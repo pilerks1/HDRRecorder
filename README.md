@@ -1,14 +1,14 @@
 # Overview:
 
-This is an HDR video recording app for android using the cameraX SDK. Your device must be running a minimum of android 13, support a 10 bit recording stream, and your OEM must allow 3rd party apps to access low level camera2 operations.
+This is a 10 bit video recording app for android using the cameraX SDK. Your device must be running a minimum of android 13, support a 10 bit recording stream, and your OEM must allow 3rd party apps to access low level camera2 operations.
 
 Android 13 is required for many parts of the app, most importantly for producing a 10 bit stream. Google revampled and standardized 10 bit video capture and display in android 13 which makes this app possible. If you'd like to make this work on older android version, the source code is yours to change.
 
 # Motivation:
 
-I record videos for a youtube channel I run. Since my only recording device is my phone (curently samsung S24), I like to take full advantage of its hardware. The problem is, Samsung's own camera/video app does not take advantage of the hardware of the phone. For example, the phone is capable of recording 4000x3000 (the sensor size) at 10 bit 60fps. Samsung does not allow 4:3 video recording at all in their video mode, and the highest 16:9 resolution avalibble is UHD (3840x2160). Using samsungs camera app means I loose about 200 horizontal pixels and 900 vertical pixels. 
+I record videos for a youtube channel I run using my phone (currently Samsung S24). I like to take full advantage of my phone's hardware, including maximizing the video resolutuion, framerate, and bit depth to produce the highest quality videos possible. The problem is Samsung's own camera/video app does not take advantage of the hardware of the phone, probablty for the sake of simplicity and maintaining a clean UI. For example, the phone is capable of recording 4000x3000 (the max sensor size) at 10 bit 60fps. Samsung does not allow 4:3 aspect ratio video recording at all, and the highest 16:9 resolution avalible is UHD (3840x2160). Using samsungs camera app means I loose about 200 horizontal pixels and 900 vertical pixels. I also do not have access to other settings or information like bitrate control or dropped frames.
 
-Naturally, my first thought would be to look for 3rd party apps on google play store or via APK. First of all, many of these "pro" video apps that truly allow for manual control of the video stream cost money, or do not support 10 bit recording. I could live with that, but many do not even support 10 bit recording. On top of that, the few that do are either overkill, or do not properly produce a 10 bit stream (incorrect gamma profile, improper encoding, etc). I had enough and decided to make my own app for free and publish the source code, as there is already enough payware in this market.
+My first thought would be to look for 3rd party apps on google play store or via APK. Many of these "pro" video apps that truly allow for manual control of the video stream cost money or do not support 10 bit recording, sometimes both. The few that do are either overkill, or do not properly produce a 10 bit stream (incorrect gamma profile, improper encoding, etc), and cost quite a lot for what I am trying to achive. I decided to make my own app for free and publish the source code. There is no other free and open source video recording app for 10 bit streams avalible on the google play store to my knowledge.
 
 # Install:
 
@@ -24,7 +24,7 @@ This app is in its infancy and I already have some bugs to sort and a list of fe
 
 While the app works perfectly on my S24 (snapdragon), it does not produce a preview or a recording on a Samsung S22 Ultra (snapdragon). This is under investigation. I have not tested on any other devices
 
-App rotation is buggy in many ways, including UI in vertical mode, and the video stream flipping upside down when rotating the phone 180 degrees.
+App rotation is buggy in many ways, including UI in vertical mode, and the video stream flipping upside down when rotating the phone 180 degrees
 
 Recording timer does not accuratly handle pause/resume during recording
 
