@@ -2,23 +2,20 @@ package com.pilerks1.hdrrecorder.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * A stateless composable for the settings overlay screen.
- * It receives all necessary data as parameters and communicates user interactions
- * via lambda functions (events).
- */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsUI(
     gammaMode: String,
@@ -29,78 +26,78 @@ fun SettingsUI(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Use a Box to make the background fully non-transparent and clickable to close
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black) // Changed from semi-transparent to fully opaque
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "Settings",
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings", fontWeight = FontWeight.Bold, fontSize = 24.sp, textAlign = TextAlign.Center) },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Black,
+                    titleContentColor = Color.White
+                )
             )
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // --- Gamma Mode Setting ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically
+        },
+        containerColor = Color.Black
+    ) { paddingValues ->
+        Box(
+            modifier = modifier
+                .padding(paddingValues)
+                .fillMaxSize()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.Start,
             ) {
-                Text(text = "Gamma Profile", color = Color.White, fontSize = 16.sp)
-                Spacer(modifier = Modifier.width(16.dp))
-                Button(
-                    onClick = onGammaChange,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                // --- Gamma Mode Setting ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = gammaMode, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "Gamma Profile", color = Color.White, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Button(
+                        onClick = onGammaChange,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                    ) {
+                        Text(text = gammaMode, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- Noise Reduction Setting ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "Noise Reduction", color = Color.White, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Switch(
+                        checked = noiseReductionEnabled,
+                        onCheckedChange = onNoiseReductionChange
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // --- Noise Reduction Setting ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "Noise Reduction", color = Color.White, fontSize = 16.sp)
-                Spacer(modifier = Modifier.width(16.dp))
-                Switch(
-                    checked = noiseReductionEnabled,
-                    onCheckedChange = onNoiseReductionChange
-                )
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // --- Compatibility Check Button ---
+            // --- CC Button ---
             Button(
                 onClick = onNavigateToCompatibility,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
             ) {
-                Text(text = "Device Compatibility Check", color = Color.White)
-            }
-
-
-            Spacer(modifier = Modifier.weight(1f)) // Pushes the close button to the bottom
-
-            // --- Close Button ---
-            Button(
-                onClick = onClose,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
-            ) {
-                Text(text = "Close", color = Color.White)
+                Text(text = "CC", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
+
