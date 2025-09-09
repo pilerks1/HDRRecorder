@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.pilerks1.hdrrecorder.compatibility.CompatibilityScreen
+import com.pilerks1.hdrrecorder.compatibility.Screen
 import com.pilerks1.hdrrecorder.ui.CameraUI
 
 /**
@@ -29,6 +31,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 var hasPermissions by remember { mutableStateOf(false) }
+                var currentScreen by remember { mutableStateOf<Screen>(Screen.Camera) }
 
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -44,8 +47,14 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (hasPermissions) {
-                    // Once permissions are granted, display the main Camera UI
-                    CameraUI()
+                    when (currentScreen) {
+                        is Screen.Camera -> CameraUI(
+                            onNavigateToCompatibility = { currentScreen = Screen.Compatibility }
+                        )
+                        is Screen.Compatibility -> CompatibilityScreen(
+                            onNavigateBack = { currentScreen = Screen.Camera }
+                        )
+                    }
                 } else {
                     // Show a message until permissions are granted
                     Box(

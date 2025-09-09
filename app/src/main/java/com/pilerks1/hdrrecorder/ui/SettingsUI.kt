@@ -25,64 +25,82 @@ fun SettingsUI(
     onGammaChange: () -> Unit,
     noiseReductionEnabled: Boolean,
     onNoiseReductionChange: (Boolean) -> Unit,
+    onNavigateToCompatibility: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    // Use a Box to make the background fully non-transparent and clickable to close
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.85f))
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(Color.Black) // Changed from semi-transparent to fully opaque
     ) {
-        Text(
-            text = "Settings",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // --- Gamma Mode Setting ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(text = "Gamma Profile", color = Color.White, fontSize = 16.sp)
-            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Settings",
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // --- Gamma Mode Setting ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Gamma Profile", color = Color.White, fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(16.dp))
+                Button(
+                    onClick = onGammaChange,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                ) {
+                    Text(text = gammaMode, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- Noise Reduction Setting ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Noise Reduction", color = Color.White, fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(16.dp))
+                Switch(
+                    checked = noiseReductionEnabled,
+                    onCheckedChange = onNoiseReductionChange
+                )
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // --- Compatibility Check Button ---
             Button(
-                onClick = onGammaChange,
+                onClick = onNavigateToCompatibility,
                 colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
             ) {
-                Text(text = gammaMode, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(text = "Device Compatibility Check", color = Color.White)
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
 
-        // --- Noise Reduction Setting ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = "Noise Reduction", color = Color.White, fontSize = 16.sp)
-            Spacer(modifier = Modifier.width(16.dp))
-            Switch(
-                checked = noiseReductionEnabled,
-                onCheckedChange = onNoiseReductionChange
-            )
-        }
+            Spacer(modifier = Modifier.weight(1f)) // Pushes the close button to the bottom
 
-        Spacer(modifier = Modifier.weight(1f)) // Pushes the close button to the bottom
-
-        // --- Close Button ---
-        Button(
-            onClick = onClose,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
-        ) {
-            Text(text = "Close", color = Color.White)
+            // --- Close Button ---
+            Button(
+                onClick = onClose,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
+            ) {
+                Text(text = "Close", color = Color.White)
+            }
         }
     }
 }

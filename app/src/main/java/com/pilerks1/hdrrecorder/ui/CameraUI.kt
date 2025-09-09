@@ -27,7 +27,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  */
 @OptIn(ExperimentalCamera2Interop::class)
 @Composable
-fun CameraUI(viewModel: CameraViewModel = viewModel()) {
+fun CameraUI(
+    viewModel: CameraViewModel = viewModel(),
+    onNavigateToCompatibility: () -> Unit
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
@@ -86,6 +89,7 @@ fun CameraUI(viewModel: CameraViewModel = viewModel()) {
                 onGammaChange = { viewModel.onEvent(CameraUiEvent.CycleGammaMode) },
                 noiseReductionEnabled = uiState.isNoiseReductionEnabled,
                 onNoiseReductionChange = { viewModel.onEvent(CameraUiEvent.SetNoiseReduction(it)) },
+                onNavigateToCompatibility = onNavigateToCompatibility, // Pass navigation lambda
                 onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }
             )
         }
