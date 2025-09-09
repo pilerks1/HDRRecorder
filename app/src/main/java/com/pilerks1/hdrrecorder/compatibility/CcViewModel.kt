@@ -2,8 +2,10 @@ package com.pilerks1.hdrrecorder.compatibility
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class CcViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -13,9 +15,8 @@ class CcViewModel(application: Application) : AndroidViewModel(application) {
     val compatibilityResult = _compatibilityResult.asStateFlow()
 
     init {
-        // Since the logic is now simple and synchronous, we can just call it directly.
-        // It returns an empty table structure.
-        _compatibilityResult.value = ccManager.getCompatibilityData()
+        viewModelScope.launch {
+            _compatibilityResult.value = ccManager.getCompatibilityData()
+        }
     }
 }
-

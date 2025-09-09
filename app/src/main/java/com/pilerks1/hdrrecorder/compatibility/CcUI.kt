@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -45,7 +46,7 @@ private fun SystemUiManagement() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class) // Opt-in for TopAppBar
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CompatibilityScreen(
     onNavigateBack: () -> Unit,
@@ -53,23 +54,27 @@ fun CompatibilityScreen(
 ) {
     val result by viewModel.compatibilityResult.collectAsState()
 
+    SystemUiManagement()
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "Device Compatibility",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 24.sp,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Text(
+                        text = "Device Compatibility",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 24.sp
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
+                },
+                actions = {
+                    Spacer(modifier = Modifier.width(48.dp)) // Balance the navigation icon
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Black,
@@ -77,13 +82,14 @@ fun CompatibilityScreen(
                 )
             )
         },
-        containerColor = Color.Black // Dark theme for the screen
+        containerColor = Color.Black
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .padding(paddingValues)
                 .fillMaxSize()
-                .padding(16.dp)
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             if (result == null) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -93,35 +99,38 @@ fun CompatibilityScreen(
                 Text(
                     "Camera2 Hardware Level: ${result!!.hardwareLevel}",
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
                 Text(
                     "Max Supported Bitrate: ${result!!.maxBitrate}",
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-                // Scrollable container for the table
-                Box(
-                    modifier = Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Column(Modifier.border(1.dp, Color.DarkGray)) {
-                        TableHeader()
-                        // Dynamically create a row for each item in the results
-                        if (result!!.tableRows.isEmpty()) {
-                            TableTemplateRow("No data", "-") // Show a placeholder if list is empty
-                        } else {
-                            result!!.tableRows.forEach { rowData ->
-                                TableRow(rowData = rowData)
-                            }
-                        }
-                    }
-                }
+                // --- 4:3 Aspect Ratio Table ---
+                Text("4:3 Aspect Ratio", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                CompatibilityTable(tableData = result!!.tableRows4by3)
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // --- 16:9 Aspect Ratio Table ---
+                Text("16:9 Aspect Ratio", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                CompatibilityTable(tableData = result!!.tableRows16by9)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompatibilityTable(tableData: List<CompatibilityResult.TableRow>) {
+    Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        Column(Modifier.border(1.dp, Color.Gray)) {
+            TableHeader()
+            tableData.forEach { rowData ->
+                TableRow(rowData = rowData)
             }
         }
     }
@@ -129,54 +138,47 @@ fun CompatibilityScreen(
 
 @Composable
 private fun TableHeader() {
-    Row(Modifier.background(Color.DarkGray)) {
-        TableCell("Quality", weight = 1.5f, fontWeight = FontWeight.Bold)
-        TableCell("Aspect Ratio", weight = 1.5f, fontWeight = FontWeight.Bold)
-        TableCell("Resolution", weight = 2f, fontWeight = FontWeight.Bold)
-        TableCell("HLG FPS", weight = 2f, fontWeight = FontWeight.Bold)
-        TableCell("HDR Capabilities", weight = 2.5f, fontWeight = FontWeight.Bold)
+    Row(
+        Modifier
+            .background(Color.Gray.copy(alpha = 0.3f))
+            .height(IntrinsicSize.Min)
+    ) {
+        TableCell("Quality", width = 85.dp, fontWeight = FontWeight.Bold)
+        TableCell("Resolution", width = 110.dp, fontWeight = FontWeight.Bold)
+        TableCell("24 FPS", width = 80.dp, fontWeight = FontWeight.Bold)
+        TableCell("30 FPS", width = 80.dp, fontWeight = FontWeight.Bold)
+        TableCell("60 FPS", width = 80.dp, fontWeight = FontWeight.Bold)
     }
 }
 
-// New Composable to display a row from dynamic data
 @Composable
 private fun TableRow(rowData: CompatibilityResult.TableRow) {
     Row(Modifier.height(IntrinsicSize.Min)) {
-        TableCell(text = rowData.quality, weight = 1.5f)
-        TableCell(text = rowData.aspectRatio, weight = 1.5f)
-        TableCell(text = rowData.resolution, weight = 2f)
-        TableCell(text = rowData.hlgFrameRates, weight = 2f)
-        TableCell(text = rowData.hdrCapabilities, weight = 2.5f)
-    }
-}
-
-// Kept for showing a placeholder row when data is empty
-@Composable
-private fun TableTemplateRow(quality: String, aspectRatio: String) {
-    Row(Modifier.height(IntrinsicSize.Min)) {
-        TableCell(text = quality, weight = 1.5f)
-        TableCell(text = aspectRatio, weight = 1.5f)
-        TableCell(text = "-", weight = 2f)
-        TableCell(text = "-", weight = 2f)
-        TableCell(text = "-", weight = 2.5f)
+        TableCell(text = rowData.quality, width = 85.dp)
+        TableCell(text = rowData.resolution, width = 110.dp)
+        TableCell(text = rowData.fps24, width = 80.dp)
+        TableCell(text = rowData.fps30, width = 80.dp)
+        TableCell(text = rowData.fps60, width = 80.dp)
     }
 }
 
 @Composable
-private fun RowScope.TableCell(
+private fun TableCell(
     text: String,
-    weight: Float,
+    width: Dp,
     fontWeight: FontWeight? = null
 ) {
     Text(
         text = text,
         modifier = Modifier
-            .border(1.dp, Color.DarkGray)
-            .weight(weight)
-            .padding(8.dp),
+            .border(1.dp, Color.Gray)
+            .width(width)
+            .padding(4.dp)
+            .fillMaxHeight(),
         fontWeight = fontWeight,
         textAlign = TextAlign.Center,
-        color = Color.White // White text for dark theme
+        color = Color.White,
+        fontSize = 14.sp
     )
 }
 
