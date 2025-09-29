@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -27,6 +28,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+
+// --- UI Colors for Stabilization Status ---
+private val StableColor = Color(0xFF4CAF50) // A pleasant, accessible green
+private val UnstableColor = Color(0xFFE57373) // A softer, less jarring red
 
 @Composable
 private fun SystemUiManagement() {
@@ -119,6 +124,17 @@ fun CompatibilityScreen(
                 Text("16:9 Aspect Ratio", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
                 CompatibilityTable(tableData = result!!.tableRows16by9)
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // --- Color Key / Legend ---
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text("Stabilization Support Key", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    KeyEntry(color = StableColor, text = "Supported with stabilization")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    KeyEntry(color = UnstableColor, text = "Supported, no stabilization")
+                }
             }
         }
     }
@@ -143,31 +159,27 @@ private fun TableHeader() {
             .background(Color.Gray.copy(alpha = 0.3f))
             .height(IntrinsicSize.Min)
     ) {
-        TableCell("Quality", width = 85.dp, fontWeight = FontWeight.Bold)
-        TableCell("Resolution", width = 110.dp, fontWeight = FontWeight.Bold)
-        TableCell("24 FPS", width = 80.dp, fontWeight = FontWeight.Bold)
-        TableCell("30 FPS", width = 80.dp, fontWeight = FontWeight.Bold)
-        TableCell("60 FPS", width = 80.dp, fontWeight = FontWeight.Bold)
+        HeaderCell("Quality", width = 85.dp)
+        HeaderCell("Resolution", width = 110.dp)
+        HeaderCell("24 FPS", width = 100.dp)
+        HeaderCell("30 FPS", width = 100.dp)
+        HeaderCell("60 FPS", width = 100.dp)
     }
 }
 
 @Composable
 private fun TableRow(rowData: CompatibilityResult.TableRow) {
     Row(Modifier.height(IntrinsicSize.Min)) {
-        TableCell(text = rowData.quality, width = 85.dp)
-        TableCell(text = rowData.resolution, width = 110.dp)
-        TableCell(text = rowData.fps24, width = 80.dp)
-        TableCell(text = rowData.fps30, width = 80.dp)
-        TableCell(text = rowData.fps60, width = 80.dp)
+        InfoCell(text = rowData.quality, width = 85.dp)
+        InfoCell(text = rowData.resolution, width = 110.dp)
+        DynamicRangeListCell(supportedRanges = rowData.fps24, width = 100.dp)
+        DynamicRangeListCell(supportedRanges = rowData.fps30, width = 100.dp)
+        DynamicRangeListCell(supportedRanges = rowData.fps60, width = 100.dp)
     }
 }
 
 @Composable
-private fun TableCell(
-    text: String,
-    width: Dp,
-    fontWeight: FontWeight? = null
-) {
+private fun HeaderCell(text: String, width: Dp) {
     Text(
         text = text,
         modifier = Modifier
@@ -175,10 +187,72 @@ private fun TableCell(
             .width(width)
             .padding(4.dp)
             .fillMaxHeight(),
-        fontWeight = fontWeight,
+        fontWeight = FontWeight.Bold,
         textAlign = TextAlign.Center,
         color = Color.White,
         fontSize = 14.sp
     )
+}
+
+@Composable
+private fun InfoCell(text: String, width: Dp) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .border(1.dp, Color.Gray)
+            .width(width)
+            .padding(4.dp)
+            .fillMaxHeight(),
+        textAlign = TextAlign.Center,
+        color = Color.White,
+        fontSize = 14.sp,
+        lineHeight = 18.sp
+    )
+}
+
+@Composable
+private fun DynamicRangeListCell(supportedRanges: List<CompatibilityResult.DynamicRangeSupport>, width: Dp) {
+    Column(
+        modifier = Modifier
+            .border(1.dp, Color.Gray)
+            .width(width)
+            .padding(vertical = 4.dp, horizontal = 2.dp)
+            .fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (supportedRanges.isEmpty()) {
+            Text("None", color = Color.White, fontSize = 14.sp)
+        } else {
+            supportedRanges.chunked(2).forEach { rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly // Use SpaceEvenly for consistent spacing
+                ) {
+                    rowItems.forEach { dynamicRange ->
+                        Text(
+                            text = dynamicRange.name,
+                            color = if (dynamicRange.stabilizationSupported) StableColor else UnstableColor,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyEntry(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier
+            .size(12.dp)
+            .background(color, shape = CircleShape))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text, color = Color.White, fontSize = 14.sp)
+    }
 }
 

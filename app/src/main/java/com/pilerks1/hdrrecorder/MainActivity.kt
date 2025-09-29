@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,7 +32,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 var hasPermissions by remember { mutableStateOf(false) }
-                var currentScreen by remember { mutableStateOf<Screen>(Screen.Camera) }
+                var currentScreen by rememberSaveable { mutableStateOf<Screen>(Screen.Camera) }
 
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -77,3 +78,4 @@ class MainActivity : ComponentActivity() {
         )
     }
 }
+

@@ -1,10 +1,17 @@
 package com.pilerks1.hdrrecorder.compatibility
 
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
+
 /**
  * A simple sealed class to define the navigation destinations in the app.
- * This makes the navigation logic type-safe.
+ * This makes the navigation logic type-safe and saveable across configuration changes.
  */
-sealed class Screen {
-    object Camera : Screen()
-    object Compatibility : Screen()
+@Parcelize
+sealed class Screen : Parcelable {
+    @Parcelize
+    data object Camera : Screen()
+
+    @Parcelize
+    data object Compatibility : Screen()
 }
