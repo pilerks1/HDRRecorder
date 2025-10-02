@@ -12,7 +12,7 @@ My first thought would be to look for 3rd party apps on google play store or via
 
 # Install:
 
-The latest .apk download is avalible in the releases. I will make this avalible on google play store soon.
+The latest .apk download is avalible in the releases. A Google playstore listing will be sought once the app is more developed.
 
 # Discussion:
 
@@ -42,6 +42,12 @@ Import a custom 1D LUT
 
 Integration of the thermal and performance API
 
-Focus slider
+Manual focus, shutter speed, iso, exposure compensation
+
+Intergration of hybrid-manual shutter speed and iso control (android 16+)
+
+APV lossless codec (android 16+)
+
+Force SDR in live preview
 
 Remaining storage indecator
