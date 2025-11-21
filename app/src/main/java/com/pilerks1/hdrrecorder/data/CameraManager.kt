@@ -3,6 +3,7 @@ package com.pilerks1.hdrrecorder.data
 import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
+import android.util.Range
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -17,6 +18,7 @@ import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.google.common.util.concurrent.ListenableFuture
+import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -43,7 +45,7 @@ class CameraManager(
 
     fun startCamera(
         lifecycleOwner: LifecycleOwner,
-        surfaceProvider: Preview.SurfaceProvider,
+        onSurfaceRequest: (SurfaceRequest) -> Unit,
         uiState: CameraUiState
     ) {
         val cameraProviderFuture: ListenableFuture<ProcessCameraProvider> =
@@ -52,7 +54,7 @@ class CameraManager(
         cameraProviderFuture.addListener({
             try {
                 cameraProvider = cameraProviderFuture.get()
-                bindUseCases(lifecycleOwner, surfaceProvider, uiState)
+                bindUseCases(lifecycleOwner, onSurfaceRequest, uiState)
             } catch (e: Exception) {
                 Log.e("CameraManager", "Error starting camera", e)
             }
@@ -62,7 +64,7 @@ class CameraManager(
     @OptIn(ExperimentalCamera2Interop::class)
     fun bindUseCases(
         lifecycleOwner: LifecycleOwner,
-        surfaceProvider: Preview.SurfaceProvider,
+        onSurfaceRequest: (SurfaceRequest) -> Unit,
         uiState: CameraUiState
     ) {
         val cameraProvider = cameraProvider ?: throw IllegalStateException("Camera initialization failed.")
@@ -72,7 +74,9 @@ class CameraManager(
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
             .build()
 
-        // --- Preview Use Case ---
+        // --- Preview Use Case Configuration ---
+
+        // 1. Resolution & Aspect Ratio
         val previewResolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
             .setResolutionStrategy(
@@ -82,9 +86,27 @@ class CameraManager(
                 )
             )
             .build()
-        val previewBuilder = Preview.Builder().setResolutionSelector(previewResolutionSelector)
+
+        // 2. Configure Builder
+        val previewBuilder = Preview.Builder()
+            .setResolutionSelector(previewResolutionSelector)
+            .setTargetFrameRate(Range(uiState.selectedFps, uiState.selectedFps))
+
+        // 3. Dynamic Range Logic
+        // Only force SDR if the toggle is explicitly enabled.
+        // Otherwise, do nothing (no dynamic range specified), letting CameraX decide.
+        if (uiState.isSdrToneMapEnabled) {
+            previewBuilder.setDynamicRange(DynamicRange.SDR)
+        }
+
+        // Hook up stats
         Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(statsManager.previewStatsCallback)
-        val preview = previewBuilder.build().also { it.surfaceProvider = surfaceProvider }
+
+        val preview = previewBuilder.build().also {
+            it.setSurfaceProvider { request ->
+                onSurfaceRequest(request)
+            }
+        }
 
 
         // --- Video Capture Use Case ---
@@ -96,6 +118,7 @@ class CameraManager(
             .setAspectRatio(AspectRatio.RATIO_4_3)
             .setTargetVideoEncodingBitRate(bitrate)
             .build()
+
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
             .setVideoStabilizationEnabled(true)
             .setDynamicRange(
@@ -104,6 +127,7 @@ class CameraManager(
                     else -> DynamicRange.HDR_UNSPECIFIED_10_BIT
                 }
             )
+
         Camera2Interop.Extender(videoCaptureBuilder).setSessionCaptureCallback(statsManager.videoStatsCallback)
         videoCapture = videoCaptureBuilder.build()
 

@@ -2,6 +2,7 @@ package com.pilerks1.hdrrecorder.ui
 
 import android.app.Application
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pilerks1.hdrrecorder.data.CameraManager
@@ -32,6 +33,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
+    // New: Surface Request State for CameraXViewfinder
+    private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
+    val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
+
     init {
         // Collect flows from managers to keep the UI state updated
         collectStats()
@@ -51,6 +56,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             is CameraUiEvent.CycleFocusMode -> cycleFocusMode()
             is CameraUiEvent.CycleGammaMode -> cycleGammaMode()
             is CameraUiEvent.SetNoiseReduction -> setNoiseReduction(event.enabled)
+
+            // Mutual Exclusion Logic for SDR Hacks
+            is CameraUiEvent.SetSdrToneMap -> {
+                _uiState.update {
+                    it.copy(
+                        isSdrToneMapEnabled = event.enabled,
+                        // If enabling Tone Map, disable Force Display SDR
+                        isForceDisplaySdrEnabled = if (event.enabled) false else it.isForceDisplaySdrEnabled
+                    )
+                }
+                // This changes the Preview configuration, so we must rebind
+                rebindCameraAndApplySettings()
+            }
+            is CameraUiEvent.SetForceDisplaySdr -> {
+                _uiState.update {
+                    it.copy(
+                        isForceDisplaySdrEnabled = event.enabled,
+                        // If enabling Force Display SDR, disable Tone Map
+                        isSdrToneMapEnabled = if (event.enabled) false else it.isSdrToneMapEnabled
+                    )
+                }
+                // No rebind needed for Window attributes, just UI update
+            }
+
             is CameraUiEvent.TapToMeter -> cameraManager.tapToMeter(event.meteringPoint)
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
             is CameraUiEvent.CloseSettings -> _uiState.update { it.copy(isSettingsSheetVisible = false) }
@@ -122,8 +151,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- Camera Lifecycle and Settings Application ---
 
-    fun startCamera(lifecycleOwner: androidx.lifecycle.LifecycleOwner, surfaceProvider: androidx.camera.core.Preview.SurfaceProvider) {
-        cameraManager.startCamera(lifecycleOwner, surfaceProvider, _uiState.value)
+    fun startCamera(lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
+        // We now pass a lambda to handle the surface request instead of a direct provider
+        cameraManager.startCamera(
+            lifecycleOwner = lifecycleOwner,
+            onSurfaceRequest = { request -> _surfaceRequest.value = request },
+            uiState = _uiState.value
+        )
+
         viewModelScope.launch {
             delay(1500) // Allow time for camera to initialize
             _uiState.update { it.copy(isCameraReady = true) }

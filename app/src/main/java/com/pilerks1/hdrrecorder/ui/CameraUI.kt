@@ -2,10 +2,10 @@ package com.pilerks1.hdrrecorder.ui
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.os.Build
 import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
@@ -31,25 +31,31 @@ fun CameraUI(
     viewModel: CameraViewModel = viewModel(),
     onNavigateToCompatibility: () -> Unit
 ) {
-    val context = LocalContext.current
+
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
-
-    val previewView = remember {
-        PreviewView(context).apply {
-            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
-        }
-    }
+    val surfaceRequest by viewModel.surfaceRequest.collectAsState()
 
     // --- Effects ---
-    LaunchedEffect(uiState.selectedResolution, uiState.selectedFps, uiState.gammaMode) {
-        viewModel.startCamera(lifecycleOwner, previewView.surfaceProvider)
+    // Added isSdrToneMapEnabled to keys: Toggling Hack 1 requires a camera restart (builder change)
+    LaunchedEffect(
+        uiState.selectedResolution,
+        uiState.selectedFps,
+        uiState.gammaMode,
+        uiState.isSdrToneMapEnabled
+    ) {
+        viewModel.startCamera(lifecycleOwner)
     }
 
     // --- System UI Management ---
     SystemUiManagement()
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
     ScreenOrientationManagement(isRecording = uiState.isRecording)
+
+    // --- Hack 2: Force Display SDR ---
+    // Controls the screen brightness logic via setDesiredHdrHeadroom.
+    // This prevents the screen from entering High Brightness Mode, saving power.
+    HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
 
     // --- Main UI Layout ---
     Box(modifier = Modifier.fillMaxSize()) {
@@ -67,7 +73,7 @@ fun CameraUI(
                 )
 
                 PreviewUI(
-                    previewView = previewView,
+                    surfaceRequest = surfaceRequest,
                     recordingTime = uiState.recordingTime,
                     isRecording = uiState.isRecording,
                     onEvent = viewModel::onEvent,
@@ -89,7 +95,14 @@ fun CameraUI(
                 onGammaChange = { viewModel.onEvent(CameraUiEvent.CycleGammaMode) },
                 noiseReductionEnabled = uiState.isNoiseReductionEnabled,
                 onNoiseReductionChange = { viewModel.onEvent(CameraUiEvent.SetNoiseReduction(it)) },
-                onNavigateToCompatibility = onNavigateToCompatibility, // Pass navigation lambda
+
+                // SDR Hacks State
+                isSdrToneMapEnabled = uiState.isSdrToneMapEnabled,
+                onSdrToneMapChange = { viewModel.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
+                isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
+                onForceDisplaySdrChange = { viewModel.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
+
+                onNavigateToCompatibility = onNavigateToCompatibility,
                 onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }
             )
         }
@@ -97,6 +110,24 @@ fun CameraUI(
 }
 
 // --- Helper Composables for System Management ---
+
+@Composable
+private fun HdrBrightnessManagement(shouldLimitBrightness: Boolean) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        val context = LocalContext.current
+        val window = (context as? Activity)?.window
+
+        LaunchedEffect(shouldLimitBrightness) {
+            // Guard: Only run on Android 15 (API 35+) as requested.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                // 1.0f = SDR brightness range (saves power).
+                // 0.0f = System default (full HDR boost).
+                window?.setDesiredHdrHeadroom(if (shouldLimitBrightness) 1.0f else 0.0f)
+            }
+        }
+    }
+}
 
 @Composable
 private fun SystemUiManagement() {

@@ -1,7 +1,8 @@
 package com.pilerks1.hdrrecorder.ui
 
+import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
-import androidx.camera.view.PreviewView
+import androidx.camera.core.SurfaceRequest
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,17 +20,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 
 /**
  * A composable dedicated to displaying the camera preview.
- * It handles the PreviewView, the tap-to-meter gesture, the metering circle
+ * It handles the CameraXViewfinder, the tap-to-meter gesture, the metering circle
  * visualization, and the recording timer overlay.
  */
 @Composable
 fun PreviewUI(
-    previewView: PreviewView,
+    surfaceRequest: SurfaceRequest?,
     recordingTime: Long,
     isRecording: Boolean,
     onEvent: (CameraUiEvent) -> Unit,
@@ -42,6 +42,8 @@ fun PreviewUI(
             .aspectRatio(4f / 3f)
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
+                    // With CameraXViewfinder, we use the SurfaceOrientedMeteringPointFactory
+                    // with the size of the composable itself.
                     val factory = SurfaceOrientedMeteringPointFactory(
                         size.width.toFloat(),
                         size.height.toFloat()
@@ -53,7 +55,15 @@ fun PreviewUI(
             },
         contentAlignment = Alignment.TopStart
     ) {
-        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        if (surfaceRequest != null) {
+            CameraXViewfinder(
+                surfaceRequest = surfaceRequest,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Placeholder while camera is initializing
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+        }
 
         // Metering circle visual feedback
         meterCirclePosition?.let {

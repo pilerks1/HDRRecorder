@@ -74,6 +74,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.view)
+    implementation(libs.androidx.camera.compose)
     implementation(libs.guava) // Required by CameraX for ListenableFuture
     implementation(libs.accompanist.permissions)
     implementation(libs.kotlinx.coroutines.guava)
