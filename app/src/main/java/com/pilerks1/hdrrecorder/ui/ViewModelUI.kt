@@ -86,6 +86,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // --- Orientation Handling ---
+    // Called by UI when display rotation changes (0, 90, 180, 270).
+    // This updates the CameraX UseCase target rotation dynamically without restarting the camera.
+    fun onOrientationChanged(rotation: Int) {
+        cameraManager.updateRotation(rotation)
+    }
+
     // --- Event Handlers ---
 
     private fun toggleRecording() {
@@ -210,6 +217,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             statsManager.iso.collect { iso -> _uiState.update { it.copy(iso = iso) } }
         }
         viewModelScope.launch {
+            // Shutter speed from Manager is Double, State is Double. No mismatch.
             statsManager.shutterSpeed.collect { shutter -> _uiState.update { it.copy(shutterSpeed = shutter) } }
         }
         viewModelScope.launch {

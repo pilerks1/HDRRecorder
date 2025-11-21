@@ -18,9 +18,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.HDRRecorder">
+        <!-- Added configChanges to prevent activity restart on rotation -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize"
             android:theme="@style/Theme.HDRRecorder">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import android.util.Range
+import android.view.Display
+import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -38,6 +40,8 @@ class CameraManager(
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
 
+    // Use cases need to be accessible to update rotation dynamically
+    private var preview: Preview? = null
     var videoCapture: VideoCapture<Recorder>? = null
         private set
 
@@ -74,6 +78,9 @@ class CameraManager(
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
             .build()
 
+        // Get current display rotation to set initial target rotation
+        val displayRotation = getDisplayRotation()
+
         // --- Preview Use Case Configuration ---
 
         // 1. Resolution & Aspect Ratio
@@ -91,6 +98,7 @@ class CameraManager(
         val previewBuilder = Preview.Builder()
             .setResolutionSelector(previewResolutionSelector)
             .setTargetFrameRate(Range(uiState.selectedFps, uiState.selectedFps))
+            .setTargetRotation(displayRotation) // Set initial rotation
 
         // 3. Dynamic Range Logic
         // Only force SDR if the toggle is explicitly enabled.
@@ -102,7 +110,7 @@ class CameraManager(
         // Hook up stats
         Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(statsManager.previewStatsCallback)
 
-        val preview = previewBuilder.build().also {
+        preview = previewBuilder.build().also {
             it.setSurfaceProvider { request ->
                 onSurfaceRequest(request)
             }
@@ -121,6 +129,7 @@ class CameraManager(
 
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
             .setVideoStabilizationEnabled(true)
+            .setTargetRotation(displayRotation) // Set initial rotation
             .setDynamicRange(
                 when (uiState.gammaMode) {
                     "Device" -> DynamicRange.HLG_10_BIT
@@ -139,6 +148,18 @@ class CameraManager(
         }
     }
 
+    /**
+     * Updates the target rotation for active use cases.
+     * This is called when the physical device orientation changes,
+     * ensuring video is upright even if the UI doesn't rotate (e.g., 180 degrees).
+     */
+    fun updateRotation(rotation: Int) {
+        // Logging to verify rotation updates are being received
+        Log.d("CameraManager", "Updating CameraX rotation to: $rotation")
+        preview?.targetRotation = rotation
+        videoCapture?.targetRotation = rotation
+    }
+
     fun getCameraControl(): CameraControl? {
         return camera?.cameraControl
     }
@@ -154,6 +175,16 @@ class CameraManager(
             30 -> 30_000_000
             24 -> 24_000_000
             else -> 30_000_000
+        }
+    }
+
+    private fun getDisplayRotation(): Int {
+        return try {
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.rotation
+        } catch (e: Exception) {
+            android.view.Surface.ROTATION_0
         }
     }
 

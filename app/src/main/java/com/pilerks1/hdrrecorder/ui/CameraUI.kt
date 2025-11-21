@@ -1,8 +1,12 @@
 package com.pilerks1.hdrrecorder.ui
 
 import android.app.Activity
+import android.content.Context
+import android.content.res.Configuration
+import android.hardware.display.DisplayManager
 import android.content.pm.ActivityInfo
 import android.os.Build
+import android.view.Display
 import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -12,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -31,13 +36,12 @@ fun CameraUI(
     viewModel: CameraViewModel = viewModel(),
     onNavigateToCompatibility: () -> Unit
 ) {
-
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     val surfaceRequest by viewModel.surfaceRequest.collectAsState()
 
     // --- Effects ---
-    // Added isSdrToneMapEnabled to keys: Toggling Hack 1 requires a camera restart (builder change)
     LaunchedEffect(
         uiState.selectedResolution,
         uiState.selectedFps,
@@ -51,40 +55,86 @@ fun CameraUI(
     SystemUiManagement()
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
     ScreenOrientationManagement(isRecording = uiState.isRecording)
-
-    // --- Hack 2: Force Display SDR ---
-    // Controls the screen brightness logic via setDesiredHdrHeadroom.
-    // This prevents the screen from entering High Brightness Mode, saving power.
     HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
+
+    // --- Display Rotation Listener ---
+    // Monitors the actual Window Manager display rotation.
+    // This ensures we are synced with the OS rotation (including 180 degrees),
+    // avoiding conflicts with raw sensor data.
+    DisplayRotationListener { rotation ->
+        viewModel.onOrientationChanged(rotation)
+    }
+
+    // --- Orientation Logic (for UI Layout) ---
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     // --- Main UI Layout ---
     Box(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
 
-                StatsUI(
-                    shutterSpeed = uiState.shutterSpeed,
-                    iso = uiState.iso,
-                    isRecording = uiState.isRecording,
-                    effectiveFps = uiState.effectiveFps,
-                    droppedFrames = uiState.droppedFrames,
-                    addedFrames = uiState.addedFrames,
-                    modifier = Modifier.weight(1f)
-                )
+            if (isLandscape) {
+                // Horizontal Layout: Stats | Preview | Controls
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StatsUI(
+                        shutterSpeed = uiState.shutterSpeed,
+                        iso = uiState.iso,
+                        isRecording = uiState.isRecording,
+                        effectiveFps = uiState.effectiveFps,
+                        droppedFrames = uiState.droppedFrames,
+                        addedFrames = uiState.addedFrames,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                PreviewUI(
-                    surfaceRequest = surfaceRequest,
-                    recordingTime = uiState.recordingTime,
-                    isRecording = uiState.isRecording,
-                    onEvent = viewModel::onEvent,
-                    modifier = Modifier.weight(3f)
-                )
+                    PreviewUI(
+                        surfaceRequest = surfaceRequest,
+                        recordingTime = uiState.recordingTime,
+                        isRecording = uiState.isRecording,
+                        onEvent = viewModel::onEvent,
+                        modifier = Modifier.weight(3f).fillMaxHeight()
+                    )
 
-                ControlsUI(
-                    uiState = uiState,
-                    onEvent = viewModel::onEvent,
-                    modifier = Modifier.weight(1f)
-                )
+                    ControlsUI(
+                        uiState = uiState,
+                        onEvent = viewModel::onEvent,
+                        isLandscape = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            } else {
+                // Vertical Layout: Stats (Top) | Preview (Middle) | Controls (Bottom)
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    StatsUI(
+                        shutterSpeed = uiState.shutterSpeed,
+                        iso = uiState.iso,
+                        isRecording = uiState.isRecording,
+                        effectiveFps = uiState.effectiveFps,
+                        droppedFrames = uiState.droppedFrames,
+                        addedFrames = uiState.addedFrames,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    PreviewUI(
+                        surfaceRequest = surfaceRequest,
+                        recordingTime = uiState.recordingTime,
+                        isRecording = uiState.isRecording,
+                        onEvent = viewModel::onEvent,
+                        modifier = Modifier.weight(3f).fillMaxWidth()
+                    )
+
+                    ControlsUI(
+                        uiState = uiState,
+                        onEvent = viewModel::onEvent,
+                        isLandscape = false,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
@@ -95,13 +145,10 @@ fun CameraUI(
                 onGammaChange = { viewModel.onEvent(CameraUiEvent.CycleGammaMode) },
                 noiseReductionEnabled = uiState.isNoiseReductionEnabled,
                 onNoiseReductionChange = { viewModel.onEvent(CameraUiEvent.SetNoiseReduction(it)) },
-
-                // SDR Hacks State
                 isSdrToneMapEnabled = uiState.isSdrToneMapEnabled,
                 onSdrToneMapChange = { viewModel.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
                 onForceDisplaySdrChange = { viewModel.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
-
                 onNavigateToCompatibility = onNavigateToCompatibility,
                 onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }
             )
@@ -112,17 +159,49 @@ fun CameraUI(
 // --- Helper Composables for System Management ---
 
 @Composable
+private fun DisplayRotationListener(onRotationChanged: (Int) -> Unit) {
+    val context = LocalContext.current
+
+    DisposableEffect(Unit) {
+        val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+            override fun onDisplayChanged(displayId: Int) {
+                val display = displayManager.getDisplay(displayId) ?: return
+                // We only care about the default display (screen)
+                if (display.displayId == Display.DEFAULT_DISPLAY) {
+                    @Suppress("DEPRECATION")
+                    val rotation = display.rotation
+                    onRotationChanged(rotation)
+                }
+            }
+        }
+
+        displayManager.registerDisplayListener(listener, null)
+
+        // Initial check
+        val initialDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+        if (initialDisplay != null) {
+            @Suppress("DEPRECATION")
+            onRotationChanged(initialDisplay.rotation)
+        }
+
+        onDispose {
+            displayManager.unregisterDisplayListener(listener)
+        }
+    }
+}
+
+@Composable
 private fun HdrBrightnessManagement(shouldLimitBrightness: Boolean) {
     val view = LocalView.current
     if (!view.isInEditMode) {
         val context = LocalContext.current
         val window = (context as? Activity)?.window
-
         LaunchedEffect(shouldLimitBrightness) {
-            // Guard: Only run on Android 15 (API 35+) as requested.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                // 1.0f = SDR brightness range (saves power).
-                // 0.0f = System default (full HDR boost).
                 window?.setDesiredHdrHeadroom(if (shouldLimitBrightness) 1.0f else 0.0f)
             }
         }

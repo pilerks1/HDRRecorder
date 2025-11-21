@@ -103,7 +103,7 @@ fun SettingsUI(
             onCheckedChange = onNoiseReductionChange
         )
 
-        Divider(modifier = Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
 
         // --- SDR Hacks ---
         Text(

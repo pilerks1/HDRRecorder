@@ -38,8 +38,10 @@ fun PreviewUI(
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
 
     Box(
+        // REMOVED .aspectRatio(4f/3f).
+        // We now rely on the parent (CameraUI) to define the size via 'modifier'.
+        // This allows the preview to be tall in Portrait and wide in Landscape.
         modifier = modifier
-            .aspectRatio(4f / 3f)
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
                     // With CameraXViewfinder, we use the SurfaceOrientedMeteringPointFactory
@@ -58,7 +60,7 @@ fun PreviewUI(
         if (surfaceRequest != null) {
             CameraXViewfinder(
                 surfaceRequest = surfaceRequest,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize() // Fills the Box provided by CameraUI
             )
         } else {
             // Placeholder while camera is initializing
