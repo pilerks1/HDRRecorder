@@ -2,11 +2,12 @@ package com.pilerks1.hdrrecorder.ui
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
-import android.content.pm.ActivityInfo
 import android.os.Build
 import android.view.Display
+import android.view.Surface
 import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -27,8 +28,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * The main entry point for the Camera UI.
- * This composable is now a clean container. It observes state from the ViewModel
- * and composes the smaller, stateless UI components (Stats, Preview, Controls).
+ * Uses a persistent Box layout to ensure the Camera Preview Surface is never destroyed or moved.
+ * UI Controls float on top and adapt their position based on system orientation.
  */
 @OptIn(ExperimentalCamera2Interop::class)
 @Composable
@@ -41,6 +42,9 @@ fun CameraUI(
     val uiState by viewModel.uiState.collectAsState()
     val surfaceRequest by viewModel.surfaceRequest.collectAsState()
 
+    // Track system display rotation
+    var displayRotation by remember { mutableIntStateOf(Surface.ROTATION_0) }
+
     // --- Effects ---
     LaunchedEffect(
         uiState.selectedResolution,
@@ -51,94 +55,76 @@ fun CameraUI(
         viewModel.startCamera(lifecycleOwner)
     }
 
-    // --- System UI Management ---
+    // --- System UI ---
     SystemUiManagement()
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
-    ScreenOrientationManagement(isRecording = uiState.isRecording)
     HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
 
     // --- Display Rotation Listener ---
-    // Monitors the actual Window Manager display rotation.
-    // This ensures we are synced with the OS rotation (including 180 degrees),
-    // avoiding conflicts with raw sensor data.
     DisplayRotationListener { rotation ->
+        displayRotation = rotation
         viewModel.onOrientationChanged(rotation)
     }
 
-    // --- Orientation Logic (for UI Layout) ---
+    // --- Layout Logic ---
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     // --- Main UI Layout ---
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        // 1. PREVIEW LAYER (Bottom)
+        // Always fills screen. Never moves in the tree.
+        PreviewUI(
+            surfaceRequest = surfaceRequest,
+            recordingTime = uiState.recordingTime,
+            isRecording = uiState.isRecording,
+            onEvent = viewModel::onEvent,
+            modifier = Modifier.fillMaxSize()
+        )
 
-            if (isLandscape) {
-                // Horizontal Layout: Stats | Preview | Controls
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    StatsUI(
-                        shutterSpeed = uiState.shutterSpeed,
-                        iso = uiState.iso,
-                        isRecording = uiState.isRecording,
-                        effectiveFps = uiState.effectiveFps,
-                        droppedFrames = uiState.droppedFrames,
-                        addedFrames = uiState.addedFrames,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    PreviewUI(
-                        surfaceRequest = surfaceRequest,
-                        recordingTime = uiState.recordingTime,
-                        isRecording = uiState.isRecording,
-                        onEvent = viewModel::onEvent,
-                        modifier = Modifier.weight(3f).fillMaxHeight()
-                    )
-
-                    ControlsUI(
-                        uiState = uiState,
-                        onEvent = viewModel::onEvent,
-                        isLandscape = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            } else {
-                // Vertical Layout: Stats (Top) | Preview (Middle) | Controls (Bottom)
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    StatsUI(
-                        shutterSpeed = uiState.shutterSpeed,
-                        iso = uiState.iso,
-                        isRecording = uiState.isRecording,
-                        effectiveFps = uiState.effectiveFps,
-                        droppedFrames = uiState.droppedFrames,
-                        addedFrames = uiState.addedFrames,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    PreviewUI(
-                        surfaceRequest = surfaceRequest,
-                        recordingTime = uiState.recordingTime,
-                        isRecording = uiState.isRecording,
-                        onEvent = viewModel::onEvent,
-                        modifier = Modifier.weight(3f).fillMaxWidth()
-                    )
-
-                    ControlsUI(
-                        uiState = uiState,
-                        onEvent = viewModel::onEvent,
-                        isLandscape = false,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+        // 2. STATS OVERLAY
+        // Landscape: Left side (25% width)
+        // Portrait: Top side (20% height), aligned to Start (Left)
+        Box(
+            modifier = Modifier
+                .align(if (isLandscape) Alignment.CenterStart else Alignment.TopStart)
+                .fillMaxWidth(if (isLandscape) 0.25f else 1f)
+                .fillMaxHeight(if (isLandscape) 1f else 0.2f)
+        ) {
+            StatsUI(
+                shutterSpeed = uiState.shutterSpeed,
+                iso = uiState.iso,
+                isRecording = uiState.isRecording,
+                effectiveFps = uiState.effectiveFps,
+                droppedFrames = uiState.droppedFrames,
+                addedFrames = uiState.addedFrames,
+                // Pass modifier to StatsUI to let it handle internal padding
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
-        // Settings Screen Overlay
+        // 3. CONTROLS OVERLAY
+        // Landscape: Right side (25% width)
+        // Portrait: Bottom side (25% height)
+        Box(
+            modifier = Modifier
+                .align(if (isLandscape) Alignment.CenterEnd else Alignment.BottomCenter)
+                .fillMaxWidth(if (isLandscape) 0.25f else 1f)
+                .fillMaxHeight(if (isLandscape) 1f else 0.25f)
+        ) {
+            ControlsUI(
+                uiState = uiState,
+                onEvent = viewModel::onEvent,
+                isLandscape = isLandscape,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // 4. SETTINGS OVERLAY
         if (uiState.isSettingsSheetVisible) {
             SettingsUI(
                 gammaMode = uiState.gammaMode,
@@ -156,7 +142,7 @@ fun CameraUI(
     }
 }
 
-// --- Helper Composables for System Management ---
+// --- Helper Composables ---
 
 @Composable
 private fun DisplayRotationListener(onRotationChanged: (Int) -> Unit) {
@@ -170,18 +156,15 @@ private fun DisplayRotationListener(onRotationChanged: (Int) -> Unit) {
             override fun onDisplayRemoved(displayId: Int) {}
             override fun onDisplayChanged(displayId: Int) {
                 val display = displayManager.getDisplay(displayId) ?: return
-                // We only care about the default display (screen)
                 if (display.displayId == Display.DEFAULT_DISPLAY) {
                     @Suppress("DEPRECATION")
-                    val rotation = display.rotation
-                    onRotationChanged(rotation)
+                    onRotationChanged(display.rotation)
                 }
             }
         }
 
         displayManager.registerDisplayListener(listener, null)
 
-        // Initial check
         val initialDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
         if (initialDisplay != null) {
             @Suppress("DEPRECATION")
