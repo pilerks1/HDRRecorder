@@ -19,7 +19,7 @@ data class CameraUiState(
     val selectedResolution: Resolution = Resolution.FHD,
     val focusMode: String = "Auto",
     val gammaMode: String = "Device",
-    val isNoiseReductionEnabled: Boolean = false,
+    val isNoiseReductionEnabled: Boolean = true,
 
     // SDR Hacks
     val isSdrToneMapEnabled: Boolean = false,
