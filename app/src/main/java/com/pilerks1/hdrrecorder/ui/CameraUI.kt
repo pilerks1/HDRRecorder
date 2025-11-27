@@ -37,7 +37,6 @@ fun CameraUI(
     viewModel: CameraViewModel = viewModel(),
     onNavigateToCompatibility: () -> Unit
 ) {
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     val surfaceRequest by viewModel.surfaceRequest.collectAsState()
@@ -98,12 +97,8 @@ fun CameraUI(
                 .fillMaxHeight(if (isLandscape) 1f else 0.2f)
         ) {
             StatsUI(
-                shutterSpeed = uiState.shutterSpeed,
-                iso = uiState.iso,
+                stats = uiState.stats, // Pass the single snapshot object
                 isRecording = uiState.isRecording,
-                effectiveFps = uiState.effectiveFps,
-                droppedFrames = uiState.droppedFrames,
-                addedFrames = uiState.addedFrames,
                 // Pass modifier to StatsUI to let it handle internal padding
                 modifier = Modifier.fillMaxSize()
             )

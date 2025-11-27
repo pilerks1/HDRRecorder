@@ -14,12 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-/**
- * The ViewModel for the CameraScreen.
- * This class is the central hub of the application's logic. It owns the UI state,
- * responds to user events, and coordinates the data managers (CameraManager,
- * SettingsManager, etc.) to perform the necessary actions.
- */
 @ExperimentalCamera2Interop
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -33,20 +27,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
-    // New: Surface Request State for CameraXViewfinder
     private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
     val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
 
     init {
-        // Collect flows from managers to keep the UI state updated
         collectStats()
         collectRecordingState()
     }
 
-    /**
-     * The main entry point for all user interactions from the UI.
-     * It uses a 'when' statement to delegate actions based on the event type.
-     */
     fun onEvent(event: CameraUiEvent) {
         when (event) {
             is CameraUiEvent.ToggleRecording -> toggleRecording()
@@ -57,27 +45,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             is CameraUiEvent.CycleGammaMode -> cycleGammaMode()
             is CameraUiEvent.SetNoiseReduction -> setNoiseReduction(event.enabled)
 
-            // Mutual Exclusion Logic for SDR Hacks
+            // SDR Hacks
             is CameraUiEvent.SetSdrToneMap -> {
                 _uiState.update {
                     it.copy(
                         isSdrToneMapEnabled = event.enabled,
-                        // If enabling Tone Map, disable Force Display SDR
+                        // Mutual exclusion logic
                         isForceDisplaySdrEnabled = if (event.enabled) false else it.isForceDisplaySdrEnabled
                     )
                 }
-                // This changes the Preview configuration, so we must rebind
                 rebindCameraAndApplySettings()
             }
             is CameraUiEvent.SetForceDisplaySdr -> {
                 _uiState.update {
                     it.copy(
                         isForceDisplaySdrEnabled = event.enabled,
-                        // If enabling Force Display SDR, disable Tone Map
+                        // Mutual exclusion logic
                         isSdrToneMapEnabled = if (event.enabled) false else it.isSdrToneMapEnabled
                     )
                 }
-                // No rebind needed for Window attributes, just UI update
+                // No rebind needed for window attributes
             }
 
             is CameraUiEvent.TapToMeter -> cameraManager.tapToMeter(event.meteringPoint)
@@ -86,14 +73,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Orientation Handling ---
-    // Called by UI when display rotation changes (0, 90, 180, 270).
-    // This updates the CameraX UseCase target rotation dynamically without restarting the camera.
     fun onOrientationChanged(rotation: Int) {
         cameraManager.updateRotation(rotation)
     }
-
-    // --- Event Handlers ---
 
     private fun toggleRecording() {
         if (_uiState.value.isRecording) {
@@ -156,10 +138,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applySettingsOnly()
     }
 
-    // --- Camera Lifecycle and Settings Application ---
-
     fun startCamera(lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
-        // We now pass a lambda to handle the surface request instead of a direct provider
         cameraManager.startCamera(
             lifecycleOwner = lifecycleOwner,
             onSurfaceRequest = { request -> _surfaceRequest.value = request },
@@ -167,41 +146,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
 
         viewModelScope.launch {
-            delay(1500) // Allow time for camera to initialize
+            delay(1500)
             _uiState.update { it.copy(isCameraReady = true) }
-            applySettingsOnly() // Apply initial settings
+            applySettingsOnly()
         }
     }
 
-    /**
-     * Applies camera2 settings that don't require re-binding camera use cases.
-     */
     private fun applySettingsOnly() {
         val cameraControl = cameraManager.getCameraControl() ?: return
         updateSettingsManager()
         settingsManager.applyAllSettings(cameraControl)
     }
 
-    /**
-     * Re-binds camera use cases, which is necessary for settings like resolution or FPS.
-     * This is expensive, slow, and can not be done while a recording is ongoing
-     */
     private fun rebindCameraAndApplySettings() {
-        // This function is implicitly handled by the UI's LaunchedEffect,
-        // which will call startCamera again when a key state changes.
-        // For a more advanced implementation, this could be handled here directly.
-        // But for now, we rely on the UI to trigger the rebind.
-        // After rebind, we must apply settings.
         viewModelScope.launch {
-            delay(500) // Give a moment for rebind to complete
+            delay(500)
             applySettingsOnly()
         }
     }
 
-    /**
-     * Updates the SettingsManager with the latest values from the UI state
-     * before applying them to the camera.
-     */
     private fun updateSettingsManager() {
         val currentState = _uiState.value
         settingsManager.setFrameRate(currentState.selectedFps)
@@ -210,24 +173,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsManager.setNoiseReduction(currentState.isNoiseReductionEnabled)
     }
 
-    // --- State Collection ---
-
+    // --- State Collection (Optimized) ---
     private fun collectStats() {
         viewModelScope.launch {
-            statsManager.iso.collect { iso -> _uiState.update { it.copy(iso = iso) } }
-        }
-        viewModelScope.launch {
-            // Shutter speed from Manager is Double, State is Double. No mismatch.
-            statsManager.shutterSpeed.collect { shutter -> _uiState.update { it.copy(shutterSpeed = shutter) } }
-        }
-        viewModelScope.launch {
-            statsManager.effectiveFps.collect { fps -> _uiState.update { it.copy(effectiveFps = fps) } }
-        }
-        viewModelScope.launch {
-            statsManager.droppedFrames.collect { frames -> _uiState.update { it.copy(droppedFrames = frames) } }
-        }
-        viewModelScope.launch {
-            statsManager.addedFrames.collect { frames -> _uiState.update { it.copy(addedFrames = frames) } }
+            // Single collection point for ALL stats.
+            // Updates strictly at the interval defined in StatsManager (e.g., 500ms)
+            statsManager.statsState.collect { snapshot ->
+                _uiState.update { it.copy(stats = snapshot) }
+            }
         }
     }
 
@@ -247,5 +200,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         cameraManager.release()
+        statsManager.cleanup() // Stop the polling job
     }
 }
+

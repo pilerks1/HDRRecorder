@@ -9,16 +9,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pilerks1.hdrrecorder.data.StatsSnapshot
 import kotlin.math.roundToInt
 
 @Composable
 fun StatsUI(
-    shutterSpeed: Double,
-    iso: Int,
+    stats: StatsSnapshot,
     isRecording: Boolean,
-    effectiveFps: Int,
-    droppedFrames: Int,
-    addedFrames: Int,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -28,16 +25,15 @@ fun StatsUI(
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.Center
     ) {
-        val shutterSpeedText = if (shutterSpeed > 0) "1/${shutterSpeed.roundToInt()} s" else "N/A"
+        val shutterSpeedText = if (stats.shutterSpeed > 0) "1/${stats.shutterSpeed.roundToInt()} s" else "N/A"
         Text(text = shutterSpeedText, color = Color.White, fontSize = 14.sp)
-        Text(text = "ISO $iso", color = Color.White, fontSize = 14.sp)
+        Text(text = "ISO ${stats.iso}", color = Color.White, fontSize = 14.sp)
 
         if (isRecording) {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(text = "FPS $effectiveFps", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(text = "Dropped: $droppedFrames", color = Color.White, fontSize = 14.sp)
-            Text(text = "Added: $addedFrames", color = Color.White, fontSize = 14.sp)
+            Text(text = "FPS ${stats.effectiveFps}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(text = "Dropped: ${stats.droppedFrames}", color = Color.White, fontSize = 14.sp)
+            Text(text = "Added: ${stats.addedFrames}", color = Color.White, fontSize = 14.sp)
         }
     }
 }
-

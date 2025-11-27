@@ -1,11 +1,11 @@
 package com.pilerks1.hdrrecorder.ui
 
 import androidx.camera.core.MeteringPoint
+import com.pilerks1.hdrrecorder.data.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.Resolution
 
 /**
  * Represents the current state of the Camera UI.
- * This data class holds all the dynamic information needed to render the screen.
  */
 data class CameraUiState(
     // Camera Status
@@ -18,19 +18,15 @@ data class CameraUiState(
     val selectedFps: Int = 30,
     val selectedResolution: Resolution = Resolution.FHD,
     val focusMode: String = "Auto",
-    val gammaMode: String = "Device", // "Device", "HLG", "Custom"
+    val gammaMode: String = "Device",
     val isNoiseReductionEnabled: Boolean = false,
 
     // SDR Hacks
     val isSdrToneMapEnabled: Boolean = false,
-    val isForceDisplaySdrEnabled: Boolean = false,
+    val isForceDisplaySdrEnabled: Boolean = false, // Restored
 
-    // Stats
-    val iso: Int = 0,
-    val shutterSpeed: Double = 0.0, // FIX: Changed to Double to match StatsManager and StatsUI
-    val effectiveFps: Int = 0,
-    val droppedFrames: Int = 0,
-    val addedFrames: Int = 0,
+    // Stats - Now grouped into a single object
+    val stats: StatsSnapshot = StatsSnapshot(),
 
     // UI Visibility
     val isSettingsSheetVisible: Boolean = false
@@ -50,7 +46,7 @@ sealed class CameraUiEvent {
 
     // SDR Hack Events
     data class SetSdrToneMap(val enabled: Boolean) : CameraUiEvent()
-    data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent()
+    data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent() // Restored
 
     data class TapToMeter(val meteringPoint: MeteringPoint) : CameraUiEvent()
     object OpenSettings : CameraUiEvent()
