@@ -58,6 +58,8 @@ fun CameraUI(
     // --- System UI ---
     SystemUiManagement()
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
+    // FIX: Added this call to actually lock the rotation!
+    ScreenOrientationManagement(isRecording = uiState.isRecording)
     HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
 
     // --- Display Rotation Listener ---

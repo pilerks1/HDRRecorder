@@ -34,9 +34,21 @@ class StatsManager {
     private var lastVideoTimestampNanos = -1L
     private var targetFps = 60
 
+    // --- Throttling Properties ---
+    private var lastPreviewStatsTimestamp = 0L
+    private val STATS_UPDATE_INTERVAL_MS = 500L // Update ISO/Shutter every 500ms
+
     val previewStatsCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
             super.onCaptureCompleted(session, request, result)
+
+            // Optimization: Throttle updates to reduce UI recomposition load
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastPreviewStatsTimestamp < STATS_UPDATE_INTERVAL_MS) {
+                return
+            }
+            lastPreviewStatsTimestamp = currentTime
+
             _iso.value = result.get(TotalCaptureResult.SENSOR_SENSITIVITY) ?: 0
             val expTime = result.get(TotalCaptureResult.SENSOR_EXPOSURE_TIME) ?: 0
             _shutterSpeed.value = if (expTime > 0) 1_000_000_000.0 / expTime else 0.0
@@ -46,6 +58,7 @@ class StatsManager {
     val videoStatsCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
             super.onCaptureCompleted(session, request, result)
+            // Video stats logic is already throttled by the 1-second check below
             if (lastVideoTimestampNanos < 0L) return
 
             val frameTimestamp = result.get(TotalCaptureResult.SENSOR_TIMESTAMP) ?: return
