@@ -47,6 +47,7 @@ fun StorageSection(
                 fontSize = 16.sp,
                 color = Color.White
             )
+            // Displays the full folder path nicely below the main text
             Text(
                 text = displayPath,
                 fontSize = 12.sp,
@@ -67,15 +68,16 @@ fun StorageSection(
 }
 
 /**
- * Converts a raw Document Tree URI into a readable path for the user.
+ * Converts a raw Document Tree URI into a highly readable full path for the user.
  * (e.g. content://.../tree/primary%3AMovies -> primary:Movies)
  */
 private fun getReadablePath(uriString: String?): String {
-    if (uriString.isNullOrEmpty()) return "Default (Movies/HDRRecorder)"
+    if (uriString.isNullOrEmpty()) return "Default (DCIM/HDR-Recorder)"
     return try {
         val uri = Uri.parse(uriString)
-        val path = uri.lastPathSegment ?: uri.toString()
-        URLDecoder.decode(path, "UTF-8")
+        val path = uri.path ?: uri.toString()
+        // Strips out the initial provider jargon so it just shows the folder structure
+        URLDecoder.decode(path, "UTF-8").substringAfter("tree/")
     } catch (e: Exception) {
         "Custom Directory"
     }

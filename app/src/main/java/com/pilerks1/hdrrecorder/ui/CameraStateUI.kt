@@ -32,6 +32,9 @@ data class CameraUiState(
     val isSdrToneMapEnabled: Boolean = false,
     val isForceDisplaySdrEnabled: Boolean = false,
 
+    // Storage
+    val storageUri: String? = null,
+
     // Stats
     val stats: StatsSnapshot = StatsSnapshot(),
 
@@ -60,6 +63,9 @@ sealed class CameraUiEvent {
     // SDR Hack Events
     data class SetSdrToneMap(val enabled: Boolean) : CameraUiEvent()
     data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent()
+
+    // Storage Event
+    data class SetStorageUri(val uri: String) : CameraUiEvent()
 
     data class TapToMeter(val meteringPoint: MeteringPoint) : CameraUiEvent()
     object OpenSettings : CameraUiEvent()

@@ -62,7 +62,6 @@ fun CameraUI(
     // --- System UI ---
     SystemUiManagement()
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
-    // FIX: Added this call to actually lock the rotation!
     ScreenOrientationManagement(isRecording = uiState.isRecording)
     HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
 
@@ -145,6 +144,9 @@ fun CameraUI(
                 onSdrToneMapChange = { viewModel.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
                 onForceDisplaySdrChange = { viewModel.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
+
+                storageUri = uiState.storageUri,
+                onStorageUriSelected = { viewModel.onEvent(CameraUiEvent.SetStorageUri(it)) },
 
                 onNavigateToCompatibility = onNavigateToCompatibility,
                 onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }

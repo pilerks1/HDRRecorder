@@ -1,11 +1,15 @@
 package com.pilerks1.hdrrecorder.ui
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pilerks1.hdrrecorder.data.CameraManager
+import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.SettingsManager
 import com.pilerks1.hdrrecorder.data.StatsManager
@@ -20,6 +24,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // --- Managers ---
     private val statsManager = StatsManager()
     private val settingsManager = SettingsManager()
+    private val preferencesManager = PreferencesManager(application)
     private val cameraManager = CameraManager(application, statsManager)
     private val recordingManager = RecordingManager(application)
 
@@ -31,6 +36,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
 
     init {
+        // Load persisted preferences
+        _uiState.update { it.copy(storageUri = preferencesManager.storageUri) }
+
         collectStats()
         collectRecordingState()
     }
@@ -75,6 +83,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // No rebind needed for window attributes
             }
 
+            // Storage
+            is CameraUiEvent.SetStorageUri -> {
+                try {
+                    val uri = Uri.parse(event.uri)
+                    val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    // Tell Android we want to remember access to this folder permanently
+                    getApplication<Application>().contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (e: Exception) {
+                    Log.e("CameraViewModel", "Failed to take persistable URI permission", e)
+                }
+
+                preferencesManager.storageUri = event.uri
+                _uiState.update { it.copy(storageUri = event.uri) }
+            }
+
             is CameraUiEvent.TapToMeter -> cameraManager.tapToMeter(event.meteringPoint)
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
             is CameraUiEvent.CloseSettings -> _uiState.update { it.copy(isSettingsSheetVisible = false) }
@@ -91,7 +115,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             statsManager.stopFpsCalculation()
         } else {
             val videoCapture = cameraManager.videoCapture ?: return
-            recordingManager.startRecording(videoCapture)
+            recordingManager.startRecording(videoCapture, _uiState.value.storageUri)
             statsManager.startFpsCalculation(_uiState.value.selectedFps)
         }
     }
