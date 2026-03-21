@@ -48,9 +48,13 @@ fun CameraUI(
     LaunchedEffect(
         uiState.selectedResolution,
         uiState.selectedFps,
-        uiState.gammaMode,
-        uiState.isSdrToneMapEnabled
+        uiState.colorFormat, // Rebind if format changes
+        uiState.isSdrToneMapEnabled,
+        uiState.isStabilizationEnabled,
+        uiState.bitrate
     ) {
+        // Debounce to prevent camera restarting on every keystroke for bitrate
+        kotlinx.coroutines.delay(500)
         viewModel.startCamera(lifecycleOwner)
     }
 
@@ -124,14 +128,23 @@ fun CameraUI(
         // 4. SETTINGS OVERLAY
         if (uiState.isSettingsSheetVisible) {
             SettingsUI(
-                gammaMode = uiState.gammaMode,
-                onGammaChange = { viewModel.onEvent(CameraUiEvent.CycleGammaMode) },
+                colorFormat = uiState.colorFormat,
+                onColorFormatChange = { viewModel.onEvent(CameraUiEvent.CycleColorFormat) },
+                gammaCurve = uiState.gammaCurve,
+                onGammaCurveChange = { viewModel.onEvent(CameraUiEvent.CycleGammaCurve) },
+
                 noiseReductionEnabled = uiState.isNoiseReductionEnabled,
                 onNoiseReductionChange = { viewModel.onEvent(CameraUiEvent.SetNoiseReduction(it)) },
+                bitrate = uiState.bitrate,
+                onBitrateChange = { viewModel.onEvent(CameraUiEvent.SetBitrate(it)) },
+                isStabilizationEnabled = uiState.isStabilizationEnabled,
+                onStabilizationChange = { viewModel.onEvent(CameraUiEvent.SetStabilization(it)) },
+
                 isSdrToneMapEnabled = uiState.isSdrToneMapEnabled,
                 onSdrToneMapChange = { viewModel.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
                 onForceDisplaySdrChange = { viewModel.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
+
                 onNavigateToCompatibility = onNavigateToCompatibility,
                 onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }
             )

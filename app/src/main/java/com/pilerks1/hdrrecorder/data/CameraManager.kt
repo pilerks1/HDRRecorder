@@ -118,23 +118,24 @@ class CameraManager(
 
 
         // --- Video Capture Use Case ---
-        val bitrate = calculateBitrate(uiState.selectedFps)
+        val bitrateMbps = uiState.bitrate.toIntOrNull() ?: 30
+        val bitrateBps = bitrateMbps * 1_000_000
         val qualitySelector = QualitySelector.from(uiState.selectedResolution.quality)
         val recorder = Recorder.Builder()
             .setExecutor(cameraExecutor)
             .setQualitySelector(qualitySelector)
             .setAspectRatio(AspectRatio.RATIO_4_3)
-            .setTargetVideoEncodingBitRate(bitrate)
+            .setTargetVideoEncodingBitRate(bitrateBps)
             .build()
 
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
-            .setVideoStabilizationEnabled(true)
+            .setVideoStabilizationEnabled(uiState.isStabilizationEnabled)
             .setTargetRotation(displayRotation) // Set initial rotation
             .setDynamicRange(
-                when (uiState.gammaMode) {
-                    "Device" -> DynamicRange.HLG_10_BIT
-                    else -> DynamicRange.HDR_UNSPECIFIED_10_BIT
-                }
+                //when (uiState.gammaMode) {
+                    DynamicRange.HLG_10_BIT
+
+                //}
             )
 
         Camera2Interop.Extender(videoCaptureBuilder).setSessionCaptureCallback(statsManager.videoStatsCallback)

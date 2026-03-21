@@ -42,8 +42,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             is CameraUiEvent.CycleFps -> cycleFps()
             is CameraUiEvent.CycleResolution -> cycleResolution()
             is CameraUiEvent.CycleFocusMode -> cycleFocusMode()
-            is CameraUiEvent.CycleGammaMode -> cycleGammaMode()
+
+            // NEW: Color Event Handlers
+            is CameraUiEvent.CycleColorFormat -> cycleColorFormat()
+            is CameraUiEvent.CycleGammaCurve -> cycleGammaCurve()
+
             is CameraUiEvent.SetNoiseReduction -> setNoiseReduction(event.enabled)
+            is CameraUiEvent.SetBitrate -> _uiState.update { it.copy(bitrate = event.bitrate) }
+            is CameraUiEvent.SetStabilization -> _uiState.update { it.copy(isStabilizationEnabled = event.enabled) }
 
             // SDR Hacks
             is CameraUiEvent.SetSdrToneMap -> {
@@ -123,14 +129,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         applySettingsOnly()
     }
 
-    private fun cycleGammaMode() {
-        val newGammaMode = when (_uiState.value.gammaMode) {
-            "Device" -> "HLG"
-            "HLG" -> "Custom"
-            else -> "Device"
+    private fun cycleColorFormat() {
+        val newFormat = when (_uiState.value.colorFormat) {
+            "HLG" -> "HDR10"
+            "HDR10" -> "HDR10+"
+            "HDR10+" -> "DB 8.4"
+            "DB 8.4" -> "Unspec"
+            else -> "HLG"
         }
-        _uiState.update { it.copy(gammaMode = newGammaMode) }
-        rebindCameraAndApplySettings()
+        _uiState.update { state ->
+            // Force Gamma to Auto if Format is anything other than Unspec
+            val newGamma = if (newFormat != "Unspec") "Auto" else state.gammaCurve
+            state.copy(colorFormat = newFormat, gammaCurve = newGamma)
+        }
+    }
+
+    private fun cycleGammaCurve() {
+        // Only allow changing gamma if format is Unspec
+        if (_uiState.value.colorFormat != "Unspec") return
+
+        val newGamma = when (_uiState.value.gammaCurve) {
+            "Auto" -> "HLG"
+            "HLG" -> "PQ"
+            "PQ" -> "Custom"
+            else -> "Auto"
+        }
+        _uiState.update { it.copy(gammaCurve = newGamma) }
     }
 
     private fun setNoiseReduction(enabled: Boolean) {
@@ -169,8 +193,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val currentState = _uiState.value
         settingsManager.setFrameRate(currentState.selectedFps)
         settingsManager.setFocusMode(currentState.focusMode)
-        settingsManager.setTonemapMode(currentState.gammaMode)
         settingsManager.setNoiseReduction(currentState.isNoiseReductionEnabled)
+
+        // Temporarily hardcode this to "Device" so SettingsManager doesn't crash
+        // while we haven't implemented backend logic for the new Color settings.
+        settingsManager.setTonemapMode("Device")
     }
 
     // --- State Collection (Optimized) ---
@@ -203,4 +230,3 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         statsManager.cleanup() // Stop the polling job
     }
 }
-

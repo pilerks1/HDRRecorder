@@ -18,14 +18,21 @@ data class CameraUiState(
     val selectedFps: Int = 30,
     val selectedResolution: Resolution = Resolution.FHD,
     val focusMode: String = "Auto",
-    val gammaMode: String = "Device",
+
+    // NEW: Color Settings
+    val colorFormat: String = "HLG",
+    val gammaCurve: String = "Auto",
+
+    // Video Settings
     val isNoiseReductionEnabled: Boolean = true,
+    val bitrate: String = "30",
+    val isStabilizationEnabled: Boolean = true,
 
     // SDR Hacks
     val isSdrToneMapEnabled: Boolean = false,
-    val isForceDisplaySdrEnabled: Boolean = false, // Restored
+    val isForceDisplaySdrEnabled: Boolean = false,
 
-    // Stats - Now grouped into a single object
+    // Stats
     val stats: StatsSnapshot = StatsSnapshot(),
 
     // UI Visibility
@@ -41,12 +48,18 @@ sealed class CameraUiEvent {
     object CycleFps : CameraUiEvent()
     object CycleResolution : CameraUiEvent()
     object CycleFocusMode : CameraUiEvent()
-    object CycleGammaMode : CameraUiEvent()
+
+    // NEW: Color Setting Events
+    object CycleColorFormat : CameraUiEvent()
+    object CycleGammaCurve : CameraUiEvent()
+
     data class SetNoiseReduction(val enabled: Boolean) : CameraUiEvent()
+    data class SetBitrate(val bitrate: String) : CameraUiEvent()
+    data class SetStabilization(val enabled: Boolean) : CameraUiEvent()
 
     // SDR Hack Events
     data class SetSdrToneMap(val enabled: Boolean) : CameraUiEvent()
-    data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent() // Restored
+    data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent()
 
     data class TapToMeter(val meteringPoint: MeteringPoint) : CameraUiEvent()
     object OpenSettings : CameraUiEvent()
