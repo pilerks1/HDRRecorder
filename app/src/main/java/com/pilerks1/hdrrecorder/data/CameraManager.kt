@@ -20,16 +20,10 @@ import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.google.common.util.concurrent.ListenableFuture
-import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/**
- * Manages the core camera session lifecycle.
- * This class is responsible for initializing the camera, binding use cases (Preview, VideoCapture)
- * to the lifecycle, handling taps for metering, and releasing the camera resources.
- */
 @ExperimentalCamera2Interop
 @SuppressLint("MissingPermission")
 class CameraManager(
@@ -40,7 +34,6 @@ class CameraManager(
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
 
-    // Use cases need to be accessible to update rotation dynamically
     private var preview: Preview? = null
     var videoCapture: VideoCapture<Recorder>? = null
         private set
@@ -78,12 +71,23 @@ class CameraManager(
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
             .build()
 
-        // Get current display rotation to set initial target rotation
         val displayRotation = getDisplayRotation()
 
-        // --- Preview Use Case Configuration ---
+        // --- Dynamic Range Resolution ---
+        // Map the Color Format UI selection to CameraX's exact 10-bit HDR Encodings
+        val baseDynamicRange = when (uiState.colorFormat) {
+            "HDR10" -> DynamicRange.HDR10_10_BIT
+            "HDR10+" -> DynamicRange.HDR10_PLUS_10_BIT
+            "Unspec" -> DynamicRange.HDR_UNSPECIFIED_10_BIT
+            "DB 8.4" -> DynamicRange.DOLBY_VISION_10_BIT
+            "HLG" -> DynamicRange.HLG_10_BIT
+            else -> DynamicRange.HLG_10_BIT
+        }
 
-        // 1. Resolution & Aspect Ratio
+        // The SDR UI hack explicitly forces standard dynamic range
+        val dynamicRange = if (uiState.isSdrToneMapEnabled) DynamicRange.SDR else baseDynamicRange
+
+        // --- Preview Use Case Configuration ---
         val previewResolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
             .setResolutionStrategy(
@@ -94,20 +98,13 @@ class CameraManager(
             )
             .build()
 
-        // 2. Configure Builder
         val previewBuilder = Preview.Builder()
             .setResolutionSelector(previewResolutionSelector)
             .setTargetFrameRate(Range(uiState.selectedFps, uiState.selectedFps))
-            .setTargetRotation(displayRotation) // Set initial rotation
+            .setTargetRotation(displayRotation)
+            .setDynamicRange(dynamicRange)
+            .setPreviewStabilizationEnabled(uiState.isStabilizationEnabled)
 
-        // 3. Dynamic Range Logic
-        // Only force SDR if the toggle is explicitly enabled.
-        // Otherwise, do nothing (no dynamic range specified), letting CameraX decide.
-        if (uiState.isSdrToneMapEnabled) {
-            previewBuilder.setDynamicRange(DynamicRange.SDR)
-        }
-
-        // Hook up stats
         Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(statsManager.previewStatsCallback)
 
         preview = previewBuilder.build().also {
@@ -116,11 +113,12 @@ class CameraManager(
             }
         }
 
-
-        // --- Video Capture Use Case ---
+        // --- Video Capture Use Case Configuration ---
+        // Bitrate string conversion and fail-safe
         val bitrateMbps = uiState.bitrate.toIntOrNull() ?: 30
         val bitrateBps = bitrateMbps * 1_000_000
         val qualitySelector = QualitySelector.from(uiState.selectedResolution.quality)
+
         val recorder = Recorder.Builder()
             .setExecutor(cameraExecutor)
             .setQualitySelector(qualitySelector)
@@ -130,13 +128,8 @@ class CameraManager(
 
         val videoCaptureBuilder = VideoCapture.Builder(recorder)
             .setVideoStabilizationEnabled(uiState.isStabilizationEnabled)
-            .setTargetRotation(displayRotation) // Set initial rotation
-            .setDynamicRange(
-                //when (uiState.gammaMode) {
-                    DynamicRange.HLG_10_BIT
-
-                //}
-            )
+            .setTargetRotation(displayRotation)
+            .setDynamicRange(dynamicRange)
 
         Camera2Interop.Extender(videoCaptureBuilder).setSessionCaptureCallback(statsManager.videoStatsCallback)
         videoCapture = videoCaptureBuilder.build()
@@ -149,14 +142,7 @@ class CameraManager(
         }
     }
 
-    /**
-     * Updates the target rotation for active use cases.
-     * This is called when the physical device orientation changes,
-     * ensuring video is upright even if the UI doesn't rotate (e.g., 180 degrees).
-     */
     fun updateRotation(rotation: Int) {
-        // Logging to verify rotation updates are being received
-        Log.d("CameraManager", "Updating CameraX rotation to: $rotation")
         preview?.targetRotation = rotation
         videoCapture?.targetRotation = rotation
     }
@@ -168,15 +154,6 @@ class CameraManager(
     fun tapToMeter(meteringPoint: MeteringPoint) {
         val action = FocusMeteringAction.Builder(meteringPoint, FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB).build()
         camera?.cameraControl?.startFocusAndMetering(action)
-    }
-
-    private fun calculateBitrate(fps: Int): Int {
-        return when (fps) {
-            60 -> 60_000_000
-            30 -> 30_000_000
-            24 -> 24_000_000
-            else -> 30_000_000
-        }
     }
 
     private fun getDisplayRotation(): Int {

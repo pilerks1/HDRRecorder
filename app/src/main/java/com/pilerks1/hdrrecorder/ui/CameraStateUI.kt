@@ -19,7 +19,7 @@ data class CameraUiState(
     val selectedResolution: Resolution = Resolution.FHD,
     val focusMode: String = "Auto",
 
-    // NEW: Color Settings
+    // Color Settings
     val colorFormat: String = "HLG",
     val gammaCurve: String = "Auto",
 
@@ -49,7 +49,7 @@ sealed class CameraUiEvent {
     object CycleResolution : CameraUiEvent()
     object CycleFocusMode : CameraUiEvent()
 
-    // NEW: Color Setting Events
+    // Color Events
     object CycleColorFormat : CameraUiEvent()
     object CycleGammaCurve : CameraUiEvent()
 

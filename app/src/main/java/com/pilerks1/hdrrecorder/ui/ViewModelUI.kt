@@ -43,30 +43,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             is CameraUiEvent.CycleResolution -> cycleResolution()
             is CameraUiEvent.CycleFocusMode -> cycleFocusMode()
 
-            // NEW: Color Event Handlers
+            // Format & Gamma
             is CameraUiEvent.CycleColorFormat -> cycleColorFormat()
             is CameraUiEvent.CycleGammaCurve -> cycleGammaCurve()
 
             is CameraUiEvent.SetNoiseReduction -> setNoiseReduction(event.enabled)
             is CameraUiEvent.SetBitrate -> _uiState.update { it.copy(bitrate = event.bitrate) }
-            is CameraUiEvent.SetStabilization -> _uiState.update { it.copy(isStabilizationEnabled = event.enabled) }
+
+            is CameraUiEvent.SetStabilization -> {
+                _uiState.update { it.copy(isStabilizationEnabled = event.enabled) }
+                rebindCameraAndApplySettings() // Requires Use Case Rebind
+            }
 
             // SDR Hacks
             is CameraUiEvent.SetSdrToneMap -> {
                 _uiState.update {
                     it.copy(
                         isSdrToneMapEnabled = event.enabled,
-                        // Mutual exclusion logic
                         isForceDisplaySdrEnabled = if (event.enabled) false else it.isForceDisplaySdrEnabled
                     )
                 }
-                rebindCameraAndApplySettings()
+                rebindCameraAndApplySettings() // Requires Use Case Rebind
             }
             is CameraUiEvent.SetForceDisplaySdr -> {
                 _uiState.update {
                     it.copy(
                         isForceDisplaySdrEnabled = event.enabled,
-                        // Mutual exclusion logic
                         isSdrToneMapEnabled = if (event.enabled) false else it.isSdrToneMapEnabled
                     )
                 }
@@ -142,6 +144,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val newGamma = if (newFormat != "Unspec") "Auto" else state.gammaCurve
             state.copy(colorFormat = newFormat, gammaCurve = newGamma)
         }
+        rebindCameraAndApplySettings() // Changing dynamic range format requires full camera rebind
     }
 
     private fun cycleGammaCurve() {
@@ -155,6 +158,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             else -> "Auto"
         }
         _uiState.update { it.copy(gammaCurve = newGamma) }
+        applySettingsOnly() // Gamma curve can be injected without rebuilding Use Cases
     }
 
     private fun setNoiseReduction(enabled: Boolean) {
@@ -194,17 +198,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsManager.setFrameRate(currentState.selectedFps)
         settingsManager.setFocusMode(currentState.focusMode)
         settingsManager.setNoiseReduction(currentState.isNoiseReductionEnabled)
-
-        // Temporarily hardcode this to "Device" so SettingsManager doesn't crash
-        // while we haven't implemented backend logic for the new Color settings.
-        settingsManager.setTonemapMode("Device")
+        settingsManager.setGammaCurve(currentState.gammaCurve) // Pass the new curve state to your settings manager
     }
 
-    // --- State Collection (Optimized) ---
+    // --- State Collection ---
     private fun collectStats() {
         viewModelScope.launch {
-            // Single collection point for ALL stats.
-            // Updates strictly at the interval defined in StatsManager (e.g., 500ms)
             statsManager.statsState.collect { snapshot ->
                 _uiState.update { it.copy(stats = snapshot) }
             }
@@ -227,6 +226,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         cameraManager.release()
-        statsManager.cleanup() // Stop the polling job
+        statsManager.cleanup()
     }
 }
