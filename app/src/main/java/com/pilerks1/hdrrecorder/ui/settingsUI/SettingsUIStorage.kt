@@ -1,4 +1,4 @@
-package com.pilerks1.hdrrecorder.ui
+package com.pilerks1.hdrrecorder.ui.settingsUI
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
