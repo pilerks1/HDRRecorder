@@ -25,6 +25,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pilerks1.hdrrecorder.ui.settingsUI.SettingsUI
 
 /**
  * The main entry point for the Camera UI.
