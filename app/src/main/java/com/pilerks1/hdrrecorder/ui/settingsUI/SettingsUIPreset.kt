@@ -171,6 +171,37 @@ fun PresetSection(
         )
     }
 
+    Spacer(modifier = Modifier.height(16.dp))
+
+    var saveStorageLocationEnabled by remember { mutableStateOf(false) }
+
+    // Toggle for Saving Storage Location with Presets
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(text = "Save Storage Location", fontSize = 16.sp, color = Color.White)
+            Text(
+                text = "Include the currently selected storage folder when saving this preset.",
+                fontSize = 12.sp,
+                color = Color.Gray,
+                lineHeight = 16.sp
+            )
+        }
+        Switch(
+            checked = saveStorageLocationEnabled,
+            onCheckedChange = { saveStorageLocationEnabled = it },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                uncheckedThumbColor = Color.LightGray,
+                uncheckedTrackColor = Color.DarkGray
+            )
+        )
+    }
+
     // --- Dialogs ---
 
     if (showAddDialog) {
@@ -245,12 +276,13 @@ fun PresetSection(
 
     if (showDeleteAllDialog) {
         AlertDialog(
-            onDismissRequest = { },
+            onDismissRequest = { showDeleteAllDialog = false },
             title = { Text("Delete All Presets", color = Color.White) },
             text = { Text("Are you sure you want to delete ALL presets? This cannot be undone.", color = Color.White) },
             confirmButton = {
                 TextButton(onClick = {
                     onDeleteAllPresets()
+                    showDeleteAllDialog = false
                 }) {
                     Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
