@@ -8,6 +8,13 @@ import com.pilerks1.hdrrecorder.model.Resolution
  * Represents the current state of the Camera UI.
  */
 data class CameraUiState(
+    // Presets
+    val currentPresetName: String = "Default",
+    val presetsList: List<String> = listOf("Default"),
+
+    // State trigger to command camera rebinds safely
+    val cameraRebindTrigger: Int = 0,
+
     // Camera Status
     val isCameraReady: Boolean = false,
     val isRecording: Boolean = false,
@@ -46,6 +53,12 @@ data class CameraUiState(
  * Represents all possible user actions or events that can occur in the Camera UI.
  */
 sealed class CameraUiEvent {
+    // Preset Events
+    data class SavePreset(val name: String) : CameraUiEvent()
+    data class LoadPreset(val name: String) : CameraUiEvent()
+    data class DeletePreset(val name: String) : CameraUiEvent()
+    object DeleteAllPresets : CameraUiEvent()
+
     object ToggleRecording : CameraUiEvent()
     object TogglePause : CameraUiEvent()
     object CycleFps : CameraUiEvent()

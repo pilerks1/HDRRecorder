@@ -17,7 +17,15 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun SettingsUI(
-        // Video Settings
+    // Presets
+    currentPreset: String,
+    presetsList: List<String>,
+    onSavePreset: (String) -> Unit,
+    onLoadPreset: (String) -> Unit,
+    onDeletePreset: (String) -> Unit,
+    onDeleteAllPresets: () -> Unit,
+
+    // Video Settings
     noiseReductionEnabled: Boolean,
     onNoiseReductionChange: (Boolean) -> Unit,
     bitrate: String,
@@ -54,8 +62,14 @@ fun SettingsUI(
     ) {
         SettingsHeader(onClose = onClose)
 
-        // Restored the Preset section at the top
-        PresetSection()
+        PresetSection(
+            currentPreset = currentPreset,
+            presetsList = presetsList,
+            onSavePreset = onSavePreset,
+            onLoadPreset = onLoadPreset,
+            onDeletePreset = onDeletePreset,
+            onDeleteAllPresets = onDeleteAllPresets
+        )
 
         SectionDivider()
 

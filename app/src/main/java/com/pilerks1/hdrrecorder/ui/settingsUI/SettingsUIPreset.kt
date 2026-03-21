@@ -14,10 +14,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun PresetSection() {
+fun PresetSection(
+    currentPreset: String,
+    presetsList: List<String>,
+    onSavePreset: (String) -> Unit,
+    onLoadPreset: (String) -> Unit,
+    onDeletePreset: (String) -> Unit,
+    onDeleteAllPresets: () -> Unit
+) {
     val focusManager = LocalFocusManager.current
-    val mockPresets = remember { mutableStateListOf("Default", "Cinematic", "Low Light") }
-    var currentPreset by remember { mutableStateOf(mockPresets.firstOrNull() ?: "None") }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
     // Dialog States
@@ -41,37 +46,52 @@ fun PresetSection() {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text = "Current Preset", fontSize = 16.sp, color = Color.White)
-        Box {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Button(
-                onClick = { dropdownExpanded = true },
+                onClick = { showAddDialog = true },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Text(text = currentPreset)
+                Text("Add")
             }
-            DropdownMenu(
-                expanded = dropdownExpanded,
-                onDismissRequest = { dropdownExpanded = false },
-                modifier = Modifier
-                    .background(Color.DarkGray)
-                    .heightIn(max = 300.dp)
-            ) {
-                if (mockPresets.isEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text("No Presets", color = Color.Gray) },
-                        onClick = { dropdownExpanded = false }
+            Box {
+                Button(
+                    onClick = { dropdownExpanded = true },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                } else {
-                    mockPresets.forEach { preset ->
+                ) {
+                    Text(text = currentPreset)
+                }
+                DropdownMenu(
+                    expanded = dropdownExpanded,
+                    onDismissRequest = { dropdownExpanded = false },
+                    modifier = Modifier
+                        .background(Color.DarkGray)
+                        .heightIn(max = 300.dp)
+                ) {
+                    if (presetsList.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text(preset, color = Color.White) },
-                            onClick = {
-                                currentPreset = preset
-                                dropdownExpanded = false
-                            }
+                            text = { Text("No Presets", color = Color.Gray) },
+                            onClick = { dropdownExpanded = false }
                         )
+                    } else {
+                        presetsList.forEach { preset ->
+                            DropdownMenuItem(
+                                text = { Text(preset, color = Color.White) },
+                                onClick = {
+                                    onLoadPreset(preset)
+                                    dropdownExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -86,7 +106,7 @@ fun PresetSection() {
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Button(
-            onClick = { showAddDialog = true },
+            onClick = { onSavePreset(currentPreset) },
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -94,10 +114,10 @@ fun PresetSection() {
             ),
             contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            Text("Add", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
+            Text("Save", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
         }
         Button(
-            onClick = { if (mockPresets.isNotEmpty()) showDeleteCurrentDialog = true },
+            onClick = { if (presetsList.size > 1) showDeleteCurrentDialog = true },
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -108,7 +128,7 @@ fun PresetSection() {
             Text("Delete Current", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
         }
         Button(
-            onClick = { if (mockPresets.isNotEmpty()) showDeleteAllDialog = true },
+            onClick = { if (presetsList.isNotEmpty()) showDeleteAllDialog = true },
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -118,6 +138,37 @@ fun PresetSection() {
         ) {
             Text("Delete All", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
         }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    var saveRecordingOptionsEnabled by remember { mutableStateOf(false) }
+
+    // Toggle for Saving Recording Options on Main Screen
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(text = "Save Recording Options", fontSize = 16.sp, color = Color.White)
+            Text(
+                text = "Save options modified on the main camera screen to the current preset automatically.",
+                fontSize = 12.sp,
+                color = Color.Gray,
+                lineHeight = 16.sp
+            )
+        }
+        Switch(
+            checked = saveRecordingOptionsEnabled,
+            onCheckedChange = { saveRecordingOptionsEnabled = it },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                uncheckedThumbColor = Color.LightGray,
+                uncheckedTrackColor = Color.DarkGray
+            )
+        )
     }
 
     // --- Dialogs ---
@@ -148,8 +199,7 @@ fun PresetSection() {
             confirmButton = {
                 TextButton(onClick = {
                     if (newPresetName.isNotBlank()) {
-                        mockPresets.add(newPresetName)
-                        currentPreset = newPresetName
+                        onSavePreset(newPresetName)
                     }
                     showAddDialog = false
                     newPresetName = ""
@@ -178,8 +228,7 @@ fun PresetSection() {
             text = { Text("Are you sure you want to delete the preset '$currentPreset'?", color = Color.White) },
             confirmButton = {
                 TextButton(onClick = {
-                    mockPresets.remove(currentPreset)
-                    currentPreset = mockPresets.firstOrNull() ?: "None"
+                    onDeletePreset(currentPreset)
                     showDeleteCurrentDialog = false
                 }) {
                     Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -196,14 +245,12 @@ fun PresetSection() {
 
     if (showDeleteAllDialog) {
         AlertDialog(
-            onDismissRequest = { showDeleteAllDialog = false },
+            onDismissRequest = { },
             title = { Text("Delete All Presets", color = Color.White) },
             text = { Text("Are you sure you want to delete ALL presets? This cannot be undone.", color = Color.White) },
             confirmButton = {
                 TextButton(onClick = {
-                    mockPresets.clear()
-                    currentPreset = "None"
-                    showDeleteAllDialog = false
+                    onDeleteAllPresets()
                 }) {
                     Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }

@@ -46,16 +46,13 @@ fun CameraUI(
     var displayRotation by remember { mutableIntStateOf(Surface.ROTATION_0) }
 
     // --- Effects ---
-    LaunchedEffect(
-        uiState.selectedResolution,
-        uiState.selectedFps,
-        uiState.colorFormat, // Rebind if format changes
-        uiState.isSdrToneMapEnabled,
-        uiState.isStabilizationEnabled,
-        uiState.bitrate
-    ) {
-        // Debounce to prevent camera restarting on every keystroke for bitrate
+    LaunchedEffect(uiState.cameraRebindTrigger) {
+        // Wait 500ms before applying. If another trigger happens during this time,
+        // the effect cancels and restarts the 500ms timer (debouncing).
         kotlinx.coroutines.delay(500)
+
+        // Rebind the camera ONLY when the explicit trigger increments
+        // (e.g., on initial launch, or upon closing Settings if changes were made)
         viewModel.startCamera(lifecycleOwner)
     }
 
@@ -128,6 +125,13 @@ fun CameraUI(
         // 4. SETTINGS OVERLAY
         if (uiState.isSettingsSheetVisible) {
             SettingsUI(
+                currentPreset = uiState.currentPresetName,
+                presetsList = uiState.presetsList,
+                onSavePreset = { viewModel.onEvent(CameraUiEvent.SavePreset(it)) },
+                onLoadPreset = { viewModel.onEvent(CameraUiEvent.LoadPreset(it)) },
+                onDeletePreset = { viewModel.onEvent(CameraUiEvent.DeletePreset(it)) },
+                onDeleteAllPresets = { viewModel.onEvent(CameraUiEvent.DeleteAllPresets) },
+
                 colorFormat = uiState.colorFormat,
                 onColorFormatChange = { viewModel.onEvent(CameraUiEvent.CycleColorFormat) },
                 gammaCurve = uiState.gammaCurve,
