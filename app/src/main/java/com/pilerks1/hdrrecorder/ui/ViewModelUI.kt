@@ -22,11 +22,11 @@ import androidx.core.net.toUri
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Managers ---
-    private val statsManager = StatsManager()
+    private val statsManager = StatsManager(application)
     private val settingsManager = SettingsManager()
     private val preferencesManager = PreferencesManager(application)
     private val cameraManager = CameraManager(application, statsManager)
-    private val recordingManager = RecordingManager(application)
+    private val recordingManager = RecordingManager(application, statsManager)
 
     // --- Dirty Flags for Settings UI ---
     private var pendingHardRebind = false
@@ -64,6 +64,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         collectStats()
         collectRecordingState()
+
+        // Initialize StatsManager with current settings for accurate initial storage readouts
+        statsManager.setRecordingState(
+            recording = false,
+            targetFps = _uiState.value.selectedFps,
+            targetBitrate = _uiState.value.bitrate.toIntOrNull() ?: 30,
+            storageUri = _uiState.value.storageUri
+        )
     }
 
     /**
@@ -239,6 +247,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 preferencesManager.storageUri = event.uri
+                statsManager.updateStorageUri(event.uri)
                 _uiState.update { it.copy(storageUri = event.uri) }
             }
 
@@ -267,10 +276,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (_uiState.value.isRecording) {
             recordingManager.stopRecording()
             statsManager.stopFpsCalculation()
+            statsManager.setRecordingState(false, _uiState.value.selectedFps, _uiState.value.bitrate.toIntOrNull() ?: 30, _uiState.value.storageUri)
         } else {
             val videoCapture = cameraManager.videoCapture ?: return
+            val targetBitrate = _uiState.value.bitrate.toIntOrNull() ?: 30
             recordingManager.startRecording(videoCapture, _uiState.value.storageUri)
             statsManager.startFpsCalculation(_uiState.value.selectedFps)
+            statsManager.setRecordingState(true, _uiState.value.selectedFps, targetBitrate, _uiState.value.storageUri)
         }
     }
 

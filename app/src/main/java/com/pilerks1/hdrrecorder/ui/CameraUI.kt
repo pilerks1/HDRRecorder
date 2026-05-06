@@ -82,7 +82,7 @@ fun CameraUI(
         // Always fills screen. Never moves in the tree.
         PreviewUI(
             surfaceRequest = surfaceRequest,
-            recordingTime = uiState.recordingTime,
+            stats = uiState.stats,
             isRecording = uiState.isRecording,
             onEvent = viewModel::onEvent,
             modifier = Modifier.fillMaxSize()
@@ -90,12 +90,13 @@ fun CameraUI(
 
         // 2. STATS OVERLAY
         // Landscape: Left side (25% width)
-        // Portrait: Top side (20% height), aligned to Start (Left)
+        // Portrait: Top side (25% height), aligned to Start (Left)
         Box(
             modifier = Modifier
                 .align(if (isLandscape) Alignment.CenterStart else Alignment.TopStart)
                 .fillMaxWidth(if (isLandscape) 0.25f else 1f)
-                .fillMaxHeight(if (isLandscape) 1f else 0.2f)
+                .fillMaxHeight(if (isLandscape) 1f else 0.25f)
+                .windowInsetsPadding(WindowInsets.displayCutout)
         ) {
             StatsUI(
                 stats = uiState.stats, // Pass the single snapshot object
@@ -113,6 +114,7 @@ fun CameraUI(
                 .align(if (isLandscape) Alignment.CenterEnd else Alignment.BottomCenter)
                 .fillMaxWidth(if (isLandscape) 0.25f else 1f)
                 .fillMaxHeight(if (isLandscape) 1f else 0.25f)
+                .windowInsetsPadding(WindowInsets.displayCutout)
         ) {
             ControlsUI(
                 uiState = uiState,

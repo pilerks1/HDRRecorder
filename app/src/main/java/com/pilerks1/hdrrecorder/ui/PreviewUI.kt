@@ -22,12 +22,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import kotlinx.coroutines.delay
 
 @Composable
 fun PreviewUI(
     surfaceRequest: SurfaceRequest?,
-    recordingTime: Long,
+    stats: StatsSnapshot,
     isRecording: Boolean,
     onEvent: (CameraUiEvent) -> Unit,
     modifier: Modifier = Modifier
@@ -90,26 +91,27 @@ fun PreviewUI(
                     meterCirclePosition = null
                 }
             }
-        }
 
-        // Recording timer display (Floating UI)
-        // Kept in the Root Container so it stays at the top of the SCREEN (in the black bars if necessary)
-        // rather than inside the cropped video area.
-        if (isRecording) {
-            val minutes = recordingTime / 60
-            val seconds = recordingTime % 60
-            val timeString = if (minutes > 0) String.format("%d:%02d", minutes, seconds) else String.format("0:%02d", seconds)
-            Text(
-                text = timeString,
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 48.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
+            // Recording timer display (Floating UI)
+            // Now inside the Viewfinder Container so it stays relative to the preview image
+            if (isRecording || stats.hardwareDurationNanos > 0L) {
+                val seconds = stats.hardwareDurationNanos / 1_000_000_000L
+                val h = seconds / 3600
+                val m = (seconds % 3600) / 60
+                val s = seconds % 60
+                val timeString = if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+                Text(
+                    text = timeString,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
         }
     }
 }

@@ -4,6 +4,7 @@
 local.properties
 .DS_Store
 .externalNativeBuild
+GEMINI.md
 /.idea
 /build
 /captures

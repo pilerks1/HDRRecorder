@@ -11,7 +11,7 @@ import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.DynamicRange
-import androidx.camera.core.ExperimentalSessionConfig
+//import androidx.camera.core.ExperimentalSessionConfig
 import androidx.camera.core.SessionConfig
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Quality
@@ -25,6 +25,7 @@ import kotlinx.coroutines.guava.await
 import android.media.CamcorderProfile
 import android.os.Build
 import android.media.EncoderProfiles
+import androidx.camera.core.ExperimentalSessionConfig
 import java.util.Locale
 
 /**
@@ -120,7 +121,7 @@ class CcManager(private val context: Context) {
      * Checks which HDR profiles are supported for a given configuration.
      * @return A list of DynamicRangeSupport objects indicating stabilization support.
      */
-    @OptIn(ExperimentalSessionConfig::class)
+    //@OptIn(ExperimentalSessionConfig::class)
     private fun checkFpsSupport(
         quality: Quality,
         targetFps: Int,
@@ -166,7 +167,8 @@ class CcManager(private val context: Context) {
     /**
      * Creates a VideoCapture UseCase for a specific configuration and gets its supported frame rates.
      */
-    @ExperimentalSessionConfig
+    //@ExperimentalSessionConfig
+    @OptIn(ExperimentalSessionConfig::class)
     private fun getFrameRatesForConfig(
         quality: Quality,
         dynamicRange: DynamicRange,

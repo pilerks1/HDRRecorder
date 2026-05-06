@@ -1,7 +1,7 @@
 package com.pilerks1.hdrrecorder.ui
 
 import androidx.camera.core.MeteringPoint
-import com.pilerks1.hdrrecorder.data.StatsSnapshot
+import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.Resolution
 
 /**
