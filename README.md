@@ -8,9 +8,12 @@ Android 13 is required for many parts of the app, most importantly for producing
 
 A basic compatibility check is included in the settings to determine what combinations of resolution and framerate your phone supports. If every table cell shows "none", it is unlikely your phone supports all the nessessary low level hardware permissions needed for this app to run.
 
-Samsung: 
+Samsung:
+
 S24 or newer
+
 Z series untested
+
 A/M series untested (I assume it wont work)
 
 All other brands are untested (Google, Sony, Xiaomi, etc).
