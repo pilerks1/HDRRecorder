@@ -100,7 +100,7 @@ class SettingsManager {
             }
         }
 
-        camera2Control.captureRequestOptions = builder.build()
+        camera2Control.setCaptureRequestOptions(builder.build())
     }
 
     /** Reference HLG Curve (OETF) */
