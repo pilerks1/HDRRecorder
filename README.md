@@ -48,6 +48,9 @@ Remaining storage always shows internal storage even if external device is selec
 
 Manual gamma curves (PQ, HLG) do not look correct
 
+Improper handling of phone rotation leads to distorted viewfinder.
+Temporary fix is toggling fps/resolutuion after rotating to desired orientation.
+
 # Planned Features:
 
 Manual focus, shutter speed, iso, exposure compensation
@@ -55,8 +58,6 @@ Manual focus, shutter speed, iso, exposure compensation
 Intergration of hybrid-manual shutter speed and iso control (android 16+)
 
 Intergration of adaptive low light boost auto exposure (android 15+)
-
-APV lossless codec once cameraX supports (android 16+)
 
 Import a custom static 1D LUT for recording
 
