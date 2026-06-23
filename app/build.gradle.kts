@@ -1,18 +1,17 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("kotlin-parcelize")
 }
 
-android {
+configure<com.android.build.api.dsl.ApplicationExtension> {
     namespace = "com.pilerks1.hdrrecorder"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.pilerks1.hdrrecorder"
         minSdk = 33         // 13 is required for a magnitude of reasons, most notably cameraX requires for HDR recording
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "Alpha 1.0"
 
@@ -22,7 +21,8 @@ android {
     buildTypes {
         release {
             // This is for your final app uploaded to the Play Store
-            isMinifyEnabled = true // Shrinks code and resources
+            isMinifyEnabled = true
+            isShrinkResources = true // Shrinks code and resources
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -45,9 +45,10 @@ android {
     buildFeatures {
         compose = true
     }
-    kotlin {
-        jvmToolchain(11)
-    }
+}
+
+kotlin {
+    jvmToolchain(11)
 }
 
 dependencies {

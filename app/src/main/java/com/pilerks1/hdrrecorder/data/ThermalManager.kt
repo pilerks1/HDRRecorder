@@ -56,7 +56,7 @@ class ThermalManager(private val context: Context) {
      */
     fun updateHeadroom() {
         lastForecast = try {
-            powerManager.getThermalHeadroom(30)
+            powerManager.getThermalHeadroom(60)
         } catch (e: Exception) {
             0.0f
         }
@@ -98,7 +98,7 @@ class ThermalManager(private val context: Context) {
     private fun formatThermalStatus(status: Int): String = when (status) {
         PowerManager.THERMAL_STATUS_NONE -> "NONE"
         PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
-        PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
+        PowerManager.THERMAL_STATUS_MODERATE -> "MOD"
         PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
         PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
         PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"

@@ -59,11 +59,11 @@ fun StatsUI(
                 StatRow(label = "TIME", value = stats.storageRemainingTime)
                 StatRow(
                     label = "BIT",
-                    value = if (isRecording) "%.1f Mbps".format(stats.actualBitrateMbps) else "N/A"
+                    value = if (isRecording) "${format3SigFigs(stats.actualBitrateMbps)} Mbps" else "N/A"
                 )
                 StatRow(
                     label = "SIZE",
-                    value = if (stats.displayedFileSizeWrittenBytes > 0L) "%.1f MB".format(stats.displayedFileSizeWrittenBytes.toDouble() / (1024.0 * 1024.0)) else "N/A"
+                    value = if (stats.displayedFileSizeWrittenBytes > 0L) "${format3SigFigs(stats.displayedFileSizeWrittenBytes.toDouble() / (1024.0 * 1024.0))} MB" else "N/A"
                 )
             }
 
@@ -78,14 +78,14 @@ fun StatsUI(
 
                 val forecastColor = getThermalColorByStatus(stats.thermalForecastStatus)
                 StatRow(
-                    label = "IN 30s",
+                    label = "IN 60s",
                     value = stats.thermalForecastStatus,
                     valueColor = forecastColor
                 )
 
                 StatRow(
                     label = "NET",
-                    value = "%.1fW".format(stats.netPowerWatts),
+                    value = "%.1f W".format(stats.netPowerWatts),
                     valueColor = Color.White
                 )
             }
@@ -133,10 +133,18 @@ private fun getThermalColorByStatus(status: String): Color {
         when (status) {
             "NONE" -> Color.White
             "LIGHT" -> Color.Yellow
+            "MOD" -> Color(0xFFFFA500)
             "MODERATE" -> Color(0xFFFFA500)
             else -> Color.Red // SEVERE, CRITICAL, EMERGENCY, SHUTDOWN
         }
     }
+}
+
+private fun format3SigFigs(value: Double): String {
+    if (value <= 0) return "0.00"
+    val magnitude = kotlin.math.floor(kotlin.math.log10(value)).toInt()
+    val scale = (2 - magnitude).coerceAtLeast(0)
+    return "%.${scale}f".format(value)
 }
 
 @Composable

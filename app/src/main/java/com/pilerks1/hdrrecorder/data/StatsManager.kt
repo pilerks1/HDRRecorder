@@ -222,14 +222,15 @@ class StatsManager(private val context: Context) {
         val secondsRemaining = if (bytesPerSec > 0) (availableBytes / bytesPerSec).toLong() else 0L
 
         val timeStr = when {
-            secondsRemaining <= 0 -> "0m"
-            secondsRemaining < 600 -> {
-                val m = secondsRemaining / 60
-                val s = secondsRemaining % 60
-                "${m}m ${s}s"
+            secondsRemaining <= 0 -> "0 Min"
+            secondsRemaining < 3600 -> {
+                val m = kotlin.math.round(secondsRemaining / 60.0).toInt()
+                "${m} Min"
             }
-            secondsRemaining < 3600 -> "${secondsRemaining / 60}m"
-            else -> "${secondsRemaining / 3600}h"
+            else -> {
+                val h = kotlin.math.round(secondsRemaining / 3600.0).toInt()
+                "${h} Hr"
+            }
         }
         
         return Triple(gb, timeStr, formattedStorage)
