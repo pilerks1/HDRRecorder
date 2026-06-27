@@ -13,13 +13,21 @@ import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ModeNight
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -73,58 +81,124 @@ fun CameraUI(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     // --- Main UI Layout ---
-    Box(
+    // The root Box anchors the permanent PreviewUI in the exact center so it survives orientation changes.
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
+        val screenWidthDp = maxWidth
+        val screenHeightDp = maxHeight
+        val density = LocalDensity.current
+
+        var previewRect by remember { mutableStateOf(Rect.Zero) }
+
         // 1. PREVIEW LAYER (Bottom)
-        // Always fills screen. Never moves in the tree.
+        // Always fills screen but constrained to its natural aspect ratio.
         PreviewUI(
             surfaceRequest = surfaceRequest,
             stats = uiState.stats,
             isRecording = uiState.isRecording,
             onEvent = viewModel::onEvent,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .align(Alignment.Center)
+                .aspectRatio(if (isLandscape) 4f / 3f else 3f / 4f)
+                .then(if (isLandscape) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
+                .onGloballyPositioned { coordinates ->
+                    // Read the exact pixel coordinates of the preview box after all notch padding and constraints are evaluated
+                    previewRect = coordinates.boundsInRoot()
+                }
         )
 
-        // 2. STATS OVERLAY
-        // Landscape: Left side (25% width)
-        // Portrait: Top side (25% height), aligned to Start (Left)
-        Box(
-            modifier = Modifier
-                .align(if (isLandscape) Alignment.CenterStart else Alignment.TopStart)
-                .fillMaxWidth(if (isLandscape) 0.25f else 1f)
-                .fillMaxHeight(if (isLandscape) 1f else 0.25f)
-                .windowInsetsPadding(WindowInsets.displayCutout)
-        ) {
-            StatsUI(
-                stats = uiState.stats, // Pass the single snapshot object
-                isRecording = uiState.isRecording,
-                // Pass modifier to StatsUI to let it handle internal padding
-                modifier = Modifier.fillMaxSize()
-            )
+        // Only draw the overlays if we have successfully measured the preview box
+        if (previewRect.width > 0f) {
+            val previewTop = with(density) { previewRect.top.toDp() }
+            val previewBottom = with(density) { previewRect.bottom.toDp() }
+            val previewLeft = with(density) { previewRect.left.toDp() }
+            val previewRight = with(density) { previewRect.right.toDp() }
+            val previewWidth = with(density) { previewRect.width.toDp() }
+            val previewHeight = with(density) { previewRect.height.toDp() }
+
+            if (isLandscape) {
+                // LEFT BLACK BAR (Stats)
+                Box(
+                    modifier = Modifier
+                        .offset(x = 0.dp, y = 0.dp)
+                        .size(width = previewLeft, height = screenHeightDp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    StatsUI(stats = uiState.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
+                }
+
+                // CENTER PREVIEW & SLIDERS (Exactly matching the preview rect)
+                Box(
+                    modifier = Modifier
+                        .offset(x = previewLeft, y = previewTop)
+                        .size(width = previewWidth, height = previewHeight)
+                ) {
+                    ControlsUISliders(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                }
+
+                // RIGHT BLACK BAR (Buttons)
+                Box(
+                    modifier = Modifier
+                        .offset(x = previewRight, y = 0.dp)
+                        .size(width = screenWidthDp - previewRight, height = screenHeightDp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    ControlsUIButtons(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                }
+            } else {
+                // TOP BLACK BAR (Stats)
+                Box(
+                    modifier = Modifier
+                        .offset(x = 0.dp, y = 0.dp)
+                        .size(width = screenWidthDp, height = previewTop),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    StatsUI(stats = uiState.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
+                }
+
+                // CENTER PREVIEW & SLIDERS (Exactly matching the preview rect)
+                Box(
+                    modifier = Modifier
+                        .offset(x = previewLeft, y = previewTop)
+                        .size(width = previewWidth, height = previewHeight)
+                ) {
+                    ControlsUISliders(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                }
+
+                // BOTTOM BLACK BAR (Buttons)
+                Box(
+                    modifier = Modifier
+                        .offset(x = 0.dp, y = previewBottom)
+                        .size(width = screenWidthDp, height = screenHeightDp - previewBottom),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    ControlsUIButtons(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+    }    
+        // 4. NIGHT MODE AE ICON
+        if (uiState.isNightModeAeEnabled) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 24.dp, end = if (isLandscape) 140.dp else 24.dp)
+                    .windowInsetsPadding(WindowInsets.displayCutout),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ModeNight,
+                    contentDescription = "Night Mode AE Active",
+                    tint = Color.Yellow,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
         }
 
-        // 3. CONTROLS OVERLAY
-        // Landscape: Right side (25% width)
-        // Portrait: Bottom side (25% height)
-        Box(
-            modifier = Modifier
-                .align(if (isLandscape) Alignment.CenterEnd else Alignment.BottomCenter)
-                .fillMaxWidth(if (isLandscape) 0.25f else 1f)
-                .fillMaxHeight(if (isLandscape) 1f else 0.25f)
-                .windowInsetsPadding(WindowInsets.displayCutout)
-        ) {
-            ControlsUI(
-                uiState = uiState,
-                onEvent = viewModel::onEvent,
-                isLandscape = isLandscape,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // 4. SETTINGS OVERLAY
+        // 5. SETTINGS OVERLAY
         if (uiState.isSettingsSheetVisible) {
             SettingsUI(
                 currentPreset = uiState.currentPresetName,
@@ -158,8 +232,8 @@ fun CameraUI(
                 onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }
             )
         }
-    }
-}
+    } // End of root Box
+
 
 // --- Helper Composables ---
 

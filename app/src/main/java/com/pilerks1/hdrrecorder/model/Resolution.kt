@@ -10,5 +10,5 @@ import androidx.camera.video.Quality
 sealed class Resolution(val quality: Quality, val qualityName: String) {
     object FHD : Resolution(Quality.FHD, "FHD")
     object UHD : Resolution(Quality.UHD, "UHD")
-    object HIGHEST : Resolution(Quality.HIGHEST, "Highest")
+    object HIGHEST : Resolution(Quality.HIGHEST, "MAX")
 }

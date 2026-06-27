@@ -173,10 +173,65 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     state.copy(selectedResolution = newRes)
                 }
             }
-            is CameraUiEvent.CycleFocusMode -> {
+            // Manual Controls
+            is CameraUiEvent.SetActiveSlider -> {
+                updateSettingsAndSave(requiresHardRebind = false) { it.copy(activeSlider = event.control) }
+            }
+            is CameraUiEvent.ToggleNightModeAe -> {
                 updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val newFocusMode = if (state.focusMode == "Auto") "Manual" else "Auto"
-                    state.copy(focusMode = newFocusMode)
+                    val newState = state.copy(isNightModeAeEnabled = event.enabled)
+                    if (event.enabled) {
+                        newState.copy(
+                            isManualIso = false,
+                            isManualShutter = false,
+                            isManualEv = false,
+                            isCamera2Fps = false,
+                            camera2FpsRange = minOf(state.camera2FpsRange.start, 30f)..minOf(state.camera2FpsRange.endInclusive, 30f),
+                            selectedFps = minOf(state.selectedFps, 30)
+                        )
+                    } else {
+                        newState
+                    }
+                }
+            }
+            is CameraUiEvent.SetManualIso -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    val newState = state.copy(isManualIso = event.enabled, isoValue = event.value ?: state.isoValue)
+                    if (event.enabled) newState.copy(isNightModeAeEnabled = false) else newState
+                }
+            }
+            is CameraUiEvent.SetManualShutter -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    val newState = state.copy(isManualShutter = event.enabled, shutterValue = event.value ?: state.shutterValue)
+                    if (event.enabled) newState.copy(isNightModeAeEnabled = false) else newState
+                }
+            }
+            is CameraUiEvent.SetManualFocus -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    state.copy(isManualFocus = event.enabled, focusValue = event.value ?: state.focusValue)
+                }
+            }
+            is CameraUiEvent.SetManualEv -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    val newState = state.copy(isManualEv = event.enabled, evValue = event.value ?: state.evValue)
+                    if (event.enabled) newState.copy(isNightModeAeEnabled = false) else newState
+                }
+            }
+            is CameraUiEvent.SetManualWb -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    state.copy(isManualWb = event.enabled, wbValue = event.value ?: state.wbValue)
+                }
+            }
+            is CameraUiEvent.SetManualTint -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    state.copy(isManualTint = event.enabled, tintValue = event.value ?: state.tintValue)
+                }
+            }
+            is CameraUiEvent.SetCamera2Fps -> {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    val range = event.range ?: state.camera2FpsRange
+                    val isNightMode = if (range.endInclusive > 30f) false else state.isNightModeAeEnabled
+                    state.copy(isCamera2Fps = event.enabled, camera2FpsRange = range, isNightModeAeEnabled = isNightMode)
                 }
             }
 

@@ -4,6 +4,10 @@ import androidx.camera.core.MeteringPoint
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.Resolution
 
+enum class ActiveControl {
+    NONE, FPS, SHUTTER, ISO, FOCUS, EV, WB, TINT
+}
+
 /**
  * Represents the current state of the Camera UI.
  */
@@ -29,6 +33,31 @@ data class CameraUiState(
     // Color Settings
     val colorFormat: String = "HLG",
     val gammaCurve: String = "Auto",
+
+    // Manual Controls UI State
+    val activeSlider: ActiveControl = ActiveControl.NONE,
+    val isNightModeAeEnabled: Boolean = false,
+    
+    val isManualIso: Boolean = false,
+    val isoValue: Float = 400f,
+    
+    val isManualShutter: Boolean = false,
+    val shutterValue: Float = 0.5f,
+    
+    val isManualFocus: Boolean = false,
+    val focusValue: Float = 0.0f,
+    
+    val isManualEv: Boolean = false,
+    val evValue: Float = 0.0f,
+    
+    val isManualWb: Boolean = false,
+    val wbValue: Float = 5000f,
+    
+    val isManualTint: Boolean = false,
+    val tintValue: Float = 0f,
+
+    val isCamera2Fps: Boolean = false,
+    val camera2FpsRange: ClosedFloatingPointRange<Float> = 15f..30f,
 
     // Video Settings
     val isNoiseReductionEnabled: Boolean = true,
@@ -63,7 +92,19 @@ sealed class CameraUiEvent {
     object TogglePause : CameraUiEvent()
     object CycleFps : CameraUiEvent()
     object CycleResolution : CameraUiEvent()
-    object CycleFocusMode : CameraUiEvent()
+
+    // Manual Controls Events
+    data class SetActiveSlider(val control: ActiveControl) : CameraUiEvent()
+    data class ToggleNightModeAe(val enabled: Boolean) : CameraUiEvent()
+    
+    data class SetManualIso(val enabled: Boolean, val value: Float? = null) : CameraUiEvent()
+    data class SetManualShutter(val enabled: Boolean, val value: Float? = null) : CameraUiEvent()
+    data class SetManualFocus(val enabled: Boolean, val value: Float? = null) : CameraUiEvent()
+    data class SetManualEv(val enabled: Boolean, val value: Float? = null) : CameraUiEvent()
+    data class SetManualWb(val enabled: Boolean, val value: Float? = null) : CameraUiEvent()
+    data class SetManualTint(val enabled: Boolean, val value: Float? = null) : CameraUiEvent()
+    
+    data class SetCamera2Fps(val enabled: Boolean, val range: ClosedFloatingPointRange<Float>? = null) : CameraUiEvent()
 
     // Color Events
     object CycleColorFormat : CameraUiEvent()
