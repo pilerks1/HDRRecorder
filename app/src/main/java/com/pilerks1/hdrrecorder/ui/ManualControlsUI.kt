@@ -559,11 +559,11 @@ fun RotatingSlider(
                     disabledActiveTrackColor = Color.DarkGray
                 ),
                 thumb = {
-                    // Fixed size container so the thumb width is static regardless of text length
-                    Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.Center) {
-                        // The physical thumb (pill shaped)
-                        Box(modifier = Modifier.size(width = 8.dp, height = 24.dp).background(if (enabled) Color.White else Color.DarkGray, androidx.compose.foundation.shape.CircleShape))
-                        // The floating label next to the thumb
+                    // Exact physical size so track touches it directly
+                    Box(
+                        modifier = Modifier.size(width = 8.dp, height = 24.dp).background(if (enabled) Color.White else Color.DarkGray, androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
                         if (labelString.isNotEmpty()) {
                             Text(
                                 text = labelString,
@@ -572,6 +572,7 @@ fun RotatingSlider(
                                 fontWeight = FontWeight.Bold,
                                 // Offset AWAY from black area
                                 modifier = Modifier
+                                    .wrapContentSize(unbounded = true)
                                     .offset(y = (-24).dp)
                                     .graphicsLayer { rotationZ = textRotation }
                             )
@@ -677,20 +678,30 @@ fun RotatingRangeSlider(
                     disabledActiveTrackColor = Color.DarkGray
                 ),
                 startThumb = {
-                    Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.Center) {
-                        Box(modifier = Modifier.size(width = 8.dp, height = 24.dp).background(if (enabled) Color.White else Color.DarkGray, androidx.compose.foundation.shape.CircleShape))
+                    Box(
+                        modifier = Modifier.size(width = 8.dp, height = 24.dp).background(if (enabled) Color.White else Color.DarkGray, androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
                             text = "${value.start.toInt()}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.offset(y = (-24).dp).graphicsLayer { rotationZ = textRotation }
+                            modifier = Modifier
+                                .wrapContentSize(unbounded = true)
+                                .offset(y = (-24).dp)
+                                .graphicsLayer { rotationZ = textRotation }
                         )
                     }
                 },
                 endThumb = {
-                    Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.Center) {
-                        Box(modifier = Modifier.size(width = 8.dp, height = 24.dp).background(if (enabled) Color.White else Color.DarkGray, androidx.compose.foundation.shape.CircleShape))
+                    Box(
+                        modifier = Modifier.size(width = 8.dp, height = 24.dp).background(if (enabled) Color.White else Color.DarkGray, androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
                             text = "${value.endInclusive.toInt()}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.offset(y = (-24).dp).graphicsLayer { rotationZ = textRotation }
+                            modifier = Modifier
+                                .wrapContentSize(unbounded = true)
+                                .offset(y = (-24).dp)
+                                .graphicsLayer { rotationZ = textRotation }
                         )
                     }
                 },
