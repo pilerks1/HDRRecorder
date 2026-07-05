@@ -34,6 +34,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilerks1.hdrrecorder.ui.settingsUI.SettingsUI
+import com.pilerks1.hdrrecorder.ui.helpers.*
+import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModel
 
 /**
  * The main entry point for the Camera UI.
@@ -136,7 +138,7 @@ fun CameraUI(
                         .offset(x = previewLeft, y = previewTop)
                         .size(width = previewWidth, height = previewHeight)
                 ) {
-                    ControlsUISliders(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUISliders(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
 
                 // RIGHT BLACK BAR (Buttons)
@@ -146,7 +148,7 @@ fun CameraUI(
                         .size(width = screenWidthDp - previewRight, height = screenHeightDp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    ControlsUIButtons(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUIButtons(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
             } else {
                 // TOP BLACK BAR (Stats)
@@ -165,7 +167,7 @@ fun CameraUI(
                         .offset(x = previewLeft, y = previewTop)
                         .size(width = previewWidth, height = previewHeight)
                 ) {
-                    ControlsUISliders(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUISliders(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
 
                 // BOTTOM BLACK BAR (Buttons)
@@ -175,13 +177,13 @@ fun CameraUI(
                         .size(width = screenWidthDp, height = screenHeightDp - previewBottom),
                     contentAlignment = Alignment.BottomCenter
                 ) {
-                    ControlsUIButtons(uiState = uiState, onEvent = viewModel::onEvent, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUIButtons(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
             }
         }
     }    
         // 4. NIGHT MODE AE ICON
-        if (uiState.isNightModeAeEnabled) {
+        if (uiState.manualControlsState.isNightModeAeEnabled) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -233,104 +235,3 @@ fun CameraUI(
             )
         }
     } // End of root Box
-
-
-// --- Helper Composables ---
-
-@Composable
-private fun DisplayRotationListener(onRotationChanged: (Int) -> Unit) {
-    val context = LocalContext.current
-
-    DisposableEffect(Unit) {
-        val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-
-        val listener = object : DisplayManager.DisplayListener {
-            override fun onDisplayAdded(displayId: Int) {}
-            override fun onDisplayRemoved(displayId: Int) {}
-            override fun onDisplayChanged(displayId: Int) {
-                val display = displayManager.getDisplay(displayId) ?: return
-                if (display.displayId == Display.DEFAULT_DISPLAY) {
-                    @Suppress("DEPRECATION")
-                    onRotationChanged(display.rotation)
-                }
-            }
-        }
-
-        displayManager.registerDisplayListener(listener, null)
-
-        val initialDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
-        if (initialDisplay != null) {
-            @Suppress("DEPRECATION")
-            onRotationChanged(initialDisplay.rotation)
-        }
-
-        onDispose {
-            displayManager.unregisterDisplayListener(listener)
-        }
-    }
-}
-
-@Composable
-private fun HdrBrightnessManagement(shouldLimitBrightness: Boolean) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        val context = LocalContext.current
-        val window = (context as? Activity)?.window
-        LaunchedEffect(shouldLimitBrightness) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                window?.setDesiredHdrHeadroom(if (shouldLimitBrightness) 1.0f else 0.0f)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SystemUiManagement() {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        val window = (view.context as Activity).window
-        DisposableEffect(Unit) {
-            val insetsController = WindowCompat.getInsetsController(window, view)
-            insetsController.apply {
-                hide(WindowInsetsCompat.Type.systemBars())
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-            onDispose {
-                insetsController.show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScreenTimeoutManagement(isRecording: Boolean) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        val window = (view.context as Activity).window
-        LaunchedEffect(isRecording) {
-            if (isRecording) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        }
-        DisposableEffect(Unit) {
-            onDispose {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScreenOrientationManagement(isRecording: Boolean) {
-    val context = LocalContext.current
-    val activity = context as Activity
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
-        } else {
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
-    }
-}

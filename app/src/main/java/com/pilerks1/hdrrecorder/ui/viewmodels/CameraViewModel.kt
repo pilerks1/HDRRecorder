@@ -1,4 +1,7 @@
-package com.pilerks1.hdrrecorder.ui
+package com.pilerks1.hdrrecorder.ui.viewmodels
+
+import com.pilerks1.hdrrecorder.ui.CameraUiState
+import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 
 import android.app.Application
 import android.content.Intent
@@ -40,38 +43,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
 
     init {
-        // Load persisted global storage preference
         val globalStorageUri = preferencesManager.storageUri
-
-        // If no "Default" preset exists, capture initial state and save it
-        if (!preferencesManager.hasPreset("Default")) {
-            preferencesManager.savePreset("Default", _uiState.value)
-        }
-
-        // Determine current preset name
+        if (!preferencesManager.hasPreset("Default")) preferencesManager.savePreset("Default", _uiState.value)
+        
         val names = preferencesManager.getPresetNames().toList()
-        var currentPreset = preferencesManager.currentPresetName
-        if (!names.contains(currentPreset)) currentPreset = "Default"
-
-        // Load the stored preset state
+        val currentPreset = if (names.contains(preferencesManager.currentPresetName)) preferencesManager.currentPresetName else "Default"
         val loadedState = preferencesManager.loadPreset(currentPreset, _uiState.value)
-        _uiState.update {
-            loadedState.copy(
-                presetsList = names,
-                storageUri = globalStorageUri
-            )
-        }
-
+        
+        _uiState.update { loadedState.copy(presetsList = names, storageUri = globalStorageUri) }
+        
         collectStats()
         collectRecordingState()
-
-        // Initialize StatsManager with current settings for accurate initial storage readouts
-        statsManager.setRecordingState(
-            recording = false,
-            targetFps = _uiState.value.selectedFps,
-            targetBitrate = _uiState.value.bitrate.toIntOrNull() ?: 30,
-            storageUri = _uiState.value.storageUri
-        )
+        statsManager.setRecordingState(false, _uiState.value.selectedFps, _uiState.value.bitrate.toIntOrNull() ?: 30, _uiState.value.storageUri)
     }
 
     /**
@@ -98,58 +81,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         when (event) {
             // Preset Management
             is CameraUiEvent.SavePreset -> {
-                val newState = _uiState.value.copy(currentPresetName = event.name)
-                preferencesManager.savePreset(event.name, newState)
+                preferencesManager.savePreset(event.name, _uiState.value.copy(currentPresetName = event.name))
                 preferencesManager.currentPresetName = event.name
-                _uiState.update { it.copy(
-                    presetsList = preferencesManager.getPresetNames().toList(),
-                    currentPresetName = event.name
-                ) }
+                _uiState.update { it.copy(presetsList = preferencesManager.getPresetNames().toList(), currentPresetName = event.name) }
             }
             is CameraUiEvent.LoadPreset -> {
                 val loadedState = preferencesManager.loadPreset(event.name, _uiState.value)
                 preferencesManager.currentPresetName = event.name
                 _uiState.update { loadedState.copy(presetsList = preferencesManager.getPresetNames().toList()) }
-
-                if (_uiState.value.isSettingsSheetVisible) {
-                    pendingHardRebind = true
-                } else {
-                    _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
-                }
+                triggerRebindForPresets()
             }
             is CameraUiEvent.DeletePreset -> {
                 preferencesManager.deletePreset(event.name)
                 val names = preferencesManager.getPresetNames().toList()
                 val nextPreset = if (names.contains("Default")) "Default" else names.firstOrNull() ?: "Default"
-
+                
                 if (_uiState.value.currentPresetName == event.name) {
                     val loadedState = preferencesManager.loadPreset(nextPreset, _uiState.value)
                     preferencesManager.currentPresetName = nextPreset
                     _uiState.update { loadedState.copy(presetsList = names) }
-
-                    if (_uiState.value.isSettingsSheetVisible) {
-                        pendingHardRebind = true
-                    } else {
-                        _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
-                    }
-                } else {
-                    _uiState.update { it.copy(presetsList = names) }
-                }
+                    triggerRebindForPresets()
+                } else _uiState.update { it.copy(presetsList = names) }
             }
             is CameraUiEvent.DeleteAllPresets -> {
                 preferencesManager.deleteAllPresets()
-                val nextPreset = "Default"
-                // Seed a fresh default config
-                val loadedState = preferencesManager.loadPreset(nextPreset, CameraUiState())
-                preferencesManager.savePreset(nextPreset, loadedState)
-                preferencesManager.currentPresetName = nextPreset
+                val loadedState = preferencesManager.loadPreset("Default", CameraUiState())
+                preferencesManager.savePreset("Default", loadedState)
+                preferencesManager.currentPresetName = "Default"
                 _uiState.update { loadedState.copy(presetsList = listOf("Default")) }
-
-                if (_uiState.value.isSettingsSheetVisible) {
-                    pendingHardRebind = true
-                } else {
-                    _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
-                }
+                triggerRebindForPresets()
             }
 
             // Camera Toggles
@@ -174,121 +134,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             // Manual Controls
-            is CameraUiEvent.SetActiveSlider -> {
-                updateSettingsAndSave(requiresHardRebind = false) { it.copy(activeSlider = event.control) }
-            }
-            is CameraUiEvent.ToggleNightModeAe -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val newState = state.copy(isNightModeAeEnabled = event.enabled)
-                    if (event.enabled) {
-                        newState.copy(
-                            isManualIso = false,
-                            isManualShutter = false,
-                            isManualEv = false,
-                            isCamera2Fps = false,
-                            camera2FpsRange = minOf(state.camera2FpsRange.start, 30f)..minOf(state.camera2FpsRange.endInclusive, 30f),
-                            selectedFps = minOf(state.selectedFps, 30)
-                        )
-                    } else {
-                        newState
-                    }
-                }
-            }
-            is CameraUiEvent.SetManualIso -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val newState = state.copy(isManualIso = event.enabled, isoValue = event.value ?: state.isoValue)
-                    if (event.enabled) newState.copy(isNightModeAeEnabled = false) else newState
-                }
-            }
-            is CameraUiEvent.SetManualShutter -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val newState = state.copy(isManualShutter = event.enabled, shutterValue = event.value ?: state.shutterValue)
-                    if (event.enabled) newState.copy(isNightModeAeEnabled = false) else newState
-                }
-            }
-            is CameraUiEvent.SetManualFocus -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    state.copy(isManualFocus = event.enabled, focusValue = event.value ?: state.focusValue)
-                }
-            }
-            is CameraUiEvent.SetManualEv -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val newState = state.copy(isManualEv = event.enabled, evValue = event.value ?: state.evValue)
-                    if (event.enabled) newState.copy(isNightModeAeEnabled = false) else newState
-                }
-            }
-            is CameraUiEvent.SetManualWb -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    state.copy(isManualWb = event.enabled, wbValue = event.value ?: state.wbValue)
-                }
-            }
-            is CameraUiEvent.SetManualTint -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    state.copy(isManualTint = event.enabled, tintValue = event.value ?: state.tintValue)
-                }
-            }
-            is CameraUiEvent.SetCamera2Fps -> {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val range = event.range ?: state.camera2FpsRange
-                    val isNightMode = if (range.endInclusive > 30f) false else state.isNightModeAeEnabled
-                    state.copy(isCamera2Fps = event.enabled, camera2FpsRange = range, isNightModeAeEnabled = isNightMode)
-                }
-            }
+
 
             // Format & Gamma (auto-saved)
-            is CameraUiEvent.CycleColorFormat -> {
-                updateSettingsAndSave(requiresHardRebind = true) { state ->
-                    val newFormat = when (state.colorFormat) {
-                        "HLG" -> "HDR10"
-                        "HDR10" -> "HDR10+"
-                        "HDR10+" -> "DB 8.4"
-                        "DB 8.4" -> "Unspec"
-                        else -> "HLG"
-                    }
-                    val newGamma = if (newFormat != "Unspec") "Auto" else state.gammaCurve
-                    state.copy(colorFormat = newFormat, gammaCurve = newGamma)
-                }
+            is CameraUiEvent.CycleColorFormat -> updateSettingsAndSave(requiresHardRebind = true) { state ->
+                val newFormat = when (state.colorFormat) { "HLG" -> "HDR10"; "HDR10" -> "HDR10+"; "HDR10+" -> "DB 8.4"; "DB 8.4" -> "Unspec"; else -> "HLG" }
+                state.copy(colorFormat = newFormat, gammaCurve = if (newFormat != "Unspec") "Auto" else state.gammaCurve)
             }
-            is CameraUiEvent.CycleGammaCurve -> {
-                if (_uiState.value.colorFormat == "Unspec") {
-                    updateSettingsAndSave(requiresHardRebind = false) { state ->
-                        val newGamma = when (state.gammaCurve) {
-                            "Auto" -> "HLG"
-                            "HLG" -> "PQ"
-                            "PQ" -> "Custom"
-                            else -> "Auto"
-                        }
-                        state.copy(gammaCurve = newGamma)
-                    }
+            is CameraUiEvent.CycleGammaCurve -> if (_uiState.value.colorFormat == "Unspec") {
+                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                    val newGamma = when (state.gammaCurve) { "Auto" -> "HLG"; "HLG" -> "PQ"; "PQ" -> "Custom"; else -> "Auto" }
+                    state.copy(gammaCurve = newGamma)
                 }
             }
 
-            is CameraUiEvent.SetNoiseReduction -> {
-                updateSettingsAndSave(requiresHardRebind = false) { it.copy(isNoiseReductionEnabled = event.enabled) }
-            }
-            is CameraUiEvent.SetBitrate -> {
-                updateSettingsAndSave(requiresHardRebind = true) { it.copy(bitrate = event.bitrate) }
-            }
-            is CameraUiEvent.SetStabilization -> {
-                updateSettingsAndSave(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
-            }
+            is CameraUiEvent.SetNoiseReduction -> updateSettingsAndSave(requiresHardRebind = false) { it.copy(isNoiseReductionEnabled = event.enabled) }
+            is CameraUiEvent.SetBitrate -> updateSettingsAndSave(requiresHardRebind = true) { it.copy(bitrate = event.bitrate) }
+            is CameraUiEvent.SetStabilization -> updateSettingsAndSave(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
 
             // SDR Hacks (auto-saved)
-            is CameraUiEvent.SetSdrToneMap -> {
-                updateSettingsAndSave(requiresHardRebind = true) {
-                    it.copy(
-                        isSdrToneMapEnabled = event.enabled,
-                        isForceDisplaySdrEnabled = if (event.enabled) false else it.isForceDisplaySdrEnabled
-                    )
-                }
+            is CameraUiEvent.SetSdrToneMap -> updateSettingsAndSave(requiresHardRebind = true) {
+                it.copy(isSdrToneMapEnabled = event.enabled, isForceDisplaySdrEnabled = if (event.enabled) false else it.isForceDisplaySdrEnabled)
             }
-            is CameraUiEvent.SetForceDisplaySdr -> {
-                updateSettingsAndSave(requiresHardRebind = false) {
-                    it.copy(
-                        isForceDisplaySdrEnabled = event.enabled,
-                        isSdrToneMapEnabled = if (event.enabled) false else it.isSdrToneMapEnabled
-                    )
-                }
+            is CameraUiEvent.SetForceDisplaySdr -> updateSettingsAndSave(requiresHardRebind = false) {
+                it.copy(isForceDisplaySdrEnabled = event.enabled, isSdrToneMapEnabled = if (event.enabled) false else it.isSdrToneMapEnabled)
             }
 
             // Storage (Maintained globally out of the presets)
@@ -322,6 +191,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+    
+    private fun triggerRebindForPresets() {
+        if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
+        else _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
+    }
 
     fun onOrientationChanged(rotation: Int) {
         cameraManager.updateRotation(rotation)
@@ -350,13 +224,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(isPaused = !it.isPaused) }
     }
 
+    fun updateManualControls(updater: (com.pilerks1.hdrrecorder.ui.ManualControlsState) -> com.pilerks1.hdrrecorder.ui.ManualControlsState) {
+        val caps = _uiState.value.cameraCapabilities
+        var triggersRebind = false
+        _uiState.update { 
+            val (newState, rebind) = ManualControlStateUpdater.calculateNextState(it.manualControlsState, caps, updater)
+            triggersRebind = rebind
+            
+            it.copy(
+                manualControlsState = newState,
+                cameraRebindTrigger = if (rebind && !it.isSettingsSheetVisible) it.cameraRebindTrigger + 1 else it.cameraRebindTrigger
+            )
+        }
+        
+        if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
+        val control = cameraManager.getCameraControl() ?: return
+        com.pilerks1.hdrrecorder.data.camera.ManualControlInjector.inject(control, _uiState.value.manualControlsState, caps)
+    }
+
     fun startCamera(lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         _uiState.update { it.copy(isCameraReady = false) }
 
         cameraManager.startCamera(
             lifecycleOwner = lifecycleOwner,
             onSurfaceRequest = { request -> _surfaceRequest.value = request },
-            uiState = _uiState.value
+            uiState = _uiState.value,
+            onCameraBound = { control, caps -> 
+                _uiState.update { it.copy(cameraCapabilities = caps) } 
+                com.pilerks1.hdrrecorder.data.camera.ManualControlInjector.inject(control, _uiState.value.manualControlsState, caps)
+            }
         )
 
         viewModelScope.launch {

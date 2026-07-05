@@ -43,7 +43,8 @@ class CameraManager(
     fun startCamera(
         lifecycleOwner: LifecycleOwner,
         onSurfaceRequest: (SurfaceRequest) -> Unit,
-        uiState: CameraUiState
+        uiState: CameraUiState,
+        onCameraBound: (CameraControl, com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
     ) {
         val cameraProviderFuture: ListenableFuture<ProcessCameraProvider> =
             ProcessCameraProvider.getInstance(context)
@@ -51,7 +52,7 @@ class CameraManager(
         cameraProviderFuture.addListener({
             try {
                 cameraProvider = cameraProviderFuture.get()
-                bindUseCases(lifecycleOwner, onSurfaceRequest, uiState)
+                bindUseCases(lifecycleOwner, onSurfaceRequest, uiState, onCameraBound)
             } catch (e: Exception) {
                 Log.e("CameraManager", "Error starting camera", e)
             }
@@ -62,7 +63,8 @@ class CameraManager(
     fun bindUseCases(
         lifecycleOwner: LifecycleOwner,
         onSurfaceRequest: (SurfaceRequest) -> Unit,
-        uiState: CameraUiState
+        uiState: CameraUiState,
+        onCameraBound: (CameraControl, com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
     ) {
         val cameraProvider = cameraProvider ?: throw IllegalStateException("Camera initialization failed.")
         cameraProvider.unbindAll()
@@ -135,7 +137,13 @@ class CameraManager(
         videoCapture = videoCaptureBuilder.build()
 
         try {
-            camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, videoCapture)
+            val boundCamera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, videoCapture)
+            camera = boundCamera
+            
+            // Extract characteristics and pass back to ViewModel
+            val caps = com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager.extractCapabilities(boundCamera.cameraInfo)
+            onCameraBound(boundCamera.cameraControl, caps)
+            
             Log.d("CameraManager", "Use cases bound successfully.")
         } catch (exc: Exception) {
             Log.e("CameraManager", "Use case binding failed", exc)
