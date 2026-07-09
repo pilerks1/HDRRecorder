@@ -35,7 +35,6 @@ class PreferencesManager(context: Context) {
         val json = JSONObject().apply {
             put("fps", state.selectedFps)
             put("res", state.selectedResolution.qualityName)
-            put("focus", state.focusMode)
             put("color", state.colorFormat)
             put("gamma", state.gammaCurve)
             put("nr", state.isNoiseReductionEnabled)
@@ -68,7 +67,6 @@ class PreferencesManager(context: Context) {
             defaultState.copy(
                 selectedFps = json.optInt("fps", defaultState.selectedFps),
                 selectedResolution = resolution,
-                focusMode = json.optString("focus", defaultState.focusMode),
                 colorFormat = json.optString("color", defaultState.colorFormat),
                 gammaCurve = json.optString("gamma", defaultState.gammaCurve),
                 isNoiseReductionEnabled = json.optBoolean("nr", defaultState.isNoiseReductionEnabled),

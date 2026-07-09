@@ -142,65 +142,27 @@ fun PresetSection(
 
     Spacer(modifier = Modifier.height(16.dp))
 
+    // NOTE: these two toggles are UI for features not yet wired to state/persistence.
+    // Kept as local state for now; they reuse the shared HdrSettingsSwitchRow styling.
     var saveRecordingOptionsEnabled by remember { mutableStateOf(false) }
 
-    // Toggle for Saving Recording Options on Main Screen
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(text = "Save Recording Options", fontSize = 16.sp, color = Color.White)
-            Text(
-                text = "Save options modified on the main camera screen to the current preset automatically.",
-                fontSize = 12.sp,
-                color = Color.Gray,
-                lineHeight = 16.sp
-            )
-        }
-        Switch(
-            checked = saveRecordingOptionsEnabled,
-            onCheckedChange = { saveRecordingOptionsEnabled = it },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                uncheckedThumbColor = Color.LightGray,
-                uncheckedTrackColor = Color.DarkGray
-            )
-        )
-    }
+    HdrSettingsSwitchRow(
+        label = "Save Recording Options",
+        description = "Save options modified on the main camera screen to the current preset automatically.",
+        checked = saveRecordingOptionsEnabled,
+        onCheckedChange = { saveRecordingOptionsEnabled = it }
+    )
 
     Spacer(modifier = Modifier.height(16.dp))
 
     var saveStorageLocationEnabled by remember { mutableStateOf(false) }
 
-    // Toggle for Saving Storage Location with Presets
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(text = "Save Storage Location", fontSize = 16.sp, color = Color.White)
-            Text(
-                text = "Include the currently selected storage folder when saving this preset.",
-                fontSize = 12.sp,
-                color = Color.Gray,
-                lineHeight = 16.sp
-            )
-        }
-        Switch(
-            checked = saveStorageLocationEnabled,
-            onCheckedChange = { saveStorageLocationEnabled = it },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                uncheckedThumbColor = Color.LightGray,
-                uncheckedTrackColor = Color.DarkGray
-            )
-        )
-    }
+    HdrSettingsSwitchRow(
+        label = "Save Storage Location",
+        description = "Include the currently selected storage folder when saving this preset.",
+        checked = saveStorageLocationEnabled,
+        onCheckedChange = { saveStorageLocationEnabled = it }
+    )
 
     // --- Dialogs ---
 

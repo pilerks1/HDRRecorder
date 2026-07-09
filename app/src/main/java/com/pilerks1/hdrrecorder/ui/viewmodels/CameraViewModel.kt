@@ -1,35 +1,45 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
-import com.pilerks1.hdrrecorder.ui.CameraUiState
-import com.pilerks1.hdrrecorder.ui.CameraUiEvent
-
 import android.app.Application
 import android.content.Intent
 import android.util.Log
+import android.view.Surface
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import androidx.core.net.toUri
 import com.pilerks1.hdrrecorder.data.CameraManager
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
-import com.pilerks1.hdrrecorder.data.SettingsManager
 import com.pilerks1.hdrrecorder.data.StatsManager
+import com.pilerks1.hdrrecorder.data.camera.CameraInteropApplier
+import com.pilerks1.hdrrecorder.data.camera.InteropSettings
 import com.pilerks1.hdrrecorder.model.Resolution
+import com.pilerks1.hdrrecorder.ui.CameraUiEvent
+import com.pilerks1.hdrrecorder.ui.CameraUiState
+import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import androidx.core.net.toUri
 
+/**
+ * Managers are constructor-injected (via CameraViewModelFactory in MainActivity) so the
+ * ViewModel no longer news up its own Android dependencies. Application is retained only
+ * for the content resolver used when persisting a storage URI permission.
+ */
 @ExperimentalCamera2Interop
-class CameraViewModel(application: Application) : AndroidViewModel(application) {
-
-    // --- Managers ---
-    private val statsManager = StatsManager(application)
-    private val settingsManager = SettingsManager()
-    private val preferencesManager = PreferencesManager(application)
-    private val cameraManager = CameraManager(application, statsManager)
-    private val recordingManager = RecordingManager(application, statsManager)
+class CameraViewModel(
+    application: Application,
+    private val statsManager: StatsManager,
+    private val preferencesManager: PreferencesManager,
+    private val cameraManager: CameraManager,
+    private val recordingManager: RecordingManager
+) : AndroidViewModel(application) {
 
     // --- Dirty Flags for Settings UI ---
     private var pendingHardRebind = false
@@ -45,13 +55,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     init {
         val globalStorageUri = preferencesManager.storageUri
         if (!preferencesManager.hasPreset("Default")) preferencesManager.savePreset("Default", _uiState.value)
-        
+
         val names = preferencesManager.getPresetNames().toList()
         val currentPreset = if (names.contains(preferencesManager.currentPresetName)) preferencesManager.currentPresetName else "Default"
         val loadedState = preferencesManager.loadPreset(currentPreset, _uiState.value)
-        
+
         _uiState.update { loadedState.copy(presetsList = names, storageUri = globalStorageUri) }
-        
+
         collectStats()
         collectRecordingState()
         statsManager.setRecordingState(false, _uiState.value.selectedFps, _uiState.value.bitrate.toIntOrNull() ?: 30, _uiState.value.storageUri)
@@ -72,7 +82,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (requiresHardRebind) {
                 _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
             } else {
-                applySettingsOnly()
+                applyInterop()
             }
         }
     }
@@ -95,7 +105,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 preferencesManager.deletePreset(event.name)
                 val names = preferencesManager.getPresetNames().toList()
                 val nextPreset = if (names.contains("Default")) "Default" else names.firstOrNull() ?: "Default"
-                
+
                 if (_uiState.value.currentPresetName == event.name) {
                     val loadedState = preferencesManager.loadPreset(nextPreset, _uiState.value)
                     preferencesManager.currentPresetName = nextPreset
@@ -133,8 +143,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     state.copy(selectedResolution = newRes)
                 }
             }
-            // Manual Controls
-
 
             // Format & Gamma (auto-saved)
             is CameraUiEvent.CycleColorFormat -> updateSettingsAndSave(requiresHardRebind = true) { state ->
@@ -183,7 +191,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (pendingHardRebind) {
                     _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
                 } else if (pendingSoftRebind) {
-                    applySettingsOnly()
+                    applyInterop()
                 }
 
                 pendingHardRebind = false
@@ -191,13 +199,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
-    
+
     private fun triggerRebindForPresets() {
         if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
         else _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
     }
 
-    fun onOrientationChanged(rotation: Int) {
+    /**
+     * Single entry point for physical device orientation changes.
+     * Accepts raw degrees (0-359) from OrientationEventListener, quantizes to a
+     * Surface.ROTATION_* constant, and updates both the UI state and CameraX use cases
+     * atomically. Ignored during recording so orientation is frozen.
+     */
+    fun onDeviceOrientationChanged(degrees: Int) {
+        val rotation = when (degrees) {
+            in 45 until 135  -> Surface.ROTATION_270
+            in 135 until 225 -> Surface.ROTATION_180
+            in 225 until 315 -> Surface.ROTATION_90
+            else             -> Surface.ROTATION_0
+        }
+        // No-op if unchanged.
+        if (rotation == _uiState.value.deviceRotation) return
+        // Freeze orientation during recording (UI + CameraX metadata both locked).
+        if (_uiState.value.isRecording) return
+
+        _uiState.update { it.copy(deviceRotation = rotation) }
         cameraManager.updateRotation(rotation)
     }
 
@@ -224,34 +250,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(isPaused = !it.isPaused) }
     }
 
-    fun updateManualControls(updater: (com.pilerks1.hdrrecorder.ui.ManualControlsState) -> com.pilerks1.hdrrecorder.ui.ManualControlsState) {
+    fun updateManualControls(updater: (ManualControlsState) -> ManualControlsState) {
         val caps = _uiState.value.cameraCapabilities
         var triggersRebind = false
-        _uiState.update { 
+        _uiState.update {
             val (newState, rebind) = ManualControlStateUpdater.calculateNextState(it.manualControlsState, caps, updater)
             triggersRebind = rebind
-            
+
             it.copy(
                 manualControlsState = newState,
                 cameraRebindTrigger = if (rebind && !it.isSettingsSheetVisible) it.cameraRebindTrigger + 1 else it.cameraRebindTrigger
             )
         }
-        
+
         if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
-        val control = cameraManager.getCameraControl() ?: return
-        com.pilerks1.hdrrecorder.data.camera.ManualControlInjector.inject(control, _uiState.value.manualControlsState, caps)
+        applyInterop()
     }
 
-    fun startCamera(lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
+    fun startCamera(lifecycleOwner: LifecycleOwner) {
         _uiState.update { it.copy(isCameraReady = false) }
 
         cameraManager.startCamera(
             lifecycleOwner = lifecycleOwner,
             onSurfaceRequest = { request -> _surfaceRequest.value = request },
             uiState = _uiState.value,
-            onCameraBound = { control, caps -> 
-                _uiState.update { it.copy(cameraCapabilities = caps) } 
-                com.pilerks1.hdrrecorder.data.camera.ManualControlInjector.inject(control, _uiState.value.manualControlsState, caps)
+            displayRotation = _uiState.value.deviceRotation,
+            onCameraBound = { control, caps ->
+                _uiState.update { it.copy(cameraCapabilities = caps) }
+                CameraInteropApplier.apply(control, _uiState.value.manualControlsState, currentInteropSettings(), caps)
             }
         )
 
@@ -268,22 +294,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             delay(100)
 
             _uiState.update { it.copy(isCameraReady = true) }
-            applySettingsOnly()
+            applyInterop()
         }
     }
 
-    private fun applySettingsOnly() {
+    /**
+     * Single entry point for all Camera2 interop writes. Builds one request from the current
+     * manual control state + non-manual interop settings via the unified applier.
+     */
+    private fun applyInterop() {
         val cameraControl = cameraManager.getCameraControl() ?: return
-        updateSettingsManager()
-        settingsManager.applyAllSettings(cameraControl)
+        val state = _uiState.value
+        CameraInteropApplier.apply(cameraControl, state.manualControlsState, currentInteropSettings(), state.cameraCapabilities)
     }
 
-    private fun updateSettingsManager() {
-        val currentState = _uiState.value
-        settingsManager.setFrameRate(currentState.selectedFps)
-        settingsManager.setFocusMode(currentState.focusMode)
-        settingsManager.setNoiseReduction(currentState.isNoiseReductionEnabled)
-        settingsManager.setGammaCurve(currentState.gammaCurve)
+    private fun currentInteropSettings(): InteropSettings {
+        val state = _uiState.value
+        return InteropSettings(
+            gammaCurve = state.gammaCurve,
+            isNoiseReductionEnabled = state.isNoiseReductionEnabled
+        )
     }
 
     // --- State Collection ---
@@ -301,15 +331,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(isRecording = isRecording, isPaused = if (!isRecording) false else it.isPaused) }
             }
         }
-        viewModelScope.launch {
-            recordingManager.recordingTimeSeconds.collect { time ->
-                _uiState.update { it.copy(recordingTime = time) }
-            }
-        }
     }
 
     override fun onCleared() {
-        super.onCleared()
         cameraManager.release()
         statsManager.cleanup()
     }

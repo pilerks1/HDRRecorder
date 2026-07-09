@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.ui
 
-import android.content.res.Configuration
 import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.core.SurfaceRequest
@@ -17,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -25,21 +23,23 @@ import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import kotlinx.coroutines.delay
 
+/**
+ * Camera preview composable. Accepts isLandscape from the parent (derived from the
+ * single deviceRotation state) instead of reading LocalConfiguration independently,
+ * so the container shape and CameraX targetRotation are always in sync.
+ */
 @Composable
 fun PreviewUI(
     surfaceRequest: SurfaceRequest?,
     stats: StatsSnapshot,
     isRecording: Boolean,
+    isLandscape: Boolean,
     onEvent: (CameraUiEvent) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
 
-    // Determine screen orientation to apply correct 4:3 logic
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-    // ROOT CONTAINER: Always fills the space allocated by parent (usually full screen)
+    // ROOT CONTAINER: Always fills the space allocated by parent
     // and centers the content (the viewfinder).
     Box(
         modifier = modifier,
@@ -48,11 +48,8 @@ fun PreviewUI(
         // VIEWFINDER CONTAINER: Constrained to 4:3 Aspect Ratio
         Box(
             modifier = Modifier
-                // In Portrait, 4:3 means Width is limiting factor (fill width, calc height) -> 3:4 Ratio
-                // In Landscape, 4:3 means Height is limiting factor (fill height, calc width) -> 4:3 Ratio
                 .aspectRatio(if (isLandscape) 4f / 3f else 3f / 4f)
                 .then(if (isLandscape) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
-                // Tap Gestures attached HERE so coordinates match the sensor image exactly
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         val factory = SurfaceOrientedMeteringPointFactory(
@@ -68,14 +65,13 @@ fun PreviewUI(
             if (surfaceRequest != null) {
                 CameraXViewfinder(
                     surfaceRequest = surfaceRequest,
-                    modifier = Modifier.fillMaxSize() // Fills the 4:3 Container
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black))
             }
 
             // Metering circle (Visual only)
-            // Rendered inside this box so offsets are relative to the image, not the screen
             meterCirclePosition?.let {
                 Surface(
                     modifier = Modifier
@@ -92,8 +88,7 @@ fun PreviewUI(
                 }
             }
 
-            // Recording timer display (Floating UI)
-            // Now inside the Viewfinder Container so it stays relative to the preview image
+            // Recording timer display (hardware duration is the single time source)
             if (isRecording || stats.hardwareDurationNanos > 0L) {
                 val seconds = stats.hardwareDurationNanos / 1_000_000_000L
                 val h = seconds / 3600

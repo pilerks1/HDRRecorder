@@ -20,6 +20,13 @@ import kotlin.math.roundToInt
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 
+/** Describes one grid button: what it shows, whether it's active, and what it does. */
+private data class ButtonSpec(
+    val label: String,
+    val isActive: Boolean,
+    val onClick: () -> Unit
+)
+
 @Composable
 fun ManualControlsGrid(
     state: ManualControlsState,
@@ -33,45 +40,17 @@ fun ManualControlsGrid(
     val secondaryEdgePadding = 8.dp
     val secondaryButtonDimension = 52.dp
 
-    // Dynamic button list based on capabilities
-    val availableButtons = mutableListOf<@Composable (Modifier) -> Unit>()
-
-    // 1. Resolution (Always available)
-    availableButtons.add { mod -> GridButton(resLabel, false, mod) { onCycleResolution() } }
-    
-    // 2. SS
-    if (caps?.ssRangeNanos != null) {
-        availableButtons.add { mod -> GridButton("SS", state.activeSlider == "SS", mod) { onToggleSlider("SS") } }
-    }
-    
-    // 3. Focus
-    if ((caps?.focusMinDistanceDiopters ?: 0f) > 0f) {
-        availableButtons.add { mod -> GridButton("FOC", state.activeSlider == "FOC", mod) { onToggleSlider("FOC") } }
-    }
-    
-    // 4. WB
-    if (caps?.supportsCCT == true) {
-        availableButtons.add { mod -> GridButton("WB", state.activeSlider == "WB", mod) { onToggleSlider("WB") } }
-    }
-    
-    // 5. FPS
-    if (caps?.fpsRanges?.isNotEmpty() == true) {
-        availableButtons.add { mod -> GridButton("FPS", state.activeSlider == "FPS", mod) { onToggleSlider("FPS") } }
-    }
-    
-    // 6. ISO
-    if (caps?.isoRange != null) {
-        availableButtons.add { mod -> GridButton("ISO", state.activeSlider == "ISO", mod) { onToggleSlider("ISO") } }
-    }
-    
-    // 7. EV
-    if (caps?.evRange != null) {
-        availableButtons.add { mod -> GridButton("EV", state.activeSlider == "EV", mod) { onToggleSlider("EV") } }
-    }
-    
-    // 8. TINT
-    if (caps?.supportsCCT == true) {
-        availableButtons.add { mod -> GridButton("TINT", state.activeSlider == "TINT", mod) { onToggleSlider("TINT") } }
+    // Build the data list of available buttons based on capabilities.
+    val buttons = buildList {
+        // Resolution is always available.
+        add(ButtonSpec(resLabel, isActive = false, onClick = onCycleResolution))
+        if (caps?.ssRangeNanos != null) add(ButtonSpec("SS", state.activeSlider == "SS") { onToggleSlider("SS") })
+        if ((caps?.focusMinDistanceDiopters ?: 0f) > 0f) add(ButtonSpec("FOC", state.activeSlider == "FOC") { onToggleSlider("FOC") })
+        if (caps?.supportsCCT == true) add(ButtonSpec("WB", state.activeSlider == "WB") { onToggleSlider("WB") })
+        if (caps?.fpsRanges?.isNotEmpty() == true) add(ButtonSpec("FPS", state.activeSlider == "FPS") { onToggleSlider("FPS") })
+        if (caps?.isoRange != null) add(ButtonSpec("ISO", state.activeSlider == "ISO") { onToggleSlider("ISO") })
+        if (caps?.evRange != null) add(ButtonSpec("EV", state.activeSlider == "EV") { onToggleSlider("EV") })
+        if (caps?.supportsCCT == true) add(ButtonSpec("TINT", state.activeSlider == "TINT") { onToggleSlider("TINT") })
     }
 
     if (isLandscape) {
@@ -81,17 +60,17 @@ fun ManualControlsGrid(
             modifier = modifier.padding(end = secondaryEdgePadding).fillMaxHeight()
         ) {
             // Split into two columns dynamically, centered.
-            val col1Count = (availableButtons.size + 1) / 2
-            val col2Count = availableButtons.size / 2
+            val col1Count = (buttons.size + 1) / 2
+            val buttonModifier = Modifier.fillMaxWidth().height(secondaryButtonDimension)
 
             Column(modifier = Modifier.width(secondaryButtonDimension).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
                 for (i in 0 until col1Count) {
-                    availableButtons[i](Modifier.fillMaxWidth().height(secondaryButtonDimension))
+                    buttons[i].let { GridButton(it.label, it.isActive, buttonModifier, it.onClick) }
                 }
             }
             Column(modifier = Modifier.width(secondaryButtonDimension).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
-                for (i in col1Count until availableButtons.size) {
-                    availableButtons[i](Modifier.fillMaxWidth().height(secondaryButtonDimension))
+                for (i in col1Count until buttons.size) {
+                    buttons[i].let { GridButton(it.label, it.isActive, buttonModifier, it.onClick) }
                 }
             }
         }
@@ -101,17 +80,17 @@ fun ManualControlsGrid(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = modifier.padding(bottom = secondaryEdgePadding).fillMaxWidth()
         ) {
-            val row1Count = (availableButtons.size + 1) / 2
-            val row2Count = availableButtons.size / 2
+            val row1Count = (buttons.size + 1) / 2
+            val buttonModifier = Modifier.fillMaxHeight().width(secondaryButtonDimension)
 
             Row(modifier = Modifier.height(secondaryButtonDimension).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 for (i in 0 until row1Count) {
-                    availableButtons[i](Modifier.fillMaxHeight().width(secondaryButtonDimension))
+                    buttons[i].let { GridButton(it.label, it.isActive, buttonModifier, it.onClick) }
                 }
             }
             Row(modifier = Modifier.height(secondaryButtonDimension).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                for (i in row1Count until availableButtons.size) {
-                    availableButtons[i](Modifier.fillMaxHeight().width(secondaryButtonDimension))
+                for (i in row1Count until buttons.size) {
+                    buttons[i].let { GridButton(it.label, it.isActive, buttonModifier, it.onClick) }
                 }
             }
         }

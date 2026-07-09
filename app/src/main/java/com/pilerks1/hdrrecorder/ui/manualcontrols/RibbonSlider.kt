@@ -17,11 +17,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
@@ -181,29 +179,7 @@ fun RibbonSlider(
 
     if (isLandscape) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .graphicsLayer {
-                        rotationZ = 270f
-                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                    }
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(
-                            androidx.compose.ui.unit.Constraints(
-                                minWidth = constraints.minHeight,
-                                maxWidth = constraints.maxHeight,
-                                minHeight = constraints.minWidth,
-                                maxHeight = constraints.maxWidth,
-                            )
-                        )
-                        layout(placeable.height, placeable.width) {
-                            placeable.place(
-                                -placeable.width / 2 + placeable.height / 2,
-                                -placeable.height / 2 + placeable.width / 2
-                            )
-                        }
-                    }
-            ) {
+            Box(modifier = Modifier.rotateVertical()) {
                 sliderContent()
             }
         }

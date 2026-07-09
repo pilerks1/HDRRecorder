@@ -10,6 +10,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import com.pilerks1.hdrrecorder.model.ThermalStatus
+import com.pilerks1.hdrrecorder.model.toSigFigs
 import kotlin.math.roundToInt
 
 /**
@@ -59,11 +61,11 @@ fun StatsUI(
                 StatRow(label = "TIME", value = stats.storageRemainingTime)
                 StatRow(
                     label = "BIT",
-                    value = if (isRecording) "${format3SigFigs(stats.actualBitrateMbps)} Mbps" else "N/A"
+                    value = if (isRecording) "${stats.actualBitrateMbps.toSigFigs()} Mbps" else "N/A"
                 )
                 StatRow(
                     label = "SIZE",
-                    value = if (stats.displayedFileSizeWrittenBytes > 0L) "${format3SigFigs(stats.displayedFileSizeWrittenBytes.toDouble() / (1024.0 * 1024.0))} MB" else "N/A"
+                    value = if (stats.displayedFileSizeWrittenBytes > 0L) "${(stats.displayedFileSizeWrittenBytes.toDouble() / (1024.0 * 1024.0)).toSigFigs()} MB" else "N/A"
                 )
             }
 
@@ -112,10 +114,10 @@ private fun StatGroup(
 }
 
 private fun getThermalColorByInt(status: Int): Color {
-    return when (status) {
-        android.os.PowerManager.THERMAL_STATUS_NONE -> Color.White
-        android.os.PowerManager.THERMAL_STATUS_LIGHT -> Color.Yellow
-        android.os.PowerManager.THERMAL_STATUS_MODERATE -> Color(0xFFFFA500)
+    return when (ThermalStatus.fromInt(status)) {
+        ThermalStatus.NONE -> Color.White
+        ThermalStatus.LIGHT -> Color.Yellow
+        ThermalStatus.MODERATE -> Color(0xFFFFA500)
         else -> Color.Red
     }
 }
@@ -130,21 +132,14 @@ private fun getThermalColorByStatus(status: String): Color {
             else -> Color.White
         }
     } else {
+        // Match against the shared ThermalStatus vocabulary by its label.
         when (status) {
-            "NONE" -> Color.White
-            "LIGHT" -> Color.Yellow
-            "MOD" -> Color(0xFFFFA500)
-            "MODERATE" -> Color(0xFFFFA500)
+            ThermalStatus.NONE.label -> Color.White
+            ThermalStatus.LIGHT.label -> Color.Yellow
+            ThermalStatus.MODERATE.label -> Color(0xFFFFA500)
             else -> Color.Red // SEVERE, CRITICAL, EMERGENCY, SHUTDOWN
         }
     }
-}
-
-private fun format3SigFigs(value: Double): String {
-    if (value <= 0) return "0.00"
-    val magnitude = kotlin.math.floor(kotlin.math.log10(value)).toInt()
-    val scale = (2 - magnitude).coerceAtLeast(0)
-    return "%.${scale}f".format(value)
 }
 
 @Composable

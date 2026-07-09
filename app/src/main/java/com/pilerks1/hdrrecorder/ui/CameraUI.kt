@@ -1,14 +1,6 @@
 package com.pilerks1.hdrrecorder.ui
 
-import android.app.Activity
-import android.content.Context
-import android.content.pm.ActivityInfo
-import android.content.res.Configuration
-import android.hardware.display.DisplayManager
-import android.os.Build
-import android.view.Display
 import android.view.Surface
-import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.compose.foundation.background
@@ -23,67 +15,80 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+import android.app.Application
 import com.pilerks1.hdrrecorder.ui.settingsUI.SettingsUI
 import com.pilerks1.hdrrecorder.ui.helpers.*
 import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModel
+import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModelFactory
+import kotlinx.coroutines.delay
 
 /**
  * The main entry point for the Camera UI.
- * Uses a persistent Box layout to ensure the Camera Preview Surface is never destroyed or moved.
- * UI Controls float on top and adapt their position based on system orientation.
+ *
+ * Rotation architecture:
+ * - DeviceOrientationListener (accelerometer) is the SINGLE source of rotation truth.
+ * - It feeds raw degrees to the ViewModel, which quantizes and stores deviceRotation.
+ * - isLandscape is derived from deviceRotation (NOT LocalConfiguration).
+ * - CameraX targetRotation is set from the same deviceRotation value.
+ * - DeviceOrientationManagement forces the Activity to match the detected tilt,
+ *   overriding the OS rotation lock (rotate-while-locked behavior).
+ * - During recording, orientation is frozen (ViewModel guard + Activity lock).
  */
 @OptIn(ExperimentalCamera2Interop::class)
 @Composable
 fun CameraUI(
-    viewModel: CameraViewModel = viewModel(),
-    onNavigateToCompatibility: () -> Unit
+    onNavigateToCompatibility: () -> Unit,
+    viewModel: CameraViewModel = viewModel(
+        factory = CameraViewModelFactory(LocalContext.current.applicationContext as Application)
+    )
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     val surfaceRequest by viewModel.surfaceRequest.collectAsState()
 
-    // Track system display rotation
-    var displayRotation by remember { mutableIntStateOf(Surface.ROTATION_0) }
+    // Stable callback surface so control composables never touch the concrete ViewModel.
+    val actions = remember(viewModel) {
+        CameraActions(
+            onEvent = viewModel::onEvent,
+            onManualControlsChange = viewModel::updateManualControls
+        )
+    }
 
     // --- Effects ---
     LaunchedEffect(uiState.cameraRebindTrigger) {
-        // Wait 500ms before applying. If another trigger happens during this time,
-        // the effect cancels and restarts the 500ms timer (debouncing).
-        kotlinx.coroutines.delay(500)
-
-        // Rebind the camera ONLY when the explicit trigger increments
-        // (e.g., on initial launch, or upon closing Settings if changes were made)
+        delay(500)
         viewModel.startCamera(lifecycleOwner)
     }
 
     // --- System UI ---
     SystemUiManagement()
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
-    ScreenOrientationManagement(isRecording = uiState.isRecording)
     HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
 
-    // --- Display Rotation Listener ---
-    DisplayRotationListener { rotation ->
-        displayRotation = rotation
-        viewModel.onOrientationChanged(rotation)
+    // --- Orientation: single source of truth ---
+    // Accelerometer-based listener fires regardless of OS rotation lock.
+    DeviceOrientationListener { degrees ->
+        viewModel.onDeviceOrientationChanged(degrees)
     }
+    // Forces the Activity window to match the detected tilt (overrides OS lock).
+    // During recording, locks to the current orientation.
+    DeviceOrientationManagement(
+        deviceRotation = uiState.deviceRotation,
+        isRecording = uiState.isRecording
+    )
 
     // --- Layout Logic ---
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // isLandscape is derived INSIDE BoxWithConstraints so it can gate on both the
+    // ViewModel's deviceRotation AND the actual window dimensions agreeing.
+    // This prevents the 1-2 frame glitch where state says "landscape" but the
+    // Activity window hasn't physically rotated yet.
 
     // --- Main UI Layout ---
-    // The root Box anchors the permanent PreviewUI in the exact center so it survives orientation changes.
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -93,21 +98,25 @@ fun CameraUI(
         val screenHeightDp = maxHeight
         val density = LocalDensity.current
 
+        // Gate: device says landscape AND the window is actually wider than tall.
+        val deviceIsLandscape = uiState.deviceRotation == Surface.ROTATION_90
+                || uiState.deviceRotation == Surface.ROTATION_270
+        val isLandscape = deviceIsLandscape && maxWidth > maxHeight
+
         var previewRect by remember { mutableStateOf(Rect.Zero) }
 
         // 1. PREVIEW LAYER (Bottom)
-        // Always fills screen but constrained to its natural aspect ratio.
         PreviewUI(
             surfaceRequest = surfaceRequest,
             stats = uiState.stats,
             isRecording = uiState.isRecording,
-            onEvent = viewModel::onEvent,
+            isLandscape = isLandscape,
+            onEvent = actions.onEvent,
             modifier = Modifier
                 .align(Alignment.Center)
                 .aspectRatio(if (isLandscape) 4f / 3f else 3f / 4f)
                 .then(if (isLandscape) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
                 .onGloballyPositioned { coordinates ->
-                    // Read the exact pixel coordinates of the preview box after all notch padding and constraints are evaluated
                     previewRect = coordinates.boundsInRoot()
                 }
         )
@@ -132,13 +141,13 @@ fun CameraUI(
                     StatsUI(stats = uiState.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
                 }
 
-                // CENTER PREVIEW & SLIDERS (Exactly matching the preview rect)
+                // CENTER PREVIEW & SLIDERS
                 Box(
                     modifier = Modifier
                         .offset(x = previewLeft, y = previewTop)
                         .size(width = previewWidth, height = previewHeight)
                 ) {
-                    ControlsUISliders(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUISliders(uiState = uiState, actions = actions, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
 
                 // RIGHT BLACK BAR (Buttons)
@@ -148,7 +157,7 @@ fun CameraUI(
                         .size(width = screenWidthDp - previewRight, height = screenHeightDp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    ControlsUIButtons(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUIButtons(uiState = uiState, actions = actions, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
             } else {
                 // TOP BLACK BAR (Stats)
@@ -161,13 +170,13 @@ fun CameraUI(
                     StatsUI(stats = uiState.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
                 }
 
-                // CENTER PREVIEW & SLIDERS (Exactly matching the preview rect)
+                // CENTER PREVIEW & SLIDERS
                 Box(
                     modifier = Modifier
                         .offset(x = previewLeft, y = previewTop)
                         .size(width = previewWidth, height = previewHeight)
                 ) {
-                    ControlsUISliders(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUISliders(uiState = uiState, actions = actions, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
 
                 // BOTTOM BLACK BAR (Buttons)
@@ -177,12 +186,12 @@ fun CameraUI(
                         .size(width = screenWidthDp, height = screenHeightDp - previewBottom),
                     contentAlignment = Alignment.BottomCenter
                 ) {
-                    ControlsUIButtons(uiState = uiState, viewModel = viewModel, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
+                    ControlsUIButtons(uiState = uiState, actions = actions, isLandscape = isLandscape, modifier = Modifier.fillMaxSize())
                 }
             }
         }
-    }    
-        // 4. NIGHT MODE AE ICON
+
+        // 2. NIGHT MODE AE ICON
         if (uiState.manualControlsState.isNightModeAeEnabled) {
             Box(
                 modifier = Modifier
@@ -200,38 +209,39 @@ fun CameraUI(
             }
         }
 
-        // 5. SETTINGS OVERLAY
+        // 3. SETTINGS OVERLAY
         if (uiState.isSettingsSheetVisible) {
             SettingsUI(
                 currentPreset = uiState.currentPresetName,
                 presetsList = uiState.presetsList,
-                onSavePreset = { viewModel.onEvent(CameraUiEvent.SavePreset(it)) },
-                onLoadPreset = { viewModel.onEvent(CameraUiEvent.LoadPreset(it)) },
-                onDeletePreset = { viewModel.onEvent(CameraUiEvent.DeletePreset(it)) },
-                onDeleteAllPresets = { viewModel.onEvent(CameraUiEvent.DeleteAllPresets) },
+                onSavePreset = { actions.onEvent(CameraUiEvent.SavePreset(it)) },
+                onLoadPreset = { actions.onEvent(CameraUiEvent.LoadPreset(it)) },
+                onDeletePreset = { actions.onEvent(CameraUiEvent.DeletePreset(it)) },
+                onDeleteAllPresets = { actions.onEvent(CameraUiEvent.DeleteAllPresets) },
 
                 colorFormat = uiState.colorFormat,
-                onColorFormatChange = { viewModel.onEvent(CameraUiEvent.CycleColorFormat) },
+                onColorFormatChange = { actions.onEvent(CameraUiEvent.CycleColorFormat) },
                 gammaCurve = uiState.gammaCurve,
-                onGammaCurveChange = { viewModel.onEvent(CameraUiEvent.CycleGammaCurve) },
+                onGammaCurveChange = { actions.onEvent(CameraUiEvent.CycleGammaCurve) },
 
                 noiseReductionEnabled = uiState.isNoiseReductionEnabled,
-                onNoiseReductionChange = { viewModel.onEvent(CameraUiEvent.SetNoiseReduction(it)) },
+                onNoiseReductionChange = { actions.onEvent(CameraUiEvent.SetNoiseReduction(it)) },
                 bitrate = uiState.bitrate,
-                onBitrateChange = { viewModel.onEvent(CameraUiEvent.SetBitrate(it)) },
+                onBitrateChange = { actions.onEvent(CameraUiEvent.SetBitrate(it)) },
                 isStabilizationEnabled = uiState.isStabilizationEnabled,
-                onStabilizationChange = { viewModel.onEvent(CameraUiEvent.SetStabilization(it)) },
+                onStabilizationChange = { actions.onEvent(CameraUiEvent.SetStabilization(it)) },
 
                 isSdrToneMapEnabled = uiState.isSdrToneMapEnabled,
-                onSdrToneMapChange = { viewModel.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
+                onSdrToneMapChange = { actions.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
-                onForceDisplaySdrChange = { viewModel.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
+                onForceDisplaySdrChange = { actions.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
 
                 storageUri = uiState.storageUri,
-                onStorageUriSelected = { viewModel.onEvent(CameraUiEvent.SetStorageUri(it)) },
+                onStorageUriSelected = { actions.onEvent(CameraUiEvent.SetStorageUri(it)) },
 
                 onNavigateToCompatibility = onNavigateToCompatibility,
-                onClose = { viewModel.onEvent(CameraUiEvent.CloseSettings) }
+                onClose = { actions.onEvent(CameraUiEvent.CloseSettings) }
             )
         }
     } // End of root Box
+}

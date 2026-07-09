@@ -4,8 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import android.util.Range
-import android.view.Display
-import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -19,7 +17,6 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
-import com.google.common.util.concurrent.ListenableFuture
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -44,15 +41,15 @@ class CameraManager(
         lifecycleOwner: LifecycleOwner,
         onSurfaceRequest: (SurfaceRequest) -> Unit,
         uiState: CameraUiState,
+        displayRotation: Int,
         onCameraBound: (CameraControl, com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
     ) {
-        val cameraProviderFuture: ListenableFuture<ProcessCameraProvider> =
-            ProcessCameraProvider.getInstance(context)
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
 
         cameraProviderFuture.addListener({
             try {
                 cameraProvider = cameraProviderFuture.get()
-                bindUseCases(lifecycleOwner, onSurfaceRequest, uiState, onCameraBound)
+                bindUseCases(lifecycleOwner, onSurfaceRequest, uiState, displayRotation, onCameraBound)
             } catch (e: Exception) {
                 Log.e("CameraManager", "Error starting camera", e)
             }
@@ -64,6 +61,7 @@ class CameraManager(
         lifecycleOwner: LifecycleOwner,
         onSurfaceRequest: (SurfaceRequest) -> Unit,
         uiState: CameraUiState,
+        displayRotation: Int,
         onCameraBound: (CameraControl, com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
     ) {
         val cameraProvider = cameraProvider ?: throw IllegalStateException("Camera initialization failed.")
@@ -72,8 +70,6 @@ class CameraManager(
         val cameraSelector = CameraSelector.Builder()
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
             .build()
-
-        val displayRotation = getDisplayRotation()
 
         // --- Dynamic Range Resolution ---
         // Map the Color Format UI selection to CameraX's exact 10-bit HDR Encodings
@@ -162,16 +158,6 @@ class CameraManager(
     fun tapToMeter(meteringPoint: MeteringPoint) {
         val action = FocusMeteringAction.Builder(meteringPoint, FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB).build()
         camera?.cameraControl?.startFocusAndMetering(action)
-    }
-
-    private fun getDisplayRotation(): Int {
-        return try {
-            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.rotation
-        } catch (e: Exception) {
-            android.view.Surface.ROTATION_0
-        }
     }
 
     fun release() {

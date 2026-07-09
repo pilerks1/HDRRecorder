@@ -1,9 +1,12 @@
 package com.pilerks1.hdrrecorder.data.camera
 
 import android.hardware.camera2.CameraCharacteristics
+import android.os.Build
 import android.util.Range
 import android.util.Rational
+import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraInfo
 
 /**
@@ -26,6 +29,7 @@ object CameraCapabilitiesManager {
     /**
      * Extracts deep manual control limits from CameraX's CameraInfo wrapper.
      */
+    @OptIn(ExperimentalCamera2Interop::class)
     fun extractCapabilities(cameraInfo: CameraInfo): CameraCapabilities {
         val camera2Info = Camera2CameraInfo.from(cameraInfo)
         
@@ -46,6 +50,10 @@ object CameraCapabilitiesManager {
         val fpsArray = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
         val fpsRanges = fpsArray?.toList() ?: emptyList()
         
+        // API 36-only capability probes are gated here so the checker's @RequiresApi(36)
+        // methods are never called on older devices.
+        val isApi36 = Build.VERSION.SDK_INT >= 36
+
         return CameraCapabilities(
             isoRange = isoRange,
             ssRangeNanos = ssRange,
@@ -54,8 +62,8 @@ object CameraCapabilitiesManager {
             focusMinDistanceDiopters = minFocus,
             fpsRanges = fpsRanges,
             supportsCCT = DeviceCompatibilityChecker.supportsCct(camera2Info),
-            hasHybridAe = DeviceCompatibilityChecker.supportsHybridAe(camera2Info),
-            supportsNightMode = DeviceCompatibilityChecker.supportsNightMode(camera2Info)
+            hasHybridAe = isApi36 && DeviceCompatibilityChecker.supportsHybridAe(camera2Info),
+            supportsNightMode = isApi36 && DeviceCompatibilityChecker.supportsNightMode(camera2Info)
         )
     }
 }

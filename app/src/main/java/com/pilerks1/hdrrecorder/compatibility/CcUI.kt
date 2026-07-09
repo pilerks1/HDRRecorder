@@ -12,44 +12,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pilerks1.hdrrecorder.ui.helpers.SystemUiManagement
 
 // --- UI Colors for Stabilization Status ---
 private val StableColor = Color(0xFF4CAF50) // A pleasant, accessible green
 private val UnstableColor = Color(0xFFE57373) // A softer, less jarring red
-
-@Composable
-private fun SystemUiManagement() {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        val window = (view.context as Activity).window
-        DisposableEffect(Unit) {
-            val insetsController = WindowCompat.getInsetsController(window, view)
-            insetsController.apply {
-                hide(WindowInsetsCompat.Type.systemBars())
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-            onDispose {
-                insetsController.show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,13 +79,14 @@ fun CompatibilityScreen(
                     CircularProgressIndicator(color = Color.White)
                 }
             } else {
+                val data = result!!
                 Text(
-                    "Camera2 Hardware Level: ${result!!.hardwareLevel}",
+                    "Camera2 Hardware Level: ${data.hardwareLevel}",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White
                 )
                 Text(
-                    "Max Supported Bitrate: ${result!!.maxBitrate}",
+                    "Max Supported Bitrate: ${data.maxBitrate}",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White
                 )
@@ -116,14 +95,14 @@ fun CompatibilityScreen(
                 // --- 4:3 Aspect Ratio Table ---
                 Text("4:3 Aspect Ratio", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
-                CompatibilityTable(tableData = result!!.tableRows4by3)
+                CompatibilityTable(tableData = data.tableRows4by3)
 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // --- 16:9 Aspect Ratio Table ---
                 Text("16:9 Aspect Ratio", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
-                CompatibilityTable(tableData = result!!.tableRows16by9)
+                CompatibilityTable(tableData = data.tableRows16by9)
 
                 Spacer(modifier = Modifier.height(24.dp))
 

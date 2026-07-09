@@ -1,5 +1,6 @@
 package com.pilerks1.hdrrecorder.ui
 
+import android.view.Surface
 import androidx.camera.core.MeteringPoint
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.Resolution
@@ -56,12 +57,14 @@ data class CameraUiState(
     val isCameraReady: Boolean = false,
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
-    val recordingTime: Long = 0L,
+
+    // Device orientation (single source of truth from OrientationEventListener).
+    // Drives both the UI layout and CameraX targetRotation.
+    val deviceRotation: Int = Surface.ROTATION_0,
 
     // Settings / Configuration
     val selectedFps: Int = 30,
     val selectedResolution: Resolution = Resolution.FHD,
-    val focusMode: String = "Auto",
 
     // Color Settings
     val colorFormat: String = "HLG",

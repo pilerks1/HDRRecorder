@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -13,12 +12,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveSliderPanel
 import com.pilerks1.hdrrecorder.ui.manualcontrols.ManualControlsGrid
-import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModel
 
 @Composable
 fun ControlsUISliders(
     uiState: CameraUiState,
-    viewModel: CameraViewModel,
+    actions: CameraActions,
     isLandscape: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -31,20 +29,20 @@ fun ControlsUISliders(
             caps = uiState.cameraCapabilities,
             isRecording = uiState.isRecording,
             isLandscape = isLandscape,
-            onClose = { viewModel.updateManualControls { it.copy(activeSlider = null) } },
-            onSetIso = { isManual, value -> viewModel.updateManualControls { it.copy(isManualIso = isManual, isoValue = value ?: it.isoValue) } },
-            onSetSs = { isManual, value -> viewModel.updateManualControls { it.copy(isManualSs = isManual, ssValueNanos = value ?: it.ssValueNanos) } },
-            onSetEv = { isManual, value -> viewModel.updateManualControls { it.copy(isManualEv = isManual, evValueIndex = value ?: it.evValueIndex) } },
-            onSetNightMode = { enabled -> viewModel.updateManualControls { it.copy(isNightModeAeEnabled = enabled) } },
-            onSetFocus = { isManual, value -> viewModel.updateManualControls { it.copy(isManualFocus = isManual, focusDistanceDiopters = value ?: it.focusDistanceDiopters) } },
-            onSetWb = { isManual, temp, tint -> viewModel.updateManualControls { it.copy(isManualWb = isManual, wbTemp = temp ?: it.wbTemp, wbTint = tint ?: it.wbTint) } },
-            onSetFps = { isManual, range -> viewModel.updateManualControls { it.copy(isManualFps = isManual, fpsRange = range ?: it.fpsRange) } },
+            onClose = { actions.onManualControlsChange { it.copy(activeSlider = null) } },
+            onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value ?: it.isoValue) } },
+            onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value ?: it.ssValueNanos) } },
+            onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: it.evValueIndex) } },
+            onSetNightMode = { enabled -> actions.onManualControlsChange { it.copy(isNightModeAeEnabled = enabled) } },
+            onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value ?: it.focusDistanceDiopters) } },
+            onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp ?: it.wbTemp, wbTint = tint ?: it.wbTint) } },
+            onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range ?: it.fpsRange) } },
             autoFps = uiState.selectedFps,
             onCycleFps = {
                 if (uiState.manualControlsState.isManualFps) {
-                    viewModel.updateManualControls { it.copy(isManualFps = false) }
+                    actions.onManualControlsChange { it.copy(isManualFps = false) }
                 } else {
-                    viewModel.onEvent(com.pilerks1.hdrrecorder.ui.CameraUiEvent.CycleFps)
+                    actions.onEvent(CameraUiEvent.CycleFps)
                 }
             }
         )
@@ -54,7 +52,7 @@ fun ControlsUISliders(
 @Composable
 fun ControlsUIButtons(
     uiState: CameraUiState,
-    viewModel: CameraViewModel,
+    actions: CameraActions,
     isLandscape: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -70,9 +68,9 @@ fun ControlsUIButtons(
                 state = uiState.manualControlsState,
                 caps = uiState.cameraCapabilities,
                 resLabel = uiState.selectedResolution.qualityName,
-                onCycleResolution = { viewModel.onEvent(CameraUiEvent.CycleResolution) },
+                onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
                 onToggleSlider = { sliderId ->
-                    viewModel.updateManualControls {
+                    actions.onManualControlsChange {
                         if (it.activeSlider == sliderId) it.copy(activeSlider = null) else it.copy(activeSlider = sliderId)
                     }
                 },
@@ -83,8 +81,8 @@ fun ControlsUIButtons(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                PauseOrSettingsButton(uiState, viewModel::onEvent)
-                RecordButton(uiState, viewModel::onEvent)
+                PauseOrSettingsButton(uiState, actions.onEvent)
+                RecordButton(uiState, actions.onEvent)
             }
         }
     } else {
@@ -99,9 +97,9 @@ fun ControlsUIButtons(
                 state = uiState.manualControlsState,
                 caps = uiState.cameraCapabilities,
                 resLabel = uiState.selectedResolution.qualityName,
-                onCycleResolution = { viewModel.onEvent(CameraUiEvent.CycleResolution) },
+                onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
                 onToggleSlider = { sliderId ->
-                    viewModel.updateManualControls {
+                    actions.onManualControlsChange {
                         if (it.activeSlider == sliderId) it.copy(activeSlider = null) else it.copy(activeSlider = sliderId)
                     }
                 },
@@ -112,8 +110,8 @@ fun ControlsUIButtons(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                PauseOrSettingsButton(uiState, viewModel::onEvent)
-                RecordButton(uiState, viewModel::onEvent)
+                PauseOrSettingsButton(uiState, actions.onEvent)
+                RecordButton(uiState, actions.onEvent)
             }
         }
     }

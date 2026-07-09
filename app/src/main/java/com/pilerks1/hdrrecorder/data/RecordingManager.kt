@@ -20,8 +20,8 @@ import androidx.core.net.toUri
 /**
  * Manages the video recording process.
  * This class handles starting, stopping, pausing, and resuming recordings.
- * It also manages the recording timer and communicates recording status
- * back to the application.
+ * Recording duration is owned by StatsManager (fed via updateHardwareStats using the
+ * hardware recording stream), so this class does not keep its own timer.
  */
 class RecordingManager(private val context: Context, private val statsManager: StatsManager) {
 
@@ -29,9 +29,6 @@ class RecordingManager(private val context: Context, private val statsManager: S
 
     // Maintain a reference to the active file descriptor so we can close it when finished
     private var activePfd: ParcelFileDescriptor? = null
-
-    private val _recordingTimeSeconds = MutableStateFlow(0L)
-    val recordingTimeSeconds = _recordingTimeSeconds.asStateFlow()
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording = _isRecording.asStateFlow()
@@ -110,7 +107,6 @@ class RecordingManager(private val context: Context, private val statsManager: S
         Log.d("RecordingManager", "stopRecording called")
         activeRecording?.stop()
         activeRecording = null
-        _recordingTimeSeconds.value = 0
         _isRecording.value = false
     }
 
@@ -145,11 +141,9 @@ class RecordingManager(private val context: Context, private val statsManager: S
                 lastBytes = bytes
                 lastDurationNanos = durationNanos
 
-                // 2. Update StatsManager with real hardware numbers and calculated bitrate
+                // 2. Update StatsManager with real hardware numbers and calculated bitrate.
+                // This hardware duration is the single source of truth for recording time.
                 statsManager.updateHardwareStats(bytes, durationNanos, bitrate)
-                
-                // 3. Update internal compatible timer
-                _recordingTimeSeconds.value = durationNanos / 1_000_000_000L
             }
             is VideoRecordEvent.Start -> {
                 Log.d("RecordingManager", "Recording started")

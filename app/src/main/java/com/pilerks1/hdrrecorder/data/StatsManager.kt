@@ -6,6 +6,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import android.os.StatFs
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import com.pilerks1.hdrrecorder.model.toSigFigs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,6 @@ class StatsManager(private val context: Context) {
     @Volatile private var currentShutterSpeed: Double = 0.0
     @Volatile private var currentFps: Int = 0
     private val totalDropped = AtomicInteger(0)
-    private val totalAdded = AtomicInteger(0)
 
     // Hardware Recording Stats
     @Volatile private var recordedBytes: Long = 0L
@@ -74,7 +74,6 @@ class StatsManager(private val context: Context) {
             currentFps = 0
             actualBitrateMbps = 0.0
             totalDropped.set(0)
-            totalAdded.set(0)
             tickCount = 0
             // Get a fresh baseline exactly when recording starts
             updateBaselineStorage()
@@ -130,8 +129,7 @@ class StatsManager(private val context: Context) {
             }
             formatStorageInfo(availableBytes, actualBitrateMbps)
         } else {
-            Triple(
-                _statsState.value.storageRemainingGb,
+            Pair(
                 _statsState.value.storageRemainingTime,
                 _statsState.value.storageRemainingFormatted
             )
@@ -146,17 +144,13 @@ class StatsManager(private val context: Context) {
             shutterSpeed = currentShutterSpeed,
             effectiveFps = currentFps,
             droppedFrames = totalDropped.get(),
-            addedFrames = totalAdded.get(),
             thermalStatus = thermalPower.thermalStatus,
             thermalStatusInt = thermalPower.thermalStatusInt,
-            thermalForecast = thermalPower.thermalForecast,
             thermalForecastStatus = thermalPower.thermalForecastStatus,
             netPowerWatts = thermalPower.netPowerWatts,
-            storageRemainingGb = storageData.first,
-            storageRemainingFormatted = storageData.third,
-            storageRemainingTime = storageData.second,
+            storageRemainingFormatted = storageData.second,
+            storageRemainingTime = storageData.first,
             actualBitrateMbps = actualBitrateMbps,
-            fileSizeWrittenBytes = recordedBytes,
             displayedFileSizeWrittenBytes = displayedSize,
             hardwareDurationNanos = hardwareDurationNanos
         )
@@ -207,14 +201,13 @@ class StatsManager(private val context: Context) {
         } catch (e: Exception) { 0L }
     }
 
-    private fun formatStorageInfo(availableBytes: Long, currentBitrate: Double): Triple<Double, String, String> {
-        val gb = availableBytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+    private fun formatStorageInfo(availableBytes: Long, currentBitrate: Double): Pair<String, String> {
         val mbValue = availableBytes.toDouble() / 1_000_000.0
-        
+
         val formattedStorage = if (mbValue >= 1000.0) {
-            formatSigFigs(mbValue / 1000.0) + " GB"
+            (mbValue / 1000.0).toSigFigs() + " GB"
         } else {
-            formatSigFigs(mbValue) + " MB"
+            mbValue.toSigFigs() + " MB"
         }
 
         val bitrateToUse = if (isRecording && currentBitrate > 0) currentBitrate else targetBitrateMbps.toDouble()
@@ -232,15 +225,8 @@ class StatsManager(private val context: Context) {
                 "${h} Hr"
             }
         }
-        
-        return Triple(gb, timeStr, formattedStorage)
-    }
 
-    private fun formatSigFigs(value: Double): String {
-        if (value <= 0) return "0.00"
-        val magnitude = kotlin.math.floor(kotlin.math.log10(value)).toInt()
-        val scale = (2 - magnitude).coerceAtLeast(0)
-        return "%.${scale}f".format(value)
+        return Pair(timeStr, formattedStorage)
     }
 
     // --- Camera Callbacks ---
@@ -275,8 +261,7 @@ class StatsManager(private val context: Context) {
                 val expected = (targetFps * duration / 1_000_000_000L).toInt()
                 val diff = videoFrameCount - expected
                 if (diff < 0) totalDropped.addAndGet(-diff)
-                else if (diff > 0) totalAdded.addAndGet(diff - 1)
-                
+
                 videoFrameCount = 0
                 lastVideoTimestampNanos = frameTimestamp
             }
@@ -287,7 +272,6 @@ class StatsManager(private val context: Context) {
         this.targetFps = targetFps
         videoFrameCount = 0
         totalDropped.set(0)
-        totalAdded.set(0)
         currentFps = 0
         lastVideoTimestampNanos = 0L
     }

@@ -7,11 +7,11 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
+import com.pilerks1.hdrrecorder.model.ThermalStatus
 
 data class ThermalPowerSnapshot(
     val thermalStatus: String = "NONE",
     val thermalStatusInt: Int = PowerManager.THERMAL_STATUS_NONE,
-    val thermalForecast: Float = 0.0f,
     val thermalForecastStatus: String = "NONE",
     val netPowerWatts: Double = 0.0
 )
@@ -89,22 +89,12 @@ class ThermalManager(private val context: Context) {
         return ThermalPowerSnapshot(
             thermalStatus = formatThermalStatus(currentThermalStatus),
             thermalStatusInt = currentThermalStatus,
-            thermalForecast = lastForecast,
             thermalForecastStatus = forecastStatus,
             netPowerWatts = netWatts
         )
     }
 
-    private fun formatThermalStatus(status: Int): String = when (status) {
-        PowerManager.THERMAL_STATUS_NONE -> "NONE"
-        PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
-        PowerManager.THERMAL_STATUS_MODERATE -> "MOD"
-        PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
-        PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
-        PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"
-        PowerManager.THERMAL_STATUS_SHUTDOWN -> "SHUTDOWN"
-        else -> "UNKNOWN"
-    }
+    private fun formatThermalStatus(status: Int): String = ThermalStatus.fromInt(status).label
 
     private fun mapHeadroomToStatus(headroom: Float): String {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
