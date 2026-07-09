@@ -3,7 +3,6 @@ package com.pilerks1.hdrrecorder.ui.viewmodels
 import android.app.Application
 import android.content.Intent
 import android.util.Log
-import android.view.Surface
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.AndroidViewModel
@@ -206,24 +205,12 @@ class CameraViewModel(
     }
 
     /**
-     * Single entry point for physical device orientation changes.
-     * Accepts raw degrees (0-359) from OrientationEventListener, quantizes to a
-     * Surface.ROTATION_* constant, and updates both the UI state and CameraX use cases
-     * atomically. Ignored during recording so orientation is frozen.
+     * Keeps CameraX aligned with the rotation of the Activity's actual display.
+     * The Activity itself is sensor-driven by Android (fullSensor), so this callback
+     * never decides or requests a screen orientation and never rebinds the camera.
      */
-    fun onDeviceOrientationChanged(degrees: Int) {
-        val rotation = when (degrees) {
-            in 45 until 135  -> Surface.ROTATION_270
-            in 135 until 225 -> Surface.ROTATION_180
-            in 225 until 315 -> Surface.ROTATION_90
-            else             -> Surface.ROTATION_0
-        }
-        // No-op if unchanged.
-        if (rotation == _uiState.value.deviceRotation) return
-        // Freeze orientation during recording (UI + CameraX metadata both locked).
+    fun onDisplayRotationChanged(rotation: Int) {
         if (_uiState.value.isRecording) return
-
-        _uiState.update { it.copy(deviceRotation = rotation) }
         cameraManager.updateRotation(rotation)
     }
 
@@ -267,14 +254,14 @@ class CameraViewModel(
         applyInterop()
     }
 
-    fun startCamera(lifecycleOwner: LifecycleOwner) {
+    fun startCamera(lifecycleOwner: LifecycleOwner, displayRotation: Int) {
         _uiState.update { it.copy(isCameraReady = false) }
 
         cameraManager.startCamera(
             lifecycleOwner = lifecycleOwner,
             onSurfaceRequest = { request -> _surfaceRequest.value = request },
             uiState = _uiState.value,
-            displayRotation = _uiState.value.deviceRotation,
+            displayRotation = displayRotation,
             onCameraBound = { control, caps ->
                 _uiState.update { it.copy(cameraCapabilities = caps) }
                 CameraInteropApplier.apply(control, _uiState.value.manualControlsState, currentInteropSettings(), caps)

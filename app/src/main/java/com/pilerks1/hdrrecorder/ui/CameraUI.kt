@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.ui
 
-import android.view.Surface
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.compose.foundation.background
@@ -20,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import android.app.Application
 import com.pilerks1.hdrrecorder.ui.settingsUI.SettingsUI
 import com.pilerks1.hdrrecorder.ui.helpers.*
@@ -30,14 +30,9 @@ import kotlinx.coroutines.delay
 /**
  * The main entry point for the Camera UI.
  *
- * Rotation architecture:
- * - DeviceOrientationListener (accelerometer) is the SINGLE source of rotation truth.
- * - It feeds raw degrees to the ViewModel, which quantizes and stores deviceRotation.
- * - isLandscape is derived from deviceRotation (NOT LocalConfiguration).
- * - CameraX targetRotation is set from the same deviceRotation value.
- * - DeviceOrientationManagement forces the Activity to match the detected tilt,
- *   overriding the OS rotation lock (rotate-while-locked behavior).
- * - During recording, orientation is frozen (ViewModel guard + Activity lock).
+ * Android owns sensor-based Activity rotation through fullSensor. The UI follows the
+ * Activity's actual window dimensions, while a DisplayListener updates CameraX rotation
+ * metadata without changing the Activity or rebinding camera use cases.
  */
 @OptIn(ExperimentalCamera2Interop::class)
 @Composable
@@ -48,6 +43,7 @@ fun CameraUI(
     )
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val view = LocalView.current
     val uiState by viewModel.uiState.collectAsState()
     val surfaceRequest by viewModel.surfaceRequest.collectAsState()
 
@@ -62,7 +58,7 @@ fun CameraUI(
     // --- Effects ---
     LaunchedEffect(uiState.cameraRebindTrigger) {
         delay(500)
-        viewModel.startCamera(lifecycleOwner)
+        viewModel.startCamera(lifecycleOwner, view.display?.rotation ?: 0)
     }
 
     // --- System UI ---
@@ -70,24 +66,11 @@ fun CameraUI(
     ScreenTimeoutManagement(isRecording = uiState.isRecording)
     HdrBrightnessManagement(shouldLimitBrightness = uiState.isForceDisplaySdrEnabled)
 
-    // --- Orientation: single source of truth ---
-    // Accelerometer-based listener fires regardless of OS rotation lock.
-    DeviceOrientationListener { degrees ->
-        viewModel.onDeviceOrientationChanged(degrees)
-    }
-    // Forces the Activity window to match the detected tilt (overrides OS lock).
-    // During recording, locks to the current orientation.
-    DeviceOrientationManagement(
-        deviceRotation = uiState.deviceRotation,
-        isRecording = uiState.isRecording
-    )
+    // --- Orientation ---
+    ActivityOrientationManagement(isRecording = uiState.isRecording)
+    DisplayRotationListener(viewModel::onDisplayRotationChanged)
 
     // --- Layout Logic ---
-    // isLandscape is derived INSIDE BoxWithConstraints so it can gate on both the
-    // ViewModel's deviceRotation AND the actual window dimensions agreeing.
-    // This prevents the 1-2 frame glitch where state says "landscape" but the
-    // Activity window hasn't physically rotated yet.
-
     // --- Main UI Layout ---
     BoxWithConstraints(
         modifier = Modifier
@@ -98,10 +81,7 @@ fun CameraUI(
         val screenHeightDp = maxHeight
         val density = LocalDensity.current
 
-        // Gate: device says landscape AND the window is actually wider than tall.
-        val deviceIsLandscape = uiState.deviceRotation == Surface.ROTATION_90
-                || uiState.deviceRotation == Surface.ROTATION_270
-        val isLandscape = deviceIsLandscape && maxWidth > maxHeight
+        val isLandscape = maxWidth > maxHeight
 
         var previewRect by remember { mutableStateOf(Rect.Zero) }
 

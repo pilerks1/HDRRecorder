@@ -25,8 +25,9 @@ import kotlinx.coroutines.delay
 
 /**
  * Camera preview composable. Accepts isLandscape from the parent (derived from the
- * single deviceRotation state) instead of reading LocalConfiguration independently,
- * so the container shape and CameraX targetRotation are always in sync.
+ * actual Activity window dimensions. CameraX target rotation follows the display through
+ * a DisplayListener, so preview layout and capture metadata stay in sync without custom
+ * sensor mapping.
  */
 @Composable
 fun PreviewUI(

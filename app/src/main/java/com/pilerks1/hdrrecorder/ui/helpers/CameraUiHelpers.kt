@@ -1,14 +1,15 @@
 package com.pilerks1.hdrrecorder.ui.helpers
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.ActivityInfo
-import android.view.OrientationEventListener
-import android.view.Surface
+import android.hardware.display.DisplayManager
 import android.view.WindowManager
 import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -16,53 +17,63 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 /**
- * Accelerometer-based device orientation listener. Fires with 0-359 degrees
- * regardless of whether the OS screen rotation lock is on.
- * This is the SINGLE source of rotation truth for the entire app.
+ * Lets Android drive the camera Activity through all four sensor orientations,
+ * even when the system-wide rotation lock is enabled.
+ *
+ * During recording, locks to whatever orientation was active when recording started.
  */
 @Composable
-fun DeviceOrientationListener(onOrientationDegrees: (Int) -> Unit) {
+fun ActivityOrientationManagement(isRecording: Boolean) {
     val context = LocalContext.current
+    val activity = context as Activity
 
-    DisposableEffect(Unit) {
-        val listener = object : OrientationEventListener(context) {
-            override fun onOrientationChanged(orientation: Int) {
-                if (orientation == ORIENTATION_UNKNOWN) return
-                onOrientationDegrees(orientation)
-            }
+    LaunchedEffect(isRecording) {
+        activity.requestedOrientation = if (isRecording) {
+            ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         }
-        listener.enable()
+    }
 
+    DisposableEffect(activity) {
         onDispose {
-            listener.disable()
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 }
 
 /**
- * Forces the Activity into the orientation that matches the current device tilt,
- * even when the user's OS rotation lock is enabled. This gives "rotate while locked"
- * behavior (like Samsung Camera).
- *
- * During recording, locks to whatever orientation was active when recording started.
+ * Observes the rotation Android actually applied to this Activity's display.
+ * This updates CameraX metadata only; it never changes Activity orientation or
+ * requests a camera rebind.
  */
 @Composable
-fun DeviceOrientationManagement(deviceRotation: Int, isRecording: Boolean) {
+fun DisplayRotationListener(onDisplayRotationChanged: (Int) -> Unit) {
     val context = LocalContext.current
-    val activity = context as Activity
+    val view = LocalView.current
+    val latestCallback = rememberUpdatedState(onDisplayRotationChanged)
 
-    LaunchedEffect(deviceRotation, isRecording) {
-        if (isRecording) {
-            // Freeze the Activity at its current orientation while recording.
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
-        } else {
-            // Force the Activity to match the detected device tilt.
-            // This overrides the OS rotation lock — the app is explicitly requesting.
-            activity.requestedOrientation = when (deviceRotation) {
-                Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    DisposableEffect(context, view) {
+        val display = view.display ?: return@DisposableEffect onDispose { }
+        val displayId = display.displayId
+        val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) = Unit
+
+            override fun onDisplayRemoved(displayId: Int) = Unit
+
+            override fun onDisplayChanged(changedDisplayId: Int) {
+                if (changedDisplayId == displayId) {
+                    latestCallback.value(view.display?.rotation ?: display.rotation)
+                }
             }
+        }
+
+        latestCallback.value(display.rotation)
+        displayManager.registerDisplayListener(listener, null)
+
+        onDispose {
+            displayManager.unregisterDisplayListener(listener)
         }
     }
 }
