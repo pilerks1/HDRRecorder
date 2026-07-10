@@ -15,6 +15,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pilerks1.hdrrecorder.data.Bitrate
 
 @Composable
 fun VideoSection(
@@ -47,7 +48,9 @@ fun VideoSection(
         OutlinedTextField(
             value = bitrate,
             onValueChange = { newValue ->
-                if (newValue.all { it.isDigit() }) onBitrateChange(newValue)
+                if (newValue.all { it.isDigit() } && (newValue.isEmpty() || Bitrate.parse(newValue) != null)) {
+                    onBitrateChange(newValue)
+                }
             },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Number,

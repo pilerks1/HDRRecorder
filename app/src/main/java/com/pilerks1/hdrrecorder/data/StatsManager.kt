@@ -41,9 +41,9 @@ class StatsManager(private val context: Context) {
     @Volatile private var currentStorageUri: String? = null
     
     // Recording configuration
-    private var isRecording = false
-    private var targetFps = 30
-    private var targetBitrateMbps = 30
+    @Volatile private var isRecording = false
+    @Volatile private var targetFps = 30
+    @Volatile private var targetBitrateMbps = 30
 
     // Internal Pacing
     private var tickCount = 0
@@ -239,8 +239,8 @@ class StatsManager(private val context: Context) {
         }
     }
 
-    private var videoFrameCount = 0
-    private var lastVideoTimestampNanos = -1L
+    @Volatile private var videoFrameCount = 0
+    @Volatile private var lastVideoTimestampNanos = -1L
 
     val videoStatsCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {

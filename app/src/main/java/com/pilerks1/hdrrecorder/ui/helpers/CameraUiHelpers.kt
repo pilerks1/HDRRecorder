@@ -89,6 +89,13 @@ fun HdrBrightnessManagement(shouldLimitBrightness: Boolean) {
                 window?.setDesiredHdrHeadroom(if (shouldLimitBrightness) 1.0f else 0.0f)
             }
         }
+        DisposableEffect(window) {
+            onDispose {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    window?.setDesiredHdrHeadroom(0.0f)
+                }
+            }
+        }
     }
 }
 

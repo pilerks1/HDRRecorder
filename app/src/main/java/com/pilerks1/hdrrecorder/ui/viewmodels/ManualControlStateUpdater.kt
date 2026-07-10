@@ -8,9 +8,15 @@ import com.pilerks1.hdrrecorder.ui.ManualControlsState
  * Evaluates hardware capabilities and enforces AE fallbacks natively.
  */
 object ManualControlStateUpdater {
+    data class ExposureDefaults(
+        val isoValue: Int?,
+        val shutterNanos: Long?
+    )
+
     fun calculateNextState(
         oldState: ManualControlsState,
         caps: CameraCapabilities?,
+        exposureDefaults: ExposureDefaults,
         updater: (ManualControlsState) -> ManualControlsState
     ): Pair<ManualControlsState, Boolean> {
         var newState = updater(oldState)
@@ -23,17 +29,23 @@ object ManualControlStateUpdater {
             newState = newState.copy(lastManualExposureInput = "SS")
         }
         
-        // If device lacks Hybrid AE, manual ISO or SS forces AE off, which locks exposure controls.
-        if (caps?.hasHybridAe == false) {
-            // If either ISO or SS changed from auto to manual, force both to manual
-            if ((newState.isManualIso && !oldState.isManualIso) ||
-                (newState.isManualSs && !oldState.isManualSs)) {
-                newState = newState.copy(isManualIso = true, isManualSs = true)
-            }
-            // If either ISO or SS changed from manual to auto, force both to auto
-            else if ((!newState.isManualIso && oldState.isManualIso) ||
-                     (!newState.isManualSs && oldState.isManualSs)) {
+        // Each Android 16 Hybrid AE priority mode is independently optional. A lone manual
+        // control may stay hybrid only when the matching priority mode is advertised; otherwise
+        // force both sensor controls manual so the request remains complete and predictable.
+        if (caps != null) {
+            if (returnsToAutoFromUnsupportedHybrid(oldState, newState, caps)) {
                 newState = newState.copy(isManualIso = false, isManualSs = false)
+            } else if (requiresFullManualExposure(newState, caps)) {
+                newState = newState.copy(
+                    isManualIso = true,
+                    isManualSs = true,
+                    isoValue = newState.isoValue
+                        ?: exposureDefaults.isoValue
+                        ?: caps.isoRange?.lower,
+                    ssValueNanos = newState.ssValueNanos
+                        ?: exposureDefaults.shutterNanos
+                        ?: caps.ssRangeNanos?.lower
+                )
             }
         }
         
@@ -43,6 +55,12 @@ object ManualControlStateUpdater {
         }
         if (caps?.supportsCCT == false && (newState.isManualWb || newState.wbTemp != null || newState.wbTint != null)) {
             newState = newState.copy(isManualWb = false, wbTemp = null, wbTint = null)
+        } else if (caps?.supportsCCT == true && newState.isManualWb) {
+            val temperatureRange = caps.cctTemperatureRange
+            newState = newState.copy(
+                wbTemp = newState.wbTemp ?: temperatureRange?.let { (it.lower + it.upper) / 2 },
+                wbTint = newState.wbTint ?: 0
+            )
         }
         
         if (newState.isManualFps != oldState.isManualFps) {
@@ -50,5 +68,25 @@ object ManualControlStateUpdater {
         }
         
         return Pair(newState, triggersRebind)
+    }
+
+    private fun requiresFullManualExposure(
+        state: ManualControlsState,
+        caps: CameraCapabilities
+    ): Boolean = when {
+        !state.isManualIso && !state.isManualSs -> false
+        state.isManualIso && state.isManualSs -> true
+        state.isManualIso -> !caps.supportsIsoPriorityAe
+        else -> !caps.supportsShutterPriorityAe
+    }
+
+    private fun returnsToAutoFromUnsupportedHybrid(
+        oldState: ManualControlsState,
+        newState: ManualControlsState,
+        caps: CameraCapabilities
+    ): Boolean {
+        val turnedOffIso = oldState.isManualIso && !newState.isManualIso
+        val turnedOffShutter = oldState.isManualSs && !newState.isManualSs
+        return (turnedOffIso || turnedOffShutter) && requiresFullManualExposure(newState, caps)
     }
 }

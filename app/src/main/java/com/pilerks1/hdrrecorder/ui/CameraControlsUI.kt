@@ -68,6 +68,7 @@ fun ControlsUIButtons(
                 state = uiState.manualControlsState,
                 caps = uiState.cameraCapabilities,
                 resLabel = uiState.selectedResolution.qualityName,
+                isRecording = uiState.isRecording,
                 onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
                 onToggleSlider = { sliderId ->
                     actions.onManualControlsChange {
@@ -97,6 +98,7 @@ fun ControlsUIButtons(
                 state = uiState.manualControlsState,
                 caps = uiState.cameraCapabilities,
                 resLabel = uiState.selectedResolution.qualityName,
+                isRecording = uiState.isRecording,
                 onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
                 onToggleSlider = { sliderId ->
                     actions.onManualControlsChange {

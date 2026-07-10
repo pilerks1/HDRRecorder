@@ -20,7 +20,9 @@ data class CameraCapabilities(
     val focusMinDistanceDiopters: Float = 0f,
     val fpsRanges: List<Range<Int>> = emptyList(),
     val supportsCCT: Boolean = false,
-    val hasHybridAe: Boolean = false,
+    val cctTemperatureRange: Range<Int>? = null,
+    val supportsShutterPriorityAe: Boolean = false,
+    val supportsIsoPriorityAe: Boolean = false,
     val supportsNightMode: Boolean = false
 )
 
@@ -53,6 +55,11 @@ object CameraCapabilitiesManager {
         // API 36-only capability probes are gated here so the checker's @RequiresApi(36)
         // methods are never called on older devices.
         val isApi36 = Build.VERSION.SDK_INT >= 36
+        val cctTemperatureRange = if (isApi36) {
+            DeviceCompatibilityChecker.getCctTemperatureRange(camera2Info)
+        } else {
+            null
+        }
 
         return CameraCapabilities(
             isoRange = isoRange,
@@ -61,8 +68,10 @@ object CameraCapabilitiesManager {
             evStep = evStep,
             focusMinDistanceDiopters = minFocus,
             fpsRanges = fpsRanges,
-            supportsCCT = DeviceCompatibilityChecker.supportsCct(camera2Info),
-            hasHybridAe = isApi36 && DeviceCompatibilityChecker.supportsHybridAe(camera2Info),
+            supportsCCT = isApi36 && DeviceCompatibilityChecker.supportsCct(camera2Info),
+            cctTemperatureRange = cctTemperatureRange,
+            supportsShutterPriorityAe = isApi36 && DeviceCompatibilityChecker.supportsShutterPriorityAe(camera2Info),
+            supportsIsoPriorityAe = isApi36 && DeviceCompatibilityChecker.supportsIsoPriorityAe(camera2Info),
             supportsNightMode = isApi36 && DeviceCompatibilityChecker.supportsNightMode(camera2Info)
         )
     }

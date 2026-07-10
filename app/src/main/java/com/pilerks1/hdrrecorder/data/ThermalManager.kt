@@ -17,6 +17,22 @@ data class ThermalPowerSnapshot(
 )
 
 /**
+ * Converts the raw battery-current property to amps.
+ *
+ * Android documents BATTERY_PROPERTY_CURRENT_NOW as microamps, but some OEM fuel gauges
+ * report milliamps instead. Values below 20,000 are treated as milliamps so those devices
+ * retain useful wattage reporting while standard microamp readings continue to work.
+ */
+internal fun batteryCurrentToAmps(rawCurrent: Long): Double? {
+    if (rawCurrent == Long.MIN_VALUE) return null
+    return if (kotlin.math.abs(rawCurrent) < 20_000L) {
+        rawCurrent.toDouble() / 1_000.0
+    } else {
+        rawCurrent.toDouble() / 1_000_000.0
+    }
+}
+
+/**
  * Manages thermal and power monitoring.
  * Refactored to be passive: it no longer has its own timer.
  * Its state is queried by the unified timer in StatsManager.
@@ -70,12 +86,7 @@ class ThermalManager(private val context: Context) {
         // Poll current amperage (fast memory read on most modern devices)
         val rawCurrent = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
 
-        // Auto-detect if the device is using mA or uA
-        val currentAmps = if (kotlin.math.abs(rawCurrent) < 20000) {
-            rawCurrent.toDouble() / 1000.0
-        } else {
-            rawCurrent.toDouble() / 1_000_000.0
-        }
+        val currentAmps = batteryCurrentToAmps(rawCurrent) ?: 0.0
 
         // Use cached voltage from the broadcast receiver
         val netWatts = (cachedVoltageMv.toDouble() / 1000.0) * currentAmps

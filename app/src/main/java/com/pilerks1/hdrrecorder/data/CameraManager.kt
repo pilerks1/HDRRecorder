@@ -113,7 +113,7 @@ class CameraManager(
 
         // --- Video Capture Use Case Configuration ---
         // Bitrate string conversion and fail-safe
-        val bitrateMbps = uiState.bitrate.toIntOrNull() ?: 30
+        val bitrateMbps = Bitrate.parseOrDefault(uiState.bitrate)
         val bitrateBps = bitrateMbps * 1_000_000
         val qualitySelector = QualitySelector.from(uiState.selectedResolution.quality)
 

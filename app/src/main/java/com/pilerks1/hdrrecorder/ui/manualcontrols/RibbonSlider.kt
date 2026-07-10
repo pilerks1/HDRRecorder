@@ -47,10 +47,10 @@ fun RibbonSlider(
     value: Float, // 0f..1f
     onValueChange: (Float) -> Unit,
     isLandscape: Boolean,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
     labelString: String = "",
-    ticks: List<Pair<Float, String>>, // fraction -> label
-    modifier: Modifier = Modifier
+    ticks: List<Pair<Float, String>> // fraction -> label
 ) {
     // ==========================================
     // RIBBON SLIDER INTERNAL LAYOUT CONTROLS
@@ -71,7 +71,7 @@ fun RibbonSlider(
     val animatable = remember { Animatable(value) }
     val velocityTracker = remember { VelocityTracker() }
     
-    var dragAccumulator by remember { mutableStateOf(value) }
+    var dragAccumulator by remember { mutableFloatStateOf(value) }
     
     val sliderContent = @Composable {
         Box(

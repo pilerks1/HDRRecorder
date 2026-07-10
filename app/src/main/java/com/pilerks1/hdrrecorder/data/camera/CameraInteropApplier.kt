@@ -80,7 +80,7 @@ object CameraInteropApplier {
         }
 
         if (needsManualAe) {
-            if (capabilities?.hasHybridAe == true && Build.VERSION.SDK_INT >= 36) {
+            if (canUseHybridAe(state, capabilities) && Build.VERSION.SDK_INT >= 36) {
                 applyHybridAe(builder, state)
             } else {
                 // Device lacks Hybrid AE: manual ISO/SS forces AE off entirely.
@@ -100,12 +100,12 @@ object CameraInteropApplier {
             builder.clearCaptureRequestOption(CaptureRequest.CONTROL_AE_PRIORITY_MODE)
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
-            if (state.lastManualExposureInput == "SS" || (state.isManualSs && !state.isManualIso)) {
+            if (state.isManualSs) {
                 builder.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AE_PRIORITY_MODE,
                     CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY
                 )
-            } else if (state.lastManualExposureInput == "ISO" || (state.isManualIso && !state.isManualSs)) {
+            } else if (state.isManualIso) {
                 builder.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AE_PRIORITY_MODE,
                     CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY
@@ -128,9 +128,18 @@ object CameraInteropApplier {
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
         }
-        if (capabilities?.hasHybridAe == true && Build.VERSION.SDK_INT >= 36) {
+        if ((capabilities?.supportsShutterPriorityAe == true || capabilities?.supportsIsoPriorityAe == true) &&
+            Build.VERSION.SDK_INT >= 36
+        ) {
             builder.clearCaptureRequestOption(CaptureRequest.CONTROL_AE_PRIORITY_MODE)
         }
+    }
+
+    private fun canUseHybridAe(state: ManualControlsState, capabilities: CameraCapabilities?): Boolean = when {
+        state.isManualIso && state.isManualSs -> false
+        state.isManualIso -> capabilities?.supportsIsoPriorityAe == true
+        state.isManualSs -> capabilities?.supportsShutterPriorityAe == true
+        else -> false
     }
 
     // --- Focus ---
@@ -159,11 +168,13 @@ object CameraInteropApplier {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
             builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_MODE, CameraMetadata.COLOR_CORRECTION_MODE_CCT)
             builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, state.wbTemp)
+            builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, state.wbTint ?: 0)
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
             builder.clearCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_MODE)
             if (Build.VERSION.SDK_INT >= 36) {
                 builder.clearCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE)
+                builder.clearCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TINT)
             }
         }
     }

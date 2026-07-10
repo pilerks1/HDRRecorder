@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.ui.settingsUI
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -13,6 +12,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.net.URLDecoder
+import androidx.core.net.toUri
 
 @Composable
 fun StorageSection(
@@ -74,7 +74,7 @@ fun StorageSection(
 private fun getReadablePath(uriString: String?): String {
     if (uriString.isNullOrEmpty()) return "Default (DCIM/HDR-Recorder)"
     return try {
-        val uri = Uri.parse(uriString)
+        val uri = uriString.toUri()
         val path = uri.path ?: uri.toString()
         // Strips out the initial provider jargon so it just shows the folder structure
         URLDecoder.decode(path, "UTF-8").substringAfter("tree/")

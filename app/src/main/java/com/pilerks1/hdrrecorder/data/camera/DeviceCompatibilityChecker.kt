@@ -2,7 +2,6 @@ package com.pilerks1.hdrrecorder.data.camera
 
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
-import android.os.Build
 import androidx.annotation.OptIn
 import androidx.annotation.RequiresApi
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -17,28 +16,47 @@ object DeviceCompatibilityChecker {
      * Checks if the device supports precise Color Correction Temperature (CCT).
      * Requires Android 16 (API 36) and hardware support for COLOR_CORRECTION_MODE_CCT.
      */
+    @RequiresApi(36)
     @OptIn(ExperimentalCamera2Interop::class)
     fun supportsCct(camera2Info: Camera2CameraInfo): Boolean {
-        if (Build.VERSION.SDK_INT < 36) return false
-
         return try {
-            val caps = camera2Info.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-            caps?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING) == true
+            val modes = camera2Info.getCameraCharacteristic(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES)
+            val temperatureRange = getCctTemperatureRange(camera2Info)
+            modes?.contains(CameraMetadata.COLOR_CORRECTION_MODE_CCT) == true &&
+                temperatureRange != null
         } catch (e: Exception) {
             false
         }
     }
 
-    /**
-     * Checks if the device supports Hybrid AE (Sensor Exposure Time Priority / Sensor Sensitivity Priority).
-     * Requires Android 16 (API 36) and the priority modes to be explicitly listed.
-     */
     @RequiresApi(36)
     @OptIn(ExperimentalCamera2Interop::class)
-    fun supportsHybridAe(camera2Info: Camera2CameraInfo): Boolean {
+    fun getCctTemperatureRange(camera2Info: Camera2CameraInfo) =
+        try {
+            camera2Info.getCameraCharacteristic(CameraCharacteristics.COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE)
+        } catch (e: Exception) {
+            null
+        }
+
+    /** Checks support for Android 16 shutter-priority Hybrid AE. */
+    @RequiresApi(36)
+    @OptIn(ExperimentalCamera2Interop::class)
+    fun supportsShutterPriorityAe(camera2Info: Camera2CameraInfo): Boolean {
         return try {
             val modes = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES)
             modes?.contains(CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY) == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Checks support for Android 16 ISO-priority Hybrid AE. */
+    @RequiresApi(36)
+    @OptIn(ExperimentalCamera2Interop::class)
+    fun supportsIsoPriorityAe(camera2Info: Camera2CameraInfo): Boolean {
+        return try {
+            val modes = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES)
+            modes?.contains(CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY) == true
         } catch (e: Exception) {
             false
         }

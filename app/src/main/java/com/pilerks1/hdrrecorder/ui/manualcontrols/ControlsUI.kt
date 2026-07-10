@@ -32,6 +32,7 @@ fun ManualControlsGrid(
     state: ManualControlsState,
     caps: CameraCapabilities?,
     resLabel: String,
+    isRecording: Boolean,
     onCycleResolution: () -> Unit,
     onToggleSlider: (String) -> Unit,
     isLandscape: Boolean,
@@ -42,8 +43,7 @@ fun ManualControlsGrid(
 
     // Build the data list of available buttons based on capabilities.
     val buttons = buildList {
-        // Resolution is always available.
-        add(ButtonSpec(resLabel, isActive = false, onClick = onCycleResolution))
+        if (!isRecording) add(ButtonSpec(resLabel, isActive = false, onClick = onCycleResolution))
         if (caps?.ssRangeNanos != null) add(ButtonSpec("SS", state.activeSlider == "SS") { onToggleSlider("SS") })
         if ((caps?.focusMinDistanceDiopters ?: 0f) > 0f) add(ButtonSpec("FOC", state.activeSlider == "FOC") { onToggleSlider("FOC") })
         if (caps?.supportsCCT == true) add(ButtonSpec("WB", state.activeSlider == "WB") { onToggleSlider("WB") })
@@ -184,7 +184,12 @@ fun ActiveSliderPanel(
             }
             "EV" -> {
                 val progress = SliderMath.mapEvIndexToProgress(state.evValueIndex, caps)
-                val aeIsOff = (state.isManualSs || state.isManualIso) && (caps?.hasHybridAe == false)
+                val aeIsOff = when {
+                    state.isManualSs && state.isManualIso -> true
+                    state.isManualSs -> caps?.supportsShutterPriorityAe != true
+                    state.isManualIso -> caps?.supportsIsoPriorityAe != true
+                    else -> false
+                }
                 val isManualEv = state.evValueIndex != 0
                 BaseSlider(
                     label = "EV",
@@ -219,12 +224,12 @@ fun ActiveSliderPanel(
             "WB" -> {
                 StandardSlider(
                     label = "WB",
-                    progress = if (state.wbTemp != null) SliderMath.mapWbTempToProgress(state.wbTemp) else 0.5f,
+                    progress = if (state.wbTemp != null) SliderMath.mapWbTempToProgress(state.wbTemp, caps) else 0.5f,
                     isManual = state.isManualWb,
                     isLandscape = isLandscape,
                     caps = caps,
                     onToggleAuto = { onSetWb(!state.isManualWb, null, state.wbTint) },
-                    onValueChange = { onSetWb(true, SliderMath.mapProgressToWbTemp(it), state.wbTint) }
+                    onValueChange = { onSetWb(true, SliderMath.mapProgressToWbTemp(it, caps), state.wbTint) }
                 )
             }
             "TINT" -> {

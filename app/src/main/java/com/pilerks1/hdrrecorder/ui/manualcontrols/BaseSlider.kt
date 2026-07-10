@@ -20,6 +20,7 @@ fun BaseSlider(
     caps: CameraCapabilities?,
     onValueChange: (Float) -> Unit,
     primaryButtonText: String,
+    modifier: Modifier = Modifier,
     primaryButtonEnabled: Boolean = true,
     primaryButtonColor: Color,
     primaryButtonTextColor: Color,
@@ -28,8 +29,7 @@ fun BaseSlider(
     secondaryButtonEnabled: Boolean = false,
     secondaryButtonColor: Color = Color.DarkGray,
     secondaryButtonTextColor: Color = Color.LightGray,
-    onSecondaryButtonClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    onSecondaryButtonClick: (() -> Unit)? = null
 ) {
     val buttons = @Composable {
         Button(

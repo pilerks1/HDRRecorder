@@ -49,8 +49,7 @@ fun PreviewUI(
         // VIEWFINDER CONTAINER: Constrained to 4:3 Aspect Ratio
         Box(
             modifier = Modifier
-                .aspectRatio(if (isLandscape) 4f / 3f else 3f / 4f)
-                .then(if (isLandscape) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
+                .fillMaxSize()
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         val factory = SurfaceOrientedMeteringPointFactory(

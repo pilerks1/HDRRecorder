@@ -21,13 +21,13 @@ import kotlin.math.roundToInt
 fun RotatingRangeSlider(
     value: ClosedFloatingPointRange<Float>,
     onValueChange: (ClosedFloatingPointRange<Float>) -> Unit,
-    onValueChangeFinished: (() -> Unit)? = null,
     valueRange: ClosedFloatingPointRange<Float>,
     isLandscape: Boolean,
+    modifier: Modifier = Modifier,
+    onValueChangeFinished: (() -> Unit)? = null,
     enabled: Boolean = true,
     isActive: Boolean = true,
-    ticks: List<Pair<Float, String>> = emptyList(),
-    modifier: Modifier = Modifier
+    ticks: List<Pair<Float, String>> = emptyList()
 ) {
     val textRotation = if (isLandscape) 90f else 0f
 

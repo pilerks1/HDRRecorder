@@ -10,6 +10,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
 import androidx.core.net.toUri
 import com.pilerks1.hdrrecorder.data.CameraManager
+import com.pilerks1.hdrrecorder.data.Bitrate
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
@@ -63,7 +64,7 @@ class CameraViewModel(
 
         collectStats()
         collectRecordingState()
-        statsManager.setRecordingState(false, _uiState.value.selectedFps, _uiState.value.bitrate.toIntOrNull() ?: 30, _uiState.value.storageUri)
+        statsManager.setRecordingState(false, _uiState.value.selectedFps, Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
     }
 
     /**
@@ -156,7 +157,13 @@ class CameraViewModel(
             }
 
             is CameraUiEvent.SetNoiseReduction -> updateSettingsAndSave(requiresHardRebind = false) { it.copy(isNoiseReductionEnabled = event.enabled) }
-            is CameraUiEvent.SetBitrate -> updateSettingsAndSave(requiresHardRebind = true) { it.copy(bitrate = event.bitrate) }
+            is CameraUiEvent.SetBitrate -> {
+                if (event.bitrate.isEmpty() || Bitrate.parse(event.bitrate) != null) {
+                    updateSettingsAndSave(requiresHardRebind = Bitrate.parse(event.bitrate) != null) {
+                        it.copy(bitrate = event.bitrate)
+                    }
+                }
+            }
             is CameraUiEvent.SetStabilization -> updateSettingsAndSave(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
 
             // SDR Hacks (auto-saved)
@@ -217,12 +224,10 @@ class CameraViewModel(
     private fun toggleRecording() {
         if (_uiState.value.isRecording) {
             recordingManager.stopRecording()
-            statsManager.stopFpsCalculation()
-            statsManager.setRecordingState(false, _uiState.value.selectedFps, _uiState.value.bitrate.toIntOrNull() ?: 30, _uiState.value.storageUri)
         } else {
             val videoCapture = cameraManager.videoCapture ?: return
-            val targetBitrate = _uiState.value.bitrate.toIntOrNull() ?: 30
-            recordingManager.startRecording(videoCapture, _uiState.value.storageUri)
+            val targetBitrate = Bitrate.parseOrDefault(_uiState.value.bitrate)
+            if (!recordingManager.startRecording(videoCapture, _uiState.value.storageUri)) return
             statsManager.startFpsCalculation(_uiState.value.selectedFps)
             statsManager.setRecordingState(true, _uiState.value.selectedFps, targetBitrate, _uiState.value.storageUri)
         }
@@ -241,7 +246,18 @@ class CameraViewModel(
         val caps = _uiState.value.cameraCapabilities
         var triggersRebind = false
         _uiState.update {
-            val (newState, rebind) = ManualControlStateUpdater.calculateNextState(it.manualControlsState, caps, updater)
+            val exposureDefaults = ManualControlStateUpdater.ExposureDefaults(
+                isoValue = it.stats.iso.takeIf { iso -> iso > 0 },
+                shutterNanos = it.stats.shutterSpeed
+                    .takeIf { shutterSpeed -> shutterSpeed > 0.0 }
+                    ?.let { shutterSpeed -> (1_000_000_000.0 / shutterSpeed).toLong() }
+            )
+            val (newState, rebind) = ManualControlStateUpdater.calculateNextState(
+                it.manualControlsState,
+                caps,
+                exposureDefaults,
+                updater
+            )
             triggersRebind = rebind
 
             it.copy(
@@ -316,6 +332,16 @@ class CameraViewModel(
         viewModelScope.launch {
             recordingManager.isRecording.collect { isRecording ->
                 _uiState.update { it.copy(isRecording = isRecording, isPaused = if (!isRecording) false else it.isPaused) }
+                if (!isRecording) {
+                    statsManager.stopFpsCalculation()
+                    val state = _uiState.value
+                    statsManager.setRecordingState(
+                        recording = false,
+                        targetFps = state.selectedFps,
+                        targetBitrate = Bitrate.parseOrDefault(state.bitrate),
+                        storageUri = state.storageUri
+                    )
+                }
             }
         }
     }

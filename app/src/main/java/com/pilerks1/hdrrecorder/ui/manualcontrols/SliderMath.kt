@@ -49,7 +49,7 @@ object SliderMath {
                 return String.format(java.util.Locale.US, "%.2f", progress)
             }
             "WB" -> {
-                val temp = mapProgressToWbTemp(progress)
+                val temp = mapProgressToWbTemp(progress, caps)
                 "$temp"
             }
             "Tint" -> {
@@ -101,9 +101,9 @@ object SliderMath {
                     ticks.add(rawFraction to formatSliderValue(label, rawFraction, caps))
                 }
                 "WB" -> {
-                    val temp = mapProgressToWbTemp(rawFraction)
+                    val temp = mapProgressToWbTemp(rawFraction, caps)
                     val roundedTemp = (Math.round(temp / 5.0) * 5).toInt()
-                    val trueFraction = mapWbTempToProgress(roundedTemp)
+                    val trueFraction = mapWbTempToProgress(roundedTemp, caps)
                     ticks.add(trueFraction to formatSliderValue(label, trueFraction, caps))
                 }
                 "Tint" -> {
@@ -164,27 +164,29 @@ object SliderMath {
         return (progress * maxDiopters).coerceIn(0f, maxDiopters)
     }
 
-    fun mapProgressToWbTemp(progress: Float): Int {
-        val minKelvin = 2000
-        val maxKelvin = 8000
+    fun mapProgressToWbTemp(progress: Float, caps: CameraCapabilities?): Int {
+        val range = caps?.cctTemperatureRange
+        val minKelvin = range?.lower ?: 2000
+        val maxKelvin = range?.upper ?: 8000
         return (minKelvin + progress * (maxKelvin - minKelvin)).roundToInt().coerceIn(minKelvin, maxKelvin)
     }
     
-    fun mapWbTempToProgress(temp: Int): Float {
-        val minKelvin = 2000
-        val maxKelvin = 8000
+    fun mapWbTempToProgress(temp: Int, caps: CameraCapabilities?): Float {
+        val range = caps?.cctTemperatureRange
+        val minKelvin = range?.lower ?: 2000
+        val maxKelvin = range?.upper ?: 8000
         return ((temp - minKelvin).toFloat() / (maxKelvin - minKelvin).toFloat()).coerceIn(0f, 1f)
     }
 
     fun mapProgressToWbTint(progress: Float): Int {
-        val minTint = -100
-        val maxTint = 100
+        val minTint = -50
+        val maxTint = 50
         return (minTint + progress * (maxTint - minTint)).roundToInt().coerceIn(minTint, maxTint)
     }
     
     fun mapWbTintToProgress(tint: Int): Float {
-        val minTint = -100
-        val maxTint = 100
+        val minTint = -50
+        val maxTint = 50
         return ((tint - minTint).toFloat() / (maxTint - minTint).toFloat()).coerceIn(0f, 1f)
     }
 
