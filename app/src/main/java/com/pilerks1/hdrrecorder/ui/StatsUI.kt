@@ -10,6 +10,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import com.pilerks1.hdrrecorder.model.ThermalForecast
 import com.pilerks1.hdrrecorder.model.ThermalStatus
 import com.pilerks1.hdrrecorder.model.toSigFigs
 import kotlin.math.roundToInt
@@ -51,7 +52,7 @@ fun StatsUI(
                 )
                 StatRow(
                     label = "DROP",
-                    value = if (isRecording) "${stats.droppedFrames}" else "N/A"
+                    value = if (isRecording && stats.canMeasureDroppedFrames) "${stats.droppedFrames}" else "N/A"
                 )
             }
 
@@ -71,17 +72,17 @@ fun StatsUI(
 
             // --- SECTION: THERMAL ---
             StatGroup("THERMAL") {
-                val statusColor = getThermalColorByInt(stats.thermalStatusInt)
+                val statusColor = getThermalColorByStatus(stats.thermalStatus)
                 StatRow(
                     label = "STATE",
-                    value = stats.thermalStatus,
+                    value = stats.thermalStatus.label,
                     valueColor = statusColor
                 )
 
-                val forecastColor = getThermalColorByStatus(stats.thermalForecastStatus)
+                val forecastColor = getThermalForecastColor(stats.thermalForecast)
                 StatRow(
                     label = "IN 60s",
-                    value = stats.thermalForecastStatus,
+                    value = stats.thermalForecast.toDisplayText(),
                     valueColor = forecastColor
                 )
 
@@ -113,8 +114,8 @@ private fun StatGroup(
     }
 }
 
-private fun getThermalColorByInt(status: Int): Color {
-    return when (ThermalStatus.fromInt(status)) {
+private fun getThermalColorByStatus(status: ThermalStatus): Color {
+    return when (status) {
         ThermalStatus.NONE -> Color.White
         ThermalStatus.LIGHT -> Color.Yellow
         ThermalStatus.MODERATE -> Color(0xFFFFA500)
@@ -122,24 +123,21 @@ private fun getThermalColorByInt(status: Int): Color {
     }
 }
 
-private fun getThermalColorByStatus(status: String): Color {
-    val floatVal = status.toFloatOrNull()
-    return if (floatVal != null) {
+private fun getThermalForecastColor(forecast: ThermalForecast): Color = when (forecast) {
+    is ThermalForecast.Status -> getThermalColorByStatus(forecast.status)
+    is ThermalForecast.Headroom -> {
         when {
-            floatVal >= 1.0f -> Color.Red
-            floatVal >= 0.85f -> Color(0xFFFFA500) // Orange
-            floatVal >= 0.75f -> Color.Yellow
+            forecast.value >= 1.0f -> Color.Red
+            forecast.value >= 0.85f -> Color(0xFFFFA500) // Orange
+            forecast.value >= 0.75f -> Color.Yellow
             else -> Color.White
         }
-    } else {
-        // Match against the shared ThermalStatus vocabulary by its label.
-        when (status) {
-            ThermalStatus.NONE.label -> Color.White
-            ThermalStatus.LIGHT.label -> Color.Yellow
-            ThermalStatus.MODERATE.label -> Color(0xFFFFA500)
-            else -> Color.Red // SEVERE, CRITICAL, EMERGENCY, SHUTDOWN
-        }
     }
+}
+
+private fun ThermalForecast.toDisplayText(): String = when (this) {
+    is ThermalForecast.Status -> status.label
+    is ThermalForecast.Headroom -> "%.2f".format(value)
 }
 
 @Composable

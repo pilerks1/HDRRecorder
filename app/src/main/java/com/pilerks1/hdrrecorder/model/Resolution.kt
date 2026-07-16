@@ -1,14 +1,21 @@
 package com.pilerks1.hdrrecorder.model
 
-import androidx.camera.video.Quality
-
 /**
  * Defines the available video recording resolutions.
- * This sealed class provides a type-safe way to represent resolution options,
+ * This enum provides a type-safe way to represent resolution options,
  * preventing the use of error-prone strings.
  */
-sealed class Resolution(val quality: Quality, val qualityName: String) {
-    object FHD : Resolution(Quality.FHD, "FHD")
-    object UHD : Resolution(Quality.UHD, "UHD")
-    object HIGHEST : Resolution(Quality.HIGHEST, "MAX")
+enum class Resolution(val qualityName: String, val storageId: String) {
+    FHD("FHD", "fhd"),
+    UHD("UHD", "uhd"),
+    HIGHEST("MAX", "highest");
+
+    fun next(): Resolution = entries[(ordinal + 1) % entries.size]
+
+    companion object {
+        /** Supports both the stable ID and values stored by older app versions. */
+        fun fromStorageId(value: String?): Resolution? = entries.firstOrNull {
+            it.storageId == value || it.qualityName == value || (it == HIGHEST && value == "Highest")
+        }
+    }
 }

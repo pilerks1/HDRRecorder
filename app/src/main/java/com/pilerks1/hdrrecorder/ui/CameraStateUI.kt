@@ -1,6 +1,8 @@
 package com.pilerks1.hdrrecorder.ui
 
 import androidx.camera.core.MeteringPoint
+import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.Resolution
 import android.util.Range
@@ -9,7 +11,7 @@ import android.util.Range
  * Represents the state of all manual controls.
  */
 data class ManualControlsState(
-    val activeSlider: String? = null,
+    val activeSlider: ManualControl? = null,
     
     // ISO
     val isManualIso: Boolean = false,
@@ -18,9 +20,6 @@ data class ManualControlsState(
     // Shutter Speed (SS)
     val isManualSs: Boolean = false,
     val ssValueNanos: Long? = null,
-    
-    // Hybrid AE Tracking
-    val lastManualExposureInput: String? = null,
     
     // Exposure Value (EV)
     val isManualEv: Boolean = false,
@@ -42,15 +41,31 @@ data class ManualControlsState(
 )
 
 /**
+ * A preview tap is an explicit request for point-based automatic 3A. Manual sensor, focus, and
+ * white-balance overrides must be cleared before CameraX can calibrate at the tapped point.
+ */
+internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState {
+    if (!isManualIso && !isManualSs && !isManualEv && !isManualFocus && !isManualWb) return this
+
+    return copy(
+        isManualIso = false,
+        isManualSs = false,
+        isManualEv = false,
+        evValueIndex = 0,
+        isManualFocus = false,
+        isManualWb = false,
+        wbTemp = null,
+        wbTint = null
+    )
+}
+
+/**
  * Represents the current state of the Camera UI.
  */
 data class CameraUiState(
     // Presets
     val currentPresetName: String = "Default",
     val presetsList: List<String> = listOf("Default"),
-
-    // State trigger to command camera rebinds safely
-    val cameraRebindTrigger: Int = 0,
 
     // Camera Status
     val isCameraReady: Boolean = false,
@@ -62,8 +77,8 @@ data class CameraUiState(
     val selectedResolution: Resolution = Resolution.FHD,
 
     // Color Settings
-    val colorFormat: String = "HLG",
-    val gammaCurve: String = "Auto",
+    val colorFormat: ColorFormat = ColorFormat.HLG,
+    val gammaCurve: GammaCurve = GammaCurve.AUTO,
 
     // Manual Controls
     val manualControlsState: ManualControlsState = ManualControlsState(),
@@ -91,34 +106,34 @@ data class CameraUiState(
 /**
  * Represents all possible user actions or events that can occur in the Camera UI.
  */
-sealed class CameraUiEvent {
+sealed interface CameraUiEvent {
     // Preset Events
-    data class SavePreset(val name: String) : CameraUiEvent()
-    data class LoadPreset(val name: String) : CameraUiEvent()
-    data class DeletePreset(val name: String) : CameraUiEvent()
-    object DeleteAllPresets : CameraUiEvent()
+    data class SavePreset(val name: String) : CameraUiEvent
+    data class LoadPreset(val name: String) : CameraUiEvent
+    data class DeletePreset(val name: String) : CameraUiEvent
+    data object DeleteAllPresets : CameraUiEvent
 
-    object ToggleRecording : CameraUiEvent()
-    object TogglePause : CameraUiEvent()
-    object CycleFps : CameraUiEvent()
-    object CycleResolution : CameraUiEvent()
+    data object ToggleRecording : CameraUiEvent
+    data object TogglePause : CameraUiEvent
+    data object CycleFps : CameraUiEvent
+    data object CycleResolution : CameraUiEvent
 
     // Color Events
-    object CycleColorFormat : CameraUiEvent()
-    object CycleGammaCurve : CameraUiEvent()
+    data object CycleColorFormat : CameraUiEvent
+    data object CycleGammaCurve : CameraUiEvent
 
-    data class SetNoiseReduction(val enabled: Boolean) : CameraUiEvent()
-    data class SetBitrate(val bitrate: String) : CameraUiEvent()
-    data class SetStabilization(val enabled: Boolean) : CameraUiEvent()
+    data class SetNoiseReduction(val enabled: Boolean) : CameraUiEvent
+    data class SetBitrate(val bitrate: String) : CameraUiEvent
+    data class SetStabilization(val enabled: Boolean) : CameraUiEvent
 
     // SDR Hack Events
-    data class SetSdrToneMap(val enabled: Boolean) : CameraUiEvent()
-    data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent()
+    data class SetSdrToneMap(val enabled: Boolean) : CameraUiEvent
+    data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent
 
     // Storage Event
-    data class SetStorageUri(val uri: String) : CameraUiEvent()
+    data class SetStorageUri(val uri: String) : CameraUiEvent
 
-    data class TapToMeter(val meteringPoint: MeteringPoint) : CameraUiEvent()
-    object OpenSettings : CameraUiEvent()
-    object CloseSettings : CameraUiEvent()
+    data class TapToMeter(val meteringPoint: MeteringPoint) : CameraUiEvent
+    data object OpenSettings : CameraUiEvent
+    data object CloseSettings : CameraUiEvent
 }

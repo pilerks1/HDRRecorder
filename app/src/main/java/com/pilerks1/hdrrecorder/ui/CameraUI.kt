@@ -25,7 +25,6 @@ import com.pilerks1.hdrrecorder.ui.settingsUI.SettingsUI
 import com.pilerks1.hdrrecorder.ui.helpers.*
 import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModel
 import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModelFactory
-import kotlinx.coroutines.delay
 
 /**
  * The main entry point for the Camera UI.
@@ -56,9 +55,8 @@ fun CameraUI(
     }
 
     // --- Effects ---
-    LaunchedEffect(uiState.cameraRebindTrigger) {
-        delay(500)
-        viewModel.startCamera(lifecycleOwner, view.display?.rotation ?: 0)
+    LaunchedEffect(lifecycleOwner) {
+        viewModel.attachCamera(lifecycleOwner, view.display?.rotation ?: 0)
     }
 
     // --- System UI ---
@@ -91,6 +89,7 @@ fun CameraUI(
             stats = uiState.stats,
             isRecording = uiState.isRecording,
             isLandscape = isLandscape,
+            hasExpandedSlider = uiState.manualControlsState.activeSlider != null,
             onEvent = actions.onEvent,
             modifier = Modifier
                 .align(Alignment.Center)

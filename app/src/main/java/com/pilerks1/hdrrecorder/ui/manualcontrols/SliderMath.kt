@@ -2,6 +2,7 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import com.pilerks1.hdrrecorder.ui.ManualControl
 import kotlin.math.log2
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -9,13 +10,13 @@ import kotlin.math.roundToLong
 
 object SliderMath {
 
-    fun formatSliderValue(label: String, progress: Float, caps: CameraCapabilities?): String {
-        return when (label) {
-            "ISO" -> {
+    fun formatSliderValue(control: ManualControl, progress: Float, caps: CameraCapabilities?): String {
+        return when (control) {
+            ManualControl.ISO -> {
                 val iso = mapProgressToIso(progress, caps)
                 "${iso ?: "Auto"}"
             }
-            "SS" -> {
+            ManualControl.SHUTTER -> {
                 val ssNanos = mapProgressToShutter(progress, caps)
                 if (ssNanos == null) return "Auto"
                 
@@ -27,7 +28,7 @@ object SliderMath {
                     "${(seconds * 10).roundToInt() / 10.0}s"
                 }
             }
-            "EV" -> {
+            ManualControl.EXPOSURE_COMPENSATION -> {
                 val evIndex = mapProgressToEvIndex(progress, caps)
                 val step = caps?.evStep?.toFloat() ?: (1f / 3f)
                 val evValue = evIndex * step
@@ -44,40 +45,40 @@ object SliderMath {
                     if (whole == 0) "$sign$rem/3" else "$sign${Math.abs(whole)} $rem/3"
                 }
             }
-            "Focus" -> {
+            ManualControl.FOCUS -> {
                 if (progress <= 0.01f) return "INF"
                 return String.format(java.util.Locale.US, "%.2f", progress)
             }
-            "WB" -> {
+            ManualControl.WHITE_BALANCE -> {
                 val temp = mapProgressToWbTemp(progress, caps)
                 "$temp"
             }
-            "Tint" -> {
+            ManualControl.TINT -> {
                 val tint = mapProgressToWbTint(progress)
                 val sign = if (tint > 0) "+" else ""
                 "$sign$tint"
             }
-            else -> ""
+            ManualControl.FPS -> ""
         }
     }
 
-    fun getTickPositions(label: String, caps: CameraCapabilities?): List<Pair<Float, String>> {
+    fun getTickPositions(control: ManualControl, caps: CameraCapabilities?): List<Pair<Float, String>> {
         val ticks = mutableListOf<Pair<Float, String>>()
         val totalTicks = 18
         
         for (i in 0..totalTicks) {
             val rawFraction = i / totalTicks.toFloat()
             
-            when (label) {
-                "ISO" -> {
+            when (control) {
+                ManualControl.ISO -> {
                     val iso = mapProgressToIso(rawFraction, caps)
                     if (iso != null) {
                         val roundedDisplayIso = (Math.round(iso / 5.0) * 5).toInt()
                         val trueFraction = mapIsoToProgress(roundedDisplayIso, caps)
-                        ticks.add(trueFraction to formatSliderValue(label, trueFraction, caps))
+                        ticks.add(trueFraction to formatSliderValue(control, trueFraction, caps))
                     }
                 }
-                "SS" -> {
+                ManualControl.SHUTTER -> {
                     val ss = mapProgressToShutter(rawFraction, caps)
                     if (ss != null) {
                         val seconds = ss / 1_000_000_000.0
@@ -86,32 +87,33 @@ object SliderMath {
                             val roundedFrac = (Math.round(frac / 5.0) * 5).toInt()
                             val roundedExposure = 1.0 / roundedFrac
                             val trueFraction = mapShutterToProgress((roundedExposure * 1_000_000_000).toLong(), caps)
-                            ticks.add(trueFraction to formatSliderValue(label, trueFraction, caps))
+                            ticks.add(trueFraction to formatSliderValue(control, trueFraction, caps))
                         } else {
-                            ticks.add(rawFraction to formatSliderValue(label, rawFraction, caps))
+                            ticks.add(rawFraction to formatSliderValue(control, rawFraction, caps))
                         }
                     }
                 }
-                "EV" -> {
+                ManualControl.EXPOSURE_COMPENSATION -> {
                     val evIndex = mapProgressToEvIndex(rawFraction, caps)
                     val trueFraction = mapEvIndexToProgress(evIndex, caps)
-                    ticks.add(trueFraction to formatSliderValue(label, trueFraction, caps))
+                    ticks.add(trueFraction to formatSliderValue(control, trueFraction, caps))
                 }
-                "Focus" -> {
-                    ticks.add(rawFraction to formatSliderValue(label, rawFraction, caps))
+                ManualControl.FOCUS -> {
+                    ticks.add(rawFraction to formatSliderValue(control, rawFraction, caps))
                 }
-                "WB" -> {
+                ManualControl.WHITE_BALANCE -> {
                     val temp = mapProgressToWbTemp(rawFraction, caps)
                     val roundedTemp = (Math.round(temp / 5.0) * 5).toInt()
                     val trueFraction = mapWbTempToProgress(roundedTemp, caps)
-                    ticks.add(trueFraction to formatSliderValue(label, trueFraction, caps))
+                    ticks.add(trueFraction to formatSliderValue(control, trueFraction, caps))
                 }
-                "Tint" -> {
+                ManualControl.TINT -> {
                     val tint = mapProgressToWbTint(rawFraction)
                     val roundedTint = (Math.round(tint / 5.0) * 5).toInt()
                     val trueFraction = mapWbTintToProgress(roundedTint)
-                    ticks.add(trueFraction to formatSliderValue(label, trueFraction, caps))
+                    ticks.add(trueFraction to formatSliderValue(control, trueFraction, caps))
                 }
+                ManualControl.FPS -> Unit
             }
         }
         return ticks.distinctBy { it.first }

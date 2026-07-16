@@ -42,7 +42,7 @@ class StatsManager(private val context: Context) {
     
     // Recording configuration
     @Volatile private var isRecording = false
-    @Volatile private var targetFps = 30
+    @Volatile private var targetFps: Int? = null
     @Volatile private var targetBitrateMbps = 30
 
     // Internal Pacing
@@ -61,7 +61,7 @@ class StatsManager(private val context: Context) {
         updateBaselineStorage()
     }
 
-    fun setRecordingState(recording: Boolean, targetFps: Int, targetBitrate: Int, storageUri: String? = null) {
+    fun setRecordingState(recording: Boolean, targetFps: Int?, targetBitrate: Int, storageUri: String? = null) {
         this.isRecording = recording
         this.targetFps = targetFps
         this.targetBitrateMbps = targetBitrate
@@ -144,9 +144,9 @@ class StatsManager(private val context: Context) {
             shutterSpeed = currentShutterSpeed,
             effectiveFps = currentFps,
             droppedFrames = totalDropped.get(),
+            canMeasureDroppedFrames = targetFps != null,
             thermalStatus = thermalPower.thermalStatus,
-            thermalStatusInt = thermalPower.thermalStatusInt,
-            thermalForecastStatus = thermalPower.thermalForecastStatus,
+            thermalForecast = thermalPower.thermalForecast,
             netPowerWatts = thermalPower.netPowerWatts,
             storageRemainingFormatted = storageData.second,
             storageRemainingTime = storageData.first,
@@ -256,11 +256,9 @@ class StatsManager(private val context: Context) {
             val duration = frameTimestamp - lastVideoTimestampNanos
             
             if (duration >= 1_000_000_000L) {
-                currentFps = ((videoFrameCount * 1_000_000_000L) / duration).toInt()
-                
-                val expected = (targetFps * duration / 1_000_000_000L).toInt()
-                val diff = videoFrameCount - expected
-                if (diff < 0) totalDropped.addAndGet(-diff)
+                val sample = FrameRateEstimator.sample(videoFrameCount, duration, targetFps)
+                currentFps = sample.effectiveFps
+                sample.droppedFrames?.let(totalDropped::addAndGet)
 
                 videoFrameCount = 0
                 lastVideoTimestampNanos = frameTimestamp
@@ -268,7 +266,7 @@ class StatsManager(private val context: Context) {
         }
     }
 
-    fun startFpsCalculation(targetFps: Int) {
+    fun startFpsCalculation(targetFps: Int?) {
         this.targetFps = targetFps
         videoFrameCount = 0
         totalDropped.set(0)

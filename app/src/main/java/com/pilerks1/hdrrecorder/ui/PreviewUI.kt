@@ -14,12 +14,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.camera.viewfinder.compose.MutableCoordinateTransformer
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import kotlinx.coroutines.delay
 
@@ -35,10 +38,14 @@ fun PreviewUI(
     stats: StatsSnapshot,
     isRecording: Boolean,
     isLandscape: Boolean,
+    hasExpandedSlider: Boolean,
     onEvent: (CameraUiEvent) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
+    val coordinateTransformer = remember { MutableCoordinateTransformer() }
+    val sliderPanelThickness = if (isLandscape) 128.dp else 64.dp
+    val sliderPanelThicknessPx = with(LocalDensity.current) { sliderPanelThickness.toPx() }
 
     // ROOT CONTAINER: Always fills the space allocated by parent
     // and centers the content (the viewfinder).
@@ -50,13 +57,24 @@ fun PreviewUI(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(surfaceRequest, isLandscape, hasExpandedSlider, sliderPanelThicknessPx) {
                     detectTapGestures { offset ->
+                        val isInsideExpandedSlider = hasExpandedSlider && if (isLandscape) {
+                            offset.x >= size.width - sliderPanelThicknessPx
+                        } else {
+                            offset.y >= size.height - sliderPanelThicknessPx
+                        }
+                        if (isInsideExpandedSlider) return@detectTapGestures
+
+                        val request = surfaceRequest ?: return@detectTapGestures
+                        val surfaceOffset = with(coordinateTransformer) {
+                            Offset(offset.x, offset.y).transform()
+                        }
                         val factory = SurfaceOrientedMeteringPointFactory(
-                            size.width.toFloat(),
-                            size.height.toFloat()
+                            request.resolution.width.toFloat(),
+                            request.resolution.height.toFloat()
                         )
-                        val point = factory.createPoint(offset.x, offset.y)
+                        val point = factory.createPoint(surfaceOffset.x, surfaceOffset.y)
                         onEvent(CameraUiEvent.TapToMeter(point))
                         meterCirclePosition = DpOffset(offset.x.toDp(), offset.y.toDp())
                     }
@@ -65,6 +83,7 @@ fun PreviewUI(
             if (surfaceRequest != null) {
                 CameraXViewfinder(
                     surfaceRequest = surfaceRequest,
+                    coordinateTransformer = coordinateTransformer,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {

@@ -18,7 +18,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
+
+/** Shared edge and action-group spacing for the manual control strip. */
+val SecondaryControlsSpacing = 8.dp
 
 /** Describes one grid button: what it shows, whether it's active, and what it does. */
 private data class ButtonSpec(
@@ -34,30 +38,32 @@ fun ManualControlsGrid(
     resLabel: String,
     isRecording: Boolean,
     onCycleResolution: () -> Unit,
-    onToggleSlider: (String) -> Unit,
+    onToggleSlider: (ManualControl) -> Unit,
     isLandscape: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val secondaryEdgePadding = 8.dp
     val secondaryButtonDimension = 52.dp
 
     // Build the data list of available buttons based on capabilities.
+    val sliderButton = { control: ManualControl ->
+        ButtonSpec(control.gridLabel, state.activeSlider == control) { onToggleSlider(control) }
+    }
     val buttons = buildList {
         if (!isRecording) add(ButtonSpec(resLabel, isActive = false, onClick = onCycleResolution))
-        if (caps?.ssRangeNanos != null) add(ButtonSpec("SS", state.activeSlider == "SS") { onToggleSlider("SS") })
-        if ((caps?.focusMinDistanceDiopters ?: 0f) > 0f) add(ButtonSpec("FOC", state.activeSlider == "FOC") { onToggleSlider("FOC") })
-        if (caps?.supportsCCT == true) add(ButtonSpec("WB", state.activeSlider == "WB") { onToggleSlider("WB") })
-        if (caps?.fpsRanges?.isNotEmpty() == true) add(ButtonSpec("FPS", state.activeSlider == "FPS") { onToggleSlider("FPS") })
-        if (caps?.isoRange != null) add(ButtonSpec("ISO", state.activeSlider == "ISO") { onToggleSlider("ISO") })
-        if (caps?.evRange != null) add(ButtonSpec("EV", state.activeSlider == "EV") { onToggleSlider("EV") })
-        if (caps?.supportsCCT == true) add(ButtonSpec("TINT", state.activeSlider == "TINT") { onToggleSlider("TINT") })
+        if (caps?.ssRangeNanos != null) add(sliderButton(ManualControl.SHUTTER))
+        if ((caps?.focusMinDistanceDiopters ?: 0f) > 0f) add(sliderButton(ManualControl.FOCUS))
+        if (caps?.supportsCCT == true) add(sliderButton(ManualControl.WHITE_BALANCE))
+        if (caps?.fpsRanges?.isNotEmpty() == true) add(sliderButton(ManualControl.FPS))
+        if (caps?.isoRange != null) add(sliderButton(ManualControl.ISO))
+        if (caps?.evRange != null) add(sliderButton(ManualControl.EXPOSURE_COMPENSATION))
+        if (caps?.supportsCCT == true) add(sliderButton(ManualControl.TINT))
     }
 
     if (isLandscape) {
         Row(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
-            modifier = modifier.padding(end = secondaryEdgePadding).fillMaxHeight()
+            modifier = modifier.padding(end = SecondaryControlsSpacing).fillMaxHeight()
         ) {
             // Split into two columns dynamically, centered.
             val col1Count = (buttons.size + 1) / 2
@@ -78,7 +84,7 @@ fun ManualControlsGrid(
         Column(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = modifier.padding(bottom = secondaryEdgePadding).fillMaxWidth()
+            modifier = modifier.padding(bottom = SecondaryControlsSpacing).fillMaxWidth()
         ) {
             val row1Count = (buttons.size + 1) / 2
             val buttonModifier = Modifier.fillMaxHeight().width(secondaryButtonDimension)
@@ -136,7 +142,7 @@ fun ActiveSliderPanel(
     onCycleFps: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (state.activeSlider == null) return
+    val activeControl = state.activeSlider ?: return
 
     val screenEdgePadding = 8.dp
     val innerThicknessPadding = if (isLandscape) 8.dp else 4.dp
@@ -159,10 +165,10 @@ fun ActiveSliderPanel(
     }
 
     Box(modifier = panelModifier, contentAlignment = Alignment.Center) {
-        when (state.activeSlider) {
-            "ISO" -> {
+        when (activeControl) {
+            ManualControl.ISO -> {
                 StandardSlider(
-                    label = "ISO",
+                    control = ManualControl.ISO,
                     progress = if (state.isoValue != null) SliderMath.mapIsoToProgress(state.isoValue, caps) else 0.5f,
                     isManual = state.isManualIso,
                     isLandscape = isLandscape,
@@ -171,9 +177,9 @@ fun ActiveSliderPanel(
                     onValueChange = { onSetIso(true, SliderMath.mapProgressToIso(it, caps)) }
                 )
             }
-            "SS" -> {
+            ManualControl.SHUTTER -> {
                 StandardSlider(
-                    label = "SS",
+                    control = ManualControl.SHUTTER,
                     progress = if (state.ssValueNanos != null) SliderMath.mapShutterToProgress(state.ssValueNanos, caps) else 0.5f,
                     isManual = state.isManualSs,
                     isLandscape = isLandscape,
@@ -182,7 +188,7 @@ fun ActiveSliderPanel(
                     onValueChange = { onSetSs(true, SliderMath.mapProgressToShutter(it, caps)) }
                 )
             }
-            "EV" -> {
+            ManualControl.EXPOSURE_COMPENSATION -> {
                 val progress = SliderMath.mapEvIndexToProgress(state.evValueIndex, caps)
                 val aeIsOff = when {
                     state.isManualSs && state.isManualIso -> true
@@ -192,7 +198,7 @@ fun ActiveSliderPanel(
                 }
                 val isManualEv = state.evValueIndex != 0
                 BaseSlider(
-                    label = "EV",
+                    control = ManualControl.EXPOSURE_COMPENSATION,
                     value = progress,
                     isLandscape = isLandscape,
                     caps = caps,
@@ -210,9 +216,9 @@ fun ActiveSliderPanel(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            "FOC" -> {
+            ManualControl.FOCUS -> {
                 StandardSlider(
-                    label = "Focus",
+                    control = ManualControl.FOCUS,
                     progress = if (state.focusDistanceDiopters != null) (state.focusDistanceDiopters / (caps?.focusMinDistanceDiopters ?: 10f)).coerceIn(0f, 1f) else 0f,
                     isManual = state.isManualFocus,
                     isLandscape = isLandscape,
@@ -221,9 +227,9 @@ fun ActiveSliderPanel(
                     onValueChange = { onSetFocus(true, SliderMath.mapProgressToFocus(it, caps)) }
                 )
             }
-            "WB" -> {
+            ManualControl.WHITE_BALANCE -> {
                 StandardSlider(
-                    label = "WB",
+                    control = ManualControl.WHITE_BALANCE,
                     progress = if (state.wbTemp != null) SliderMath.mapWbTempToProgress(state.wbTemp, caps) else 0.5f,
                     isManual = state.isManualWb,
                     isLandscape = isLandscape,
@@ -232,9 +238,9 @@ fun ActiveSliderPanel(
                     onValueChange = { onSetWb(true, SliderMath.mapProgressToWbTemp(it, caps), state.wbTint) }
                 )
             }
-            "TINT" -> {
+            ManualControl.TINT -> {
                 StandardSlider(
-                    label = "Tint",
+                    control = ManualControl.TINT,
                     progress = if (state.wbTint != null) SliderMath.mapWbTintToProgress(state.wbTint) else 0.5f,
                     isManual = state.isManualWb,
                     isLandscape = isLandscape,
@@ -243,7 +249,7 @@ fun ActiveSliderPanel(
                     onValueChange = { onSetWb(true, state.wbTemp, SliderMath.mapProgressToWbTint(it)) }
                 )
             }
-            "FPS" -> {
+            ManualControl.FPS -> {
                 // If not manual, default to the first available range or a standard 30fps fallback
                 val defaultRange = Range(30, 30)
                 val currentRange = state.fpsRange ?: defaultRange
@@ -268,7 +274,7 @@ fun ActiveSliderPanel(
 
 @Composable
 fun StandardSlider(
-    label: String,
+    control: ManualControl,
     progress: Float,
     isManual: Boolean,
     isLandscape: Boolean,
@@ -277,7 +283,7 @@ fun StandardSlider(
     onValueChange: (Float) -> Unit
 ) {
     BaseSlider(
-        label = label,
+        control = control,
         value = progress,
         isLandscape = isLandscape,
         caps = caps,

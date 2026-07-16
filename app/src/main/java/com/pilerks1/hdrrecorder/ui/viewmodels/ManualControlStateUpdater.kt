@@ -22,13 +22,6 @@ object ManualControlStateUpdater {
         var newState = updater(oldState)
         var triggersRebind = false
         
-        // Track Hybrid AE priority based on what was just modified
-        if (newState.isManualIso != oldState.isManualIso || newState.isoValue != oldState.isoValue) {
-            newState = newState.copy(lastManualExposureInput = "ISO")
-        } else if (newState.isManualSs != oldState.isManualSs || newState.ssValueNanos != oldState.ssValueNanos) {
-            newState = newState.copy(lastManualExposureInput = "SS")
-        }
-        
         // Each Android 16 Hybrid AE priority mode is independently optional. A lone manual
         // control may stay hybrid only when the matching priority mode is advertised; otherwise
         // force both sensor controls manual so the request remains complete and predictable.

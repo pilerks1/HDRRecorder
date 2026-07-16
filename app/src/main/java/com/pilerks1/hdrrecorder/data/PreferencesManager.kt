@@ -2,6 +2,8 @@ package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import org.json.JSONObject
@@ -34,9 +36,9 @@ class PreferencesManager(context: Context) {
     fun savePreset(name: String, state: CameraUiState) {
         val json = JSONObject().apply {
             put("fps", state.selectedFps)
-            put("res", state.selectedResolution.qualityName)
-            put("color", state.colorFormat)
-            put("gamma", state.gammaCurve)
+            put("res", state.selectedResolution.storageId)
+            put("color", state.colorFormat.storageId)
+            put("gamma", state.gammaCurve.storageId)
             put("nr", state.isNoiseReductionEnabled)
             put("bitrate", state.bitrate)
             put("stab", state.isStabilizationEnabled)
@@ -56,19 +58,16 @@ class PreferencesManager(context: Context) {
         val str = prefs.getString("preset_$name", null) ?: return defaultState
         return try {
             val json = JSONObject(str)
-            val resName = json.optString("res", defaultState.selectedResolution.qualityName)
-            val resolution = when(resName) {
-                "FHD" -> Resolution.FHD
-                "UHD" -> Resolution.UHD
-                "Highest" -> Resolution.HIGHEST
-                else -> Resolution.FHD
-            }
+            val resolution = Resolution.fromStorageId(json.optString("res", ""))
+                ?: defaultState.selectedResolution
 
             defaultState.copy(
                 selectedFps = json.optInt("fps", defaultState.selectedFps),
                 selectedResolution = resolution,
-                colorFormat = json.optString("color", defaultState.colorFormat),
-                gammaCurve = json.optString("gamma", defaultState.gammaCurve),
+                colorFormat = ColorFormat.fromStorageId(json.optString("color", ""))
+                    ?: defaultState.colorFormat,
+                gammaCurve = GammaCurve.fromStorageId(json.optString("gamma", ""))
+                    ?: defaultState.gammaCurve,
                 isNoiseReductionEnabled = json.optBoolean("nr", defaultState.isNoiseReductionEnabled),
                 bitrate = json.optString("bitrate", defaultState.bitrate),
                 isStabilizationEnabled = json.optBoolean("stab", defaultState.isStabilizationEnabled),

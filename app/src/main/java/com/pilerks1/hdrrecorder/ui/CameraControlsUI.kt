@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveSliderPanel
 import com.pilerks1.hdrrecorder.ui.manualcontrols.ManualControlsGrid
+import com.pilerks1.hdrrecorder.ui.manualcontrols.SecondaryControlsSpacing
 
 @Composable
 fun ControlsUISliders(
@@ -70,13 +71,15 @@ fun ControlsUIButtons(
                 resLabel = uiState.selectedResolution.qualityName,
                 isRecording = uiState.isRecording,
                 onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
-                onToggleSlider = { sliderId ->
+                onToggleSlider = { control ->
                     actions.onManualControlsChange {
-                        if (it.activeSlider == sliderId) it.copy(activeSlider = null) else it.copy(activeSlider = sliderId)
+                        if (it.activeSlider == control) it.copy(activeSlider = null) else it.copy(activeSlider = control)
                     }
                 },
                 isLandscape = isLandscape,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(bottom = SecondaryControlsSpacing)
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -100,13 +103,15 @@ fun ControlsUIButtons(
                 resLabel = uiState.selectedResolution.qualityName,
                 isRecording = uiState.isRecording,
                 onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
-                onToggleSlider = { sliderId ->
+                onToggleSlider = { control ->
                     actions.onManualControlsChange {
-                        if (it.activeSlider == sliderId) it.copy(activeSlider = null) else it.copy(activeSlider = sliderId)
+                        if (it.activeSlider == control) it.copy(activeSlider = null) else it.copy(activeSlider = control)
                     }
                 },
                 isLandscape = isLandscape,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = SecondaryControlsSpacing)
             )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,

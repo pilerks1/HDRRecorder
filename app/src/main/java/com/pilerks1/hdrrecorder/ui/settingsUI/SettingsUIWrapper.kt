@@ -10,6 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.GammaCurve
 
 /**
  * Settings UI overlay.
@@ -34,9 +36,9 @@ fun SettingsUI(
     onStabilizationChange: (Boolean) -> Unit,
 
     // Color Settings
-    colorFormat: String,
+    colorFormat: ColorFormat,
     onColorFormatChange: () -> Unit,
-    gammaCurve: String,
+    gammaCurve: GammaCurve,
     onGammaCurveChange: () -> Unit,
 
     // SDR Hacks

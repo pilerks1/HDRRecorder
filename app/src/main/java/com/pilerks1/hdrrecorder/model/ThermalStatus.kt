@@ -30,3 +30,9 @@ enum class ThermalStatus(val label: String) {
         }
     }
 }
+
+/** A forecast is either an Android thermal status or the numeric headroom supplied by the device. */
+sealed interface ThermalForecast {
+    data class Status(val status: ThermalStatus) : ThermalForecast
+    data class Headroom(val value: Float) : ThermalForecast
+}

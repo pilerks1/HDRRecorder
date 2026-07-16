@@ -19,8 +19,9 @@ import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoCapabilities
+import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
+import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.Resolution
-import kotlinx.coroutines.guava.await
 import android.media.CamcorderProfile
 import android.os.Build
 import android.media.EncoderProfiles
@@ -42,7 +43,7 @@ class CcManager(private val context: Context) {
      * This must be called before getCompatibilityData.
      */
     private suspend fun initializeCamera() {
-        cameraProvider = ProcessCameraProvider.getInstance(context).await()
+        cameraProvider = CameraProviderRepository.awaitProvider(context)
         // Get the CameraInfo for the first available back camera.
         cameraInfo = cameraProvider.availableCameraInfos.first {
             it.lensFacing == CameraSelector.LENS_FACING_BACK
@@ -93,9 +94,9 @@ class CcManager(private val context: Context) {
                 val row = CompatibilityResult.TableRow(
                     quality = resolution.qualityName,
                     resolution = "N/A",
-                    fps24 = checkFpsSupport(resolution.quality, 24, ratioEnum, supportedHdrProfiles),
-                    fps30 = checkFpsSupport(resolution.quality, 30, ratioEnum, supportedHdrProfiles),
-                    fps60 = checkFpsSupport(resolution.quality, 60, ratioEnum, supportedHdrProfiles)
+                    fps24 = checkFpsSupport(resolution.toCameraXQuality(), 24, ratioEnum, supportedHdrProfiles),
+                    fps30 = checkFpsSupport(resolution.toCameraXQuality(), 30, ratioEnum, supportedHdrProfiles),
+                    fps60 = checkFpsSupport(resolution.toCameraXQuality(), 60, ratioEnum, supportedHdrProfiles)
                 )
 
 

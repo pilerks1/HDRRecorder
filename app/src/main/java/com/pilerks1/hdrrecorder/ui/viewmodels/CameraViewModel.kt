@@ -16,10 +16,11 @@ import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.camera.CameraInteropApplier
 import com.pilerks1.hdrrecorder.data.camera.InteropSettings
-import com.pilerks1.hdrrecorder.model.Resolution
+import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
+import com.pilerks1.hdrrecorder.ui.resetForTapToMeter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,9 +42,12 @@ class CameraViewModel(
     private val recordingManager: RecordingManager
 ) : AndroidViewModel(application) {
 
-    // --- Dirty Flags for Settings UI ---
+    // --- Deferred settings and camera binding state ---
     private var pendingHardRebind = false
     private var pendingSoftRebind = false
+    private var cameraLifecycleOwner: LifecycleOwner? = null
+    private var lastDisplayRotation = 0
+    private var cameraRebindJob: kotlinx.coroutines.Job? = null
 
     // --- UI State ---
     private val _uiState = MutableStateFlow(CameraUiState())
@@ -64,7 +68,7 @@ class CameraViewModel(
 
         collectStats()
         collectRecordingState()
-        statsManager.setRecordingState(false, _uiState.value.selectedFps, Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
+        statsManager.setRecordingState(false, requestedFpsForStats(), Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
     }
 
     /**
@@ -78,9 +82,8 @@ class CameraViewModel(
             // Defer changes while in settings UI
             if (requiresHardRebind) pendingHardRebind = true else pendingSoftRebind = true
         } else {
-            // Apply immediately if not in settings UI
             if (requiresHardRebind) {
-                _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
+                scheduleCameraRebind(debounce = true)
             } else {
                 applyInterop()
             }
@@ -135,24 +138,21 @@ class CameraViewModel(
             }
             is CameraUiEvent.CycleResolution -> {
                 updateSettingsAndSave(requiresHardRebind = true) { state ->
-                    val newRes = when (state.selectedResolution) {
-                        is Resolution.FHD -> Resolution.UHD
-                        is Resolution.UHD -> Resolution.HIGHEST
-                        is Resolution.HIGHEST -> Resolution.FHD
-                    }
-                    state.copy(selectedResolution = newRes)
+                    state.copy(selectedResolution = state.selectedResolution.next())
                 }
             }
 
             // Format & Gamma (auto-saved)
             is CameraUiEvent.CycleColorFormat -> updateSettingsAndSave(requiresHardRebind = true) { state ->
-                val newFormat = when (state.colorFormat) { "HLG" -> "HDR10"; "HDR10" -> "HDR10+"; "HDR10+" -> "DB 8.4"; "DB 8.4" -> "Unspec"; else -> "HLG" }
-                state.copy(colorFormat = newFormat, gammaCurve = if (newFormat != "Unspec") "Auto" else state.gammaCurve)
+                val newFormat = state.colorFormat.next()
+                state.copy(
+                    colorFormat = newFormat,
+                    gammaCurve = if (newFormat.supportsGammaCurveSelection) state.gammaCurve else GammaCurve.AUTO
+                )
             }
-            is CameraUiEvent.CycleGammaCurve -> if (_uiState.value.colorFormat == "Unspec") {
+            is CameraUiEvent.CycleGammaCurve -> if (_uiState.value.colorFormat.supportsGammaCurveSelection) {
                 updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    val newGamma = when (state.gammaCurve) { "Auto" -> "HLG"; "HLG" -> "PQ"; "PQ" -> "Custom"; else -> "Auto" }
-                    state.copy(gammaCurve = newGamma)
+                    state.copy(gammaCurve = state.gammaCurve.next())
                 }
             }
 
@@ -189,13 +189,21 @@ class CameraViewModel(
                 _uiState.update { it.copy(storageUri = event.uri) }
             }
 
-            is CameraUiEvent.TapToMeter -> cameraManager.tapToMeter(event.meteringPoint)
+            is CameraUiEvent.TapToMeter -> {
+                val manualControls = _uiState.value.manualControlsState
+                val automaticControls = manualControls.resetForTapToMeter()
+                if (automaticControls != manualControls) {
+                    _uiState.update { it.copy(manualControlsState = automaticControls) }
+                    applyInterop()
+                }
+                cameraManager.tapToMeter(event.meteringPoint)
+            }
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
             is CameraUiEvent.CloseSettings -> {
                 _uiState.update { it.copy(isSettingsSheetVisible = false) }
 
                 if (pendingHardRebind) {
-                    _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
+                    scheduleCameraRebind(debounce = false)
                 } else if (pendingSoftRebind) {
                     applyInterop()
                 }
@@ -208,7 +216,7 @@ class CameraViewModel(
 
     private fun triggerRebindForPresets() {
         if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
-        else _uiState.update { it.copy(cameraRebindTrigger = it.cameraRebindTrigger + 1) }
+        else scheduleCameraRebind(debounce = true)
     }
 
     /**
@@ -217,6 +225,7 @@ class CameraViewModel(
      * never decides or requests a screen orientation and never rebinds the camera.
      */
     fun onDisplayRotationChanged(rotation: Int) {
+        lastDisplayRotation = rotation
         if (_uiState.value.isRecording) return
         cameraManager.updateRotation(rotation)
     }
@@ -228,8 +237,9 @@ class CameraViewModel(
             val videoCapture = cameraManager.videoCapture ?: return
             val targetBitrate = Bitrate.parseOrDefault(_uiState.value.bitrate)
             if (!recordingManager.startRecording(videoCapture, _uiState.value.storageUri)) return
-            statsManager.startFpsCalculation(_uiState.value.selectedFps)
-            statsManager.setRecordingState(true, _uiState.value.selectedFps, targetBitrate, _uiState.value.storageUri)
+            val requestedFps = requestedFpsForStats()
+            statsManager.startFpsCalculation(requestedFps)
+            statsManager.setRecordingState(true, requestedFps, targetBitrate, _uiState.value.storageUri)
         }
     }
 
@@ -261,45 +271,57 @@ class CameraViewModel(
             triggersRebind = rebind
 
             it.copy(
-                manualControlsState = newState,
-                cameraRebindTrigger = if (rebind && !it.isSettingsSheetVisible) it.cameraRebindTrigger + 1 else it.cameraRebindTrigger
+                manualControlsState = newState
             )
         }
 
         if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
+        else if (triggersRebind) scheduleCameraRebind(debounce = true)
         applyInterop()
     }
 
-    fun startCamera(lifecycleOwner: LifecycleOwner, displayRotation: Int) {
-        _uiState.update { it.copy(isCameraReady = false) }
+    /** Attaches the current lifecycle and starts the initial bind without an arbitrary delay. */
+    fun attachCamera(lifecycleOwner: LifecycleOwner, displayRotation: Int) {
+        val lifecycleChanged = cameraLifecycleOwner !== lifecycleOwner
+        cameraLifecycleOwner = lifecycleOwner
+        lastDisplayRotation = displayRotation
+        scheduleCameraRebind(debounce = !lifecycleChanged)
+    }
 
-        cameraManager.startCamera(
-            lifecycleOwner = lifecycleOwner,
-            onSurfaceRequest = { request -> _surfaceRequest.value = request },
-            uiState = _uiState.value,
-            displayRotation = displayRotation,
-            onCameraBound = { control, caps ->
-                _uiState.update { it.copy(cameraCapabilities = caps) }
-                CameraInteropApplier.apply(control, _uiState.value.manualControlsState, currentInteropSettings(), caps)
+    /**
+     * Coalesces quick changes (such as 24 -> 30 -> 60 FPS) but never waits for a guessed camera
+     * startup time. CameraManager binds only after the ProcessCameraProvider is actually ready.
+     */
+    private fun scheduleCameraRebind(debounce: Boolean) {
+        val lifecycleOwner = cameraLifecycleOwner ?: return
+        cameraRebindJob?.cancel()
+
+        val bind = {
+            _uiState.update { it.copy(isCameraReady = false) }
+            cameraManager.requestBindWhenReady(
+                lifecycleOwner = lifecycleOwner,
+                onSurfaceRequest = { request -> _surfaceRequest.value = request },
+                uiState = _uiState.value,
+                displayRotation = lastDisplayRotation,
+                onCameraBound = { control, caps ->
+                    _uiState.update { it.copy(cameraCapabilities = caps, isCameraReady = true) }
+                    CameraInteropApplier.apply(control, _uiState.value.manualControlsState, currentInteropSettings(), caps)
+                }
+            )
+        }
+
+        if (debounce && _uiState.value.isCameraReady) {
+            cameraRebindJob = viewModelScope.launch {
+                delay(CAMERA_REBIND_DEBOUNCE_MS)
+                bind()
             }
-        )
-
-        viewModelScope.launch {
-            // Fast poll to wait for the camera hardware to actually bind
-            // instead of using a rigid 1500ms delay.
-            var attempts = 0
-            while (cameraManager.getCameraControl() == null && attempts < 50) {
-                delay(50) // check every 50ms (max 2.5 seconds timeout)
-                attempts++
-            }
-
-            // Give the pipeline a tiny fraction to stabilize surface formats
-            delay(100)
-
-            _uiState.update { it.copy(isCameraReady = true) }
-            applyInterop()
+        } else {
+            bind()
         }
     }
+
+    private fun requestedFpsForStats(): Int? = _uiState.value.selectedFps
+        .takeUnless { _uiState.value.manualControlsState.isManualFps }
 
     /**
      * Single entry point for all Camera2 interop writes. Builds one request from the current
@@ -337,7 +359,7 @@ class CameraViewModel(
                     val state = _uiState.value
                     statsManager.setRecordingState(
                         recording = false,
-                        targetFps = state.selectedFps,
+                        targetFps = requestedFpsForStats(),
                         targetBitrate = Bitrate.parseOrDefault(state.bitrate),
                         storageUri = state.storageUri
                     )
@@ -347,7 +369,12 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        cameraRebindJob?.cancel()
         cameraManager.release()
         statsManager.cleanup()
+    }
+
+    private companion object {
+        const val CAMERA_REBIND_DEBOUNCE_MS = 300L
     }
 }

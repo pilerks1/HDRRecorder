@@ -7,12 +7,12 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
+import com.pilerks1.hdrrecorder.model.ThermalForecast
 import com.pilerks1.hdrrecorder.model.ThermalStatus
 
 data class ThermalPowerSnapshot(
-    val thermalStatus: String = "NONE",
-    val thermalStatusInt: Int = PowerManager.THERMAL_STATUS_NONE,
-    val thermalForecastStatus: String = "NONE",
+    val thermalStatus: ThermalStatus = ThermalStatus.NONE,
+    val thermalForecast: ThermalForecast = ThermalForecast.Status(ThermalStatus.NONE),
     val netPowerWatts: Double = 0.0
 )
 
@@ -91,23 +91,20 @@ class ThermalManager(private val context: Context) {
         // Use cached voltage from the broadcast receiver
         val netWatts = (cachedVoltageMv.toDouble() / 1000.0) * currentAmps
 
-        val forecastStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+        val forecast = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             mapHeadroomToStatus(lastForecast)
         } else {
-            "%.2f".format(lastForecast)
+            ThermalForecast.Headroom(lastForecast)
         }
 
         return ThermalPowerSnapshot(
-            thermalStatus = formatThermalStatus(currentThermalStatus),
-            thermalStatusInt = currentThermalStatus,
-            thermalForecastStatus = forecastStatus,
+            thermalStatus = ThermalStatus.fromInt(currentThermalStatus),
+            thermalForecast = forecast,
             netPowerWatts = netWatts
         )
     }
 
-    private fun formatThermalStatus(status: Int): String = ThermalStatus.fromInt(status).label
-
-    private fun mapHeadroomToStatus(headroom: Float): String {
+    private fun mapHeadroomToStatus(headroom: Float): ThermalForecast {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             val thresholds = powerManager.thermalHeadroomThresholds
             if (thresholds.isNotEmpty()) {
@@ -116,17 +113,17 @@ class ThermalManager(private val context: Context) {
                     .maxByOrNull { it }
 
                 return if (highestStatus != null) {
-                    formatThermalStatus(highestStatus)
+                    ThermalForecast.Status(ThermalStatus.fromInt(highestStatus))
                 } else {
                     if (thresholds.containsKey(PowerManager.THERMAL_STATUS_LIGHT)) {
-                        "NONE"
+                        ThermalForecast.Status(ThermalStatus.NONE)
                     } else {
-                        "%.2f".format(headroom)
+                        ThermalForecast.Headroom(headroom)
                     }
                 }
             }
         }
-        return "%.2f".format(headroom)
+        return ThermalForecast.Headroom(headroom)
     }
 
     fun cleanup() {

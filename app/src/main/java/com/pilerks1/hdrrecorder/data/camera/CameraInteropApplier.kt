@@ -10,6 +10,7 @@ import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraControl
 import com.pilerks1.hdrrecorder.model.TonemapCurves
+import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 
 /**
@@ -17,7 +18,7 @@ import com.pilerks1.hdrrecorder.ui.ManualControlsState
  * Kept as a small holder so the data layer doesn't depend on the whole UI state class.
  */
 data class InteropSettings(
-    val gammaCurve: String = "Auto",
+    val gammaCurve: GammaCurve = GammaCurve.AUTO,
     val isNoiseReductionEnabled: Boolean = true
 )
 
@@ -203,18 +204,18 @@ object CameraInteropApplier {
 
     // --- Gamma / Tonemap ---
 
-    private fun applyGamma(builder: CaptureRequestOptions.Builder, gammaCurve: String) {
+    private fun applyGamma(builder: CaptureRequestOptions.Builder, gammaCurve: GammaCurve) {
         when (gammaCurve) {
-            "Auto" -> builder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
-            "HLG" -> {
+            GammaCurve.AUTO -> builder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+            GammaCurve.HLG -> {
                 builder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
                 builder.setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, TonemapCurves.hlg())
             }
-            "PQ" -> {
+            GammaCurve.PQ -> {
                 builder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
                 builder.setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, TonemapCurves.pq())
             }
-            "Custom" -> {
+            GammaCurve.CUSTOM -> {
                 builder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
                 builder.setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, TonemapCurves.custom())
             }

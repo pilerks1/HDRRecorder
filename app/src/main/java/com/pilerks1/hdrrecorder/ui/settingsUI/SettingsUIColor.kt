@@ -9,12 +9,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.GammaCurve
 
 @Composable
 fun ColorSection(
-    colorFormat: String,
+    colorFormat: ColorFormat,
     onColorFormatChange: () -> Unit,
-    gammaCurve: String,
+    gammaCurve: GammaCurve,
     onGammaCurveChange: () -> Unit
 ) {
     Text(
@@ -39,14 +41,14 @@ fun ColorSection(
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
             )
         ) {
-            Text(text = colorFormat)
+            Text(text = colorFormat.displayName)
         }
     }
 
     Spacer(modifier = Modifier.height(8.dp))
 
     // Gamma
-    val isGammaEnabled = colorFormat == "Unspec"
+    val isGammaEnabled = colorFormat.supportsGammaCurveSelection
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -63,7 +65,7 @@ fun ColorSection(
                 disabledContentColor = Color.Gray
             )
         ) {
-            Text(text = gammaCurve)
+            Text(text = gammaCurve.displayName)
         }
     }
 }

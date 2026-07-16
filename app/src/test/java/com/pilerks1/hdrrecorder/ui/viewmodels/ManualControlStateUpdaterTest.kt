@@ -46,7 +46,7 @@ class ManualControlStateUpdaterTest {
     }
 
     @Test
-    fun hybridAeAllowsIndependentControlsAndTracksTheLatestManualInput() {
+    fun hybridAeAllowsIndependentControls() {
         val (state) = ManualControlStateUpdater.calculateNextState(
             oldState = ManualControlsState(),
             caps = CameraCapabilities(supportsIsoPriorityAe = true, supportsShutterPriorityAe = true),
@@ -55,7 +55,6 @@ class ManualControlStateUpdaterTest {
 
         assertTrue(state.isManualIso)
         assertFalse(state.isManualSs)
-        assertEquals("ISO", state.lastManualExposureInput)
     }
 
     @Test

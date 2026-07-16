@@ -11,10 +11,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import com.pilerks1.hdrrecorder.ui.ManualControl
 
 @Composable
 fun BaseSlider(
-    label: String,
+    control: ManualControl,
     value: Float,
     isLandscape: Boolean,
     caps: CameraCapabilities?,
@@ -83,14 +84,14 @@ fun BaseSlider(
         
         Spacer(modifier = Modifier.size(8.dp))
         
-        val liveValueStr = SliderMath.formatSliderValue(label, value, caps)
+        val liveValueStr = SliderMath.formatSliderValue(control, value, caps)
         
         RibbonSlider(
             value = value,
             onValueChange = onValueChange,
             isLandscape = isLandscape,
             labelString = liveValueStr,
-            ticks = SliderMath.getTickPositions(label, caps),
+            ticks = SliderMath.getTickPositions(control, caps),
             modifier = weightModifier
         )
     }
