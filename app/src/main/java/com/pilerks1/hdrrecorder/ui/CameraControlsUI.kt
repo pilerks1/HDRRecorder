@@ -28,16 +28,17 @@ fun ControlsUISliders(
         ActiveSliderPanel(
             state = uiState.manualControlsState,
             caps = uiState.cameraCapabilities,
+            cameraTelemetry = actions.cameraTelemetry,
             isRecording = uiState.isRecording,
             isLandscape = isLandscape,
             onClose = { actions.onManualControlsChange { it.copy(activeSlider = null) } },
-            onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value ?: it.isoValue) } },
-            onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value ?: it.ssValueNanos) } },
-            onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: it.evValueIndex) } },
+            onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value) } },
+            onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value) } },
+            onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: 0) } },
             onSetNightMode = { enabled -> actions.onManualControlsChange { it.copy(isNightModeAeEnabled = enabled) } },
-            onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value ?: it.focusDistanceDiopters) } },
-            onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp ?: it.wbTemp, wbTint = tint ?: it.wbTint) } },
-            onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range ?: it.fpsRange) } },
+            onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value) } },
+            onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp, wbTint = tint) } },
+            onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range) } },
             autoFps = uiState.selectedFps,
             onCycleFps = {
                 if (uiState.manualControlsState.isManualFps) {

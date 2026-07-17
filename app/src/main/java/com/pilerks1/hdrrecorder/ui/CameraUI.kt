@@ -50,7 +50,9 @@ fun CameraUI(
     val actions = remember(viewModel) {
         CameraActions(
             onEvent = viewModel::onEvent,
-            onManualControlsChange = viewModel::updateManualControls
+            onManualControlsChange = viewModel::updateManualControls,
+            stats = viewModel.stats,
+            cameraTelemetry = viewModel.cameraTelemetry
         )
     }
 
@@ -86,7 +88,7 @@ fun CameraUI(
         // 1. PREVIEW LAYER (Bottom)
         PreviewUI(
             surfaceRequest = surfaceRequest,
-            stats = uiState.stats,
+            stats = actions.stats,
             isRecording = uiState.isRecording,
             isLandscape = isLandscape,
             hasExpandedSlider = uiState.manualControlsState.activeSlider != null,
@@ -117,7 +119,7 @@ fun CameraUI(
                         .size(width = previewLeft, height = screenHeightDp),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    StatsUI(stats = uiState.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
+                    StatsUI(stats = actions.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
                 }
 
                 // CENTER PREVIEW & SLIDERS
@@ -146,7 +148,7 @@ fun CameraUI(
                         .size(width = screenWidthDp, height = previewTop),
                     contentAlignment = Alignment.TopStart
                 ) {
-                    StatsUI(stats = uiState.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
+                    StatsUI(stats = actions.stats, isRecording = uiState.isRecording, modifier = Modifier.fillMaxSize())
                 }
 
                 // CENTER PREVIEW & SLIDERS

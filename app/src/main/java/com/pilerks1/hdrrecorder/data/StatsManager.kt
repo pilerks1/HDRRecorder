@@ -5,7 +5,9 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import android.os.StatFs
+import android.os.SystemClock
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import com.pilerks1.hdrrecorder.model.CameraTelemetry
 import com.pilerks1.hdrrecorder.model.toSigFigs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +24,9 @@ class StatsManager(private val context: Context) {
     private val _statsState = MutableStateFlow(StatsSnapshot())
     val statsState = _statsState.asStateFlow()
 
+    private val _cameraTelemetry = MutableStateFlow(CameraTelemetry())
+    val cameraTelemetry = _cameraTelemetry.asStateFlow()
+
     private val thermalManager = ThermalManager(context)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -29,6 +34,7 @@ class StatsManager(private val context: Context) {
     @Volatile private var currentIso: Int = 0
     @Volatile private var currentShutterSpeed: Double = 0.0
     @Volatile private var currentFps: Int = 0
+    @Volatile private var lastTelemetryEmissionElapsedNanos = 0L
     private val totalDropped = AtomicInteger(0)
 
     // Hardware Recording Stats
@@ -233,9 +239,37 @@ class StatsManager(private val context: Context) {
 
     val previewStatsCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-            currentIso = result.get(TotalCaptureResult.SENSOR_SENSITIVITY) ?: 0
+            val iso = result.get(TotalCaptureResult.SENSOR_SENSITIVITY)
+            currentIso = iso ?: 0
             val expTime = result.get(TotalCaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
             if (expTime > 0) currentShutterSpeed = 1_000_000_000.0 / expTime
+
+            val focusDistance = result.get(TotalCaptureResult.LENS_FOCUS_DISTANCE)
+            val cctTemperature = if (android.os.Build.VERSION.SDK_INT >= 36) {
+                result.get(TotalCaptureResult.COLOR_CORRECTION_COLOR_TEMPERATURE)
+            } else {
+                null
+            }
+            val cctTint = if (android.os.Build.VERSION.SDK_INT >= 36) {
+                result.get(TotalCaptureResult.COLOR_CORRECTION_COLOR_TINT)
+            } else {
+                null
+            }
+
+            val nowElapsedNanos = SystemClock.elapsedRealtimeNanos()
+            if (nowElapsedNanos - lastTelemetryEmissionElapsedNanos >= TELEMETRY_INTERVAL_NANOS) {
+                val telemetry = CameraTelemetry(
+                    iso = iso,
+                    shutterNanos = expTime.takeIf { it > 0L },
+                    focusDistanceDiopters = focusDistance,
+                    cctTemperatureKelvin = cctTemperature,
+                    cctTint = cctTint
+                )
+                if (_cameraTelemetry.value != telemetry) {
+                    _cameraTelemetry.value = telemetry
+                }
+                lastTelemetryEmissionElapsedNanos = nowElapsedNanos
+            }
         }
     }
 
@@ -283,5 +317,9 @@ class StatsManager(private val context: Context) {
         thermalManager.cleanup()
         pollingJob?.cancel()
         scope.cancel()
+    }
+
+    private companion object {
+        const val TELEMETRY_INTERVAL_NANOS = 50_000_000L
     }
 }

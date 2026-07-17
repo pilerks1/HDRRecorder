@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.camera.viewfinder.compose.MutableCoordinateTransformer
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.delay
 
 /**
@@ -35,13 +36,14 @@ import kotlinx.coroutines.delay
 @Composable
 fun PreviewUI(
     surfaceRequest: SurfaceRequest?,
-    stats: StatsSnapshot,
+    stats: StateFlow<StatsSnapshot>,
     isRecording: Boolean,
     isLandscape: Boolean,
     hasExpandedSlider: Boolean,
     onEvent: (CameraUiEvent) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val statsSnapshot by stats.collectAsState()
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
     val coordinateTransformer = remember { MutableCoordinateTransformer() }
     val sliderPanelThickness = if (isLandscape) 128.dp else 64.dp
@@ -108,8 +110,8 @@ fun PreviewUI(
             }
 
             // Recording timer display (hardware duration is the single time source)
-            if (isRecording || stats.hardwareDurationNanos > 0L) {
-                val seconds = stats.hardwareDurationNanos / 1_000_000_000L
+            if (isRecording || statsSnapshot.hardwareDurationNanos > 0L) {
+                val seconds = statsSnapshot.hardwareDurationNanos / 1_000_000_000L
                 val h = seconds / 3600
                 val m = (seconds % 3600) / 60
                 val s = seconds % 60

@@ -26,10 +26,13 @@ class ManualControlsStateTest {
         val automaticState = manualState.resetForTapToMeter()
 
         assertFalse(automaticState.isManualIso)
+        assertEquals(null, automaticState.isoValue)
         assertFalse(automaticState.isManualSs)
+        assertEquals(null, automaticState.ssValueNanos)
         assertFalse(automaticState.isManualEv)
         assertEquals(0, automaticState.evValueIndex)
         assertFalse(automaticState.isManualFocus)
+        assertEquals(null, automaticState.focusDistanceDiopters)
         assertFalse(automaticState.isManualWb)
         assertEquals(null, automaticState.wbTemp)
         assertEquals(null, automaticState.wbTint)

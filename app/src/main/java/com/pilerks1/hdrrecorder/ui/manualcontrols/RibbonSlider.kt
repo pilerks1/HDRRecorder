@@ -4,7 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
@@ -12,16 +12,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -41,6 +48,11 @@ private val ClipXAxisShape = object : Shape {
         )
     }
 }
+
+private data class RibbonTickLayout(
+    val fraction: Float,
+    val label: TextLayoutResult?
+)
 
 @Composable
 fun RibbonSlider(
@@ -64,6 +76,23 @@ fun RibbonSlider(
     
     val density = LocalDensity.current
     val totalPanDistancePx = with(density) { 600.dp.toPx() } // How many pixels to drag from 0 to 1
+    val tickStartYOffsetPx = with(density) { tickStartYOffset.toPx() }
+    val tickToTextPaddingPx = with(density) { tickToTextPadding.toPx() }
+    val majorTickHeightPx = with(density) { 12.dp.toPx() }
+    val minorTickHeightPx = with(density) { 6.dp.toPx() }
+    val centerIndicatorHalfHeightPx = with(density) { 12.dp.toPx() }
+    val tickTextStyle = remember { TextStyle(color = Color.Gray, fontSize = 10.sp) }
+    val textMeasurer = rememberTextMeasurer()
+    val tickLayouts = remember(ticks, density, textMeasurer) {
+        ticks.map { (fraction, label) ->
+            RibbonTickLayout(
+                fraction = fraction,
+                label = label.takeIf(String::isNotEmpty)?.let {
+                    textMeasurer.measure(AnnotatedString(it), style = tickTextStyle)
+                }
+            )
+        }
+    }
     
     val currentVal by rememberUpdatedState(value)
     
@@ -130,36 +159,50 @@ fun RibbonSlider(
                 },
             contentAlignment = Alignment.Center
         ) {
-            ticks.forEachIndexed { i, tickData ->
-                val fraction = tickData.first
-                val displayStr = tickData.second
-                
-                val offsetPx = (fraction - value) * totalPanDistancePx
-                val offsetDp = with(density) { offsetPx.toDp() }
-                
-                Box(
-                    modifier = Modifier.offset(x = offsetDp, y = tickStartYOffset),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(modifier = Modifier.width(1.dp).height(if (i % 3 == 0) 12.dp else 6.dp).background(Color.White))
-                        
-                        if (displayStr.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(tickToTextPadding))
-                            Text(
-                                text = displayStr,
-                                color = Color.Gray,
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.graphicsLayer { rotationZ = textRotation }
-                            )
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(ClipXAxisShape)
+            ) {
+                val centerX = size.width / 2f
+                val centerY = size.height / 2f
+
+                tickLayouts.forEachIndexed { index, tick ->
+                    val tickX = centerX + (tick.fraction - value) * totalPanDistancePx
+                    val tickHeight = if (index % 3 == 0) majorTickHeightPx else minorTickHeightPx
+                    val tickTop = centerY + tickStartYOffsetPx
+                    drawLine(
+                        color = Color.White,
+                        start = Offset(tickX, tickTop),
+                        end = Offset(tickX, tickTop + tickHeight),
+                        strokeWidth = 1.dp.toPx()
+                    )
+
+                    tick.label?.let { label ->
+                        val topLeft = Offset(
+                            x = tickX - label.size.width / 2f,
+                            y = tickTop + tickHeight + tickToTextPaddingPx
+                        )
+                        if (isLandscape) {
+                            rotate(
+                                degrees = textRotation,
+                                pivot = Offset(tickX, topLeft.y + label.size.height / 2f)
+                            ) {
+                                drawText(label, topLeft = topLeft)
+                            }
+                        } else {
+                            drawText(label, topLeft = topLeft)
                         }
                     }
                 }
-            }
 
-            Box(modifier = Modifier.width(2.dp).height(24.dp).background(Color.White))
+                drawLine(
+                    color = Color.White,
+                    start = Offset(centerX, centerY - centerIndicatorHalfHeightPx),
+                    end = Offset(centerX, centerY + centerIndicatorHalfHeightPx),
+                    strokeWidth = 2.dp.toPx()
+                )
+            }
             
             if (labelString.isNotEmpty()) {
                 Text(

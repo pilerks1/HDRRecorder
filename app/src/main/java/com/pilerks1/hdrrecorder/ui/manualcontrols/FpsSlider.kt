@@ -1,6 +1,7 @@
 package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import android.util.Range
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,13 +9,95 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import kotlin.math.roundToInt
+
+private data class RangeSliderTickLayout(
+    val fraction: Float,
+    val heightDp: androidx.compose.ui.unit.Dp,
+    val label: TextLayoutResult?
+)
+
+@Composable
+private fun RangeSliderTickAxis(
+    ticks: List<Pair<Float, String>>,
+    color: Color,
+    isLandscape: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val textStyle = remember(color) { TextStyle(color = color, fontSize = 7.sp) }
+    val tickLayouts = remember(ticks, color, density, textMeasurer) {
+        if (ticks.isEmpty()) {
+            (0..10).map { index ->
+                RangeSliderTickLayout(
+                    fraction = index / 10f,
+                    heightDp = if (index % 5 == 0) 6.dp else 4.dp,
+                    label = null
+                )
+            }
+        } else {
+            ticks.map { (fraction, label) ->
+                RangeSliderTickLayout(
+                    fraction = fraction,
+                    heightDp = 6.dp,
+                    label = label.takeIf(String::isNotEmpty)?.let {
+                        textMeasurer.measure(AnnotatedString(it), style = textStyle)
+                    }
+                )
+            }
+        }
+    }
+
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            .padding(horizontal = 10.dp)
+            .offset(y = 16.dp)
+    ) {
+        tickLayouts.forEach { tick ->
+            val tickX = size.width * tick.fraction
+            val tickHeight = with(density) { tick.heightDp.toPx() }
+            drawLine(
+                color = color,
+                start = Offset(tickX, 0f),
+                end = Offset(tickX, tickHeight),
+                strokeWidth = 1.dp.toPx()
+            )
+            tick.label?.let { label ->
+                val topLeft = Offset(
+                    x = tickX - label.size.width / 2f,
+                    y = tickHeight + with(density) { 2.dp.toPx() }
+                )
+                if (isLandscape) {
+                    rotate(
+                        degrees = 90f,
+                        pivot = Offset(tickX, topLeft.y + label.size.height / 2f)
+                    ) {
+                        drawText(label, topLeft = topLeft)
+                    }
+                } else {
+                    drawText(label, topLeft = topLeft)
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,50 +117,13 @@ fun RotatingRangeSlider(
     val mainColor = if (isActive) Color.White else if (enabled) Color.Gray else Color.DarkGray
     val secondaryColor = if (isActive) Color.Gray else if (enabled) Color.Gray else Color.DarkGray
 
-    val axis = @Composable {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp) // match RangeSlider thumb padding
-                .offset(y = 16.dp)
-        ) {
-            val w = maxWidth
-            if (ticks.isEmpty()) {
-                // Fallback to 10 even ticks if none provided
-                for (i in 0..10) {
-                    val fraction = i / 10f
-                    Box(modifier = Modifier.offset(x = w * fraction - 0.5.dp)) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(modifier = Modifier.width(1.dp).height(if (i % 5 == 0) 6.dp else 4.dp).background(secondaryColor))
-                        }
-                    }
-                }
-            } else {
-                for (tick in ticks) {
-                    val fraction = tick.first
-                    val labelStr = tick.second
-                    Box(modifier = Modifier.offset(x = w * fraction - 0.5.dp)) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(modifier = Modifier.width(1.dp).height(6.dp).background(secondaryColor))
-                            if (labelStr.isNotEmpty()) {
-                                Text(
-                                    text = labelStr,
-                                    color = secondaryColor,
-                                    fontSize = 7.sp,
-                                    maxLines = 1,
-                                    modifier = Modifier.offset(y = 2.dp).graphicsLayer { rotationZ = textRotation }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     val sliderContent = @Composable {
         Box(contentAlignment = Alignment.Center) {
-            axis()
+            RangeSliderTickAxis(
+                ticks = ticks,
+                color = secondaryColor,
+                isLandscape = isLandscape
+            )
             RangeSlider(
                 value = value,
                 onValueChange = onValueChange,
@@ -176,10 +222,12 @@ fun FpsSlider(
         val maxFps = validRanges.maxOfOrNull { it.upper }?.toFloat() ?: 60f
         
         // Extract unique FPS values
-        val uniqueFpsValues = validRanges.flatMap { listOf(it.lower.toFloat(), it.upper.toFloat()) }.distinct().sorted()
-        val ticks = uniqueFpsValues.map { fps ->
-            val fraction = if (maxFps == minFps) 0.5f else (fps - minFps) / (maxFps - minFps)
-            fraction to fps.roundToInt().toString()
+        val ticks = remember(caps?.fpsRanges) {
+            val uniqueFpsValues = validRanges.flatMap { listOf(it.lower.toFloat(), it.upper.toFloat()) }.distinct().sorted()
+            uniqueFpsValues.map { fps ->
+                val fraction = if (maxFps == minFps) 0.5f else (fps - minFps) / (maxFps - minFps)
+                fraction to fps.roundToInt().toString()
+            }
         }
 
         var localRange by remember(currentRange) { 

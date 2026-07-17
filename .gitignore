@@ -5,6 +5,7 @@ local.properties
 .DS_Store
 .externalNativeBuild
 GEMINI.md
+AGENTS.md
 /.idea
 /build
 /captures

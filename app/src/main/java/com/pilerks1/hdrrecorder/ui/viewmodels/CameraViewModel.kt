@@ -2,9 +2,11 @@ package com.pilerks1.hdrrecorder.ui.viewmodels
 
 import android.app.Application
 import android.content.Intent
+import android.os.SystemClock
 import android.util.Log
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.SurfaceRequest
+import androidx.camera.core.CameraControl
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
@@ -48,6 +50,11 @@ class CameraViewModel(
     private var cameraLifecycleOwner: LifecycleOwner? = null
     private var lastDisplayRotation = 0
     private var cameraRebindJob: kotlinx.coroutines.Job? = null
+    private var interopApplyJob: kotlinx.coroutines.Job? = null
+    private var lastInteropControl: CameraControl? = null
+    private var lastInteropSubmission: InteropSubmission? = null
+    private var lastExposureCompensationIndex: Int? = null
+    private var lastInteropSubmissionElapsedMs = 0L
 
     // --- UI State ---
     private val _uiState = MutableStateFlow(CameraUiState())
@@ -55,6 +62,8 @@ class CameraViewModel(
 
     private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
     val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
+    val stats = statsManager.statsState
+    val cameraTelemetry = statsManager.cameraTelemetry
 
     init {
         val globalStorageUri = preferencesManager.storageUri
@@ -66,7 +75,6 @@ class CameraViewModel(
 
         _uiState.update { loadedState.copy(presetsList = names, storageUri = globalStorageUri) }
 
-        collectStats()
         collectRecordingState()
         statsManager.setRecordingState(false, requestedFpsForStats(), Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
     }
@@ -254,13 +262,12 @@ class CameraViewModel(
 
     fun updateManualControls(updater: (ManualControlsState) -> ManualControlsState) {
         val caps = _uiState.value.cameraCapabilities
+        val telemetry = cameraTelemetry.value
         var triggersRebind = false
         _uiState.update {
             val exposureDefaults = ManualControlStateUpdater.ExposureDefaults(
-                isoValue = it.stats.iso.takeIf { iso -> iso > 0 },
-                shutterNanos = it.stats.shutterSpeed
-                    .takeIf { shutterSpeed -> shutterSpeed > 0.0 }
-                    ?.let { shutterSpeed -> (1_000_000_000.0 / shutterSpeed).toLong() }
+                isoValue = telemetry.iso,
+                shutterNanos = telemetry.shutterNanos
             )
             val (newState, rebind) = ManualControlStateUpdater.calculateNextState(
                 it.manualControlsState,
@@ -277,7 +284,7 @@ class CameraViewModel(
 
         if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
         else if (triggersRebind) scheduleCameraRebind(debounce = true)
-        applyInterop()
+        applyInterop(coalesce = true)
     }
 
     /** Attaches the current lifecycle and starts the initial bind without an arbitrary delay. */
@@ -305,7 +312,7 @@ class CameraViewModel(
                 displayRotation = lastDisplayRotation,
                 onCameraBound = { control, caps ->
                     _uiState.update { it.copy(cameraCapabilities = caps, isCameraReady = true) }
-                    CameraInteropApplier.apply(control, _uiState.value.manualControlsState, currentInteropSettings(), caps)
+                    applyInterop()
                 }
             )
         }
@@ -327,10 +334,47 @@ class CameraViewModel(
      * Single entry point for all Camera2 interop writes. Builds one request from the current
      * manual control state + non-manual interop settings via the unified applier.
      */
-    private fun applyInterop() {
+    private fun applyInterop(coalesce: Boolean = false) {
+        if (!coalesce) {
+            interopApplyJob?.cancel()
+            submitInteropIfChanged()
+            return
+        }
+
+        if (interopApplyJob?.isActive == true) return
+
+        val remainingDelayMs = (lastInteropSubmissionElapsedMs + INTEROP_DRAG_SAMPLE_MS -
+            SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        interopApplyJob = viewModelScope.launch {
+            delay(remainingDelayMs)
+            submitInteropIfChanged()
+        }
+    }
+
+    private fun submitInteropIfChanged() {
         val cameraControl = cameraManager.getCameraControl() ?: return
         val state = _uiState.value
-        CameraInteropApplier.apply(cameraControl, state.manualControlsState, currentInteropSettings(), state.cameraCapabilities)
+        val submission = InteropSubmission(
+            controls = state.manualControlsState,
+            settings = currentInteropSettings(),
+            capabilities = state.cameraCapabilities
+        )
+        if (lastInteropControl === cameraControl && lastInteropSubmission == submission) return
+
+        val exposureCompensationIndex = CameraInteropApplier.exposureCompensationIndex(submission.controls)
+        val shouldApplyExposureCompensation = lastInteropControl !== cameraControl ||
+            lastExposureCompensationIndex != exposureCompensationIndex
+        CameraInteropApplier.apply(
+            cameraControl = cameraControl,
+            state = submission.controls,
+            settings = submission.settings,
+            capabilities = submission.capabilities,
+            applyExposureCompensation = shouldApplyExposureCompensation
+        )
+        lastInteropControl = cameraControl
+        lastInteropSubmission = submission
+        lastExposureCompensationIndex = exposureCompensationIndex
+        lastInteropSubmissionElapsedMs = SystemClock.elapsedRealtime()
     }
 
     private fun currentInteropSettings(): InteropSettings {
@@ -342,14 +386,6 @@ class CameraViewModel(
     }
 
     // --- State Collection ---
-    private fun collectStats() {
-        viewModelScope.launch {
-            statsManager.statsState.collect { snapshot ->
-                _uiState.update { it.copy(stats = snapshot) }
-            }
-        }
-    }
-
     private fun collectRecordingState() {
         viewModelScope.launch {
             recordingManager.isRecording.collect { isRecording ->
@@ -370,11 +406,19 @@ class CameraViewModel(
 
     override fun onCleared() {
         cameraRebindJob?.cancel()
+        interopApplyJob?.cancel()
         cameraManager.release()
         statsManager.cleanup()
     }
 
     private companion object {
         const val CAMERA_REBIND_DEBOUNCE_MS = 300L
+        const val INTEROP_DRAG_SAMPLE_MS = 33L
     }
+
+    private data class InteropSubmission(
+        val controls: ManualControlsState,
+        val settings: InteropSettings,
+        val capabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities?
+    )
 }

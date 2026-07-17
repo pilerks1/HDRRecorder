@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -86,12 +87,13 @@ fun BaseSlider(
         
         val liveValueStr = SliderMath.formatSliderValue(control, value, caps)
         
+        val ticks = remember(control, caps) { SliderMath.getTickPositions(control, caps) }
         RibbonSlider(
             value = value,
             onValueChange = onValueChange,
             isLandscape = isLandscape,
             labelString = liveValueStr,
-            ticks = SliderMath.getTickPositions(control, caps),
+            ticks = ticks,
             modifier = weightModifier
         )
     }

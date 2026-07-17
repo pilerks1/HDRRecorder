@@ -78,4 +78,42 @@ class ManualControlStateUpdaterTest {
         assertTrue(isoState.isManualSs)
         assertEquals(10_000_000L, isoState.ssValueNanos)
     }
+
+    @Test
+    fun returningToAutoClearsManualOverrides() {
+        val oldState = ManualControlsState(
+            isManualIso = true,
+            isoValue = 400,
+            isManualSs = true,
+            ssValueNanos = 10_000_000L,
+            isManualFocus = true,
+            focusDistanceDiopters = 2f,
+            isManualWb = true,
+            wbTemp = 5000,
+            wbTint = 10
+        )
+
+        val (state) = ManualControlStateUpdater.calculateNextState(
+            oldState = oldState,
+            caps = CameraCapabilities(
+                supportsIsoPriorityAe = true,
+                supportsShutterPriorityAe = true,
+                supportsCCT = true
+            ),
+            exposureDefaults = defaults
+        ) {
+            it.copy(
+                isManualIso = false,
+                isManualSs = false,
+                isManualFocus = false,
+                isManualWb = false
+            )
+        }
+
+        assertEquals(null, state.isoValue)
+        assertEquals(null, state.ssValueNanos)
+        assertEquals(null, state.focusDistanceDiopters)
+        assertEquals(null, state.wbTemp)
+        assertEquals(null, state.wbTint)
+    }
 }

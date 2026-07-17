@@ -3,6 +3,8 @@ package com.pilerks1.hdrrecorder.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -14,6 +16,7 @@ import com.pilerks1.hdrrecorder.model.ThermalForecast
 import com.pilerks1.hdrrecorder.model.ThermalStatus
 import com.pilerks1.hdrrecorder.model.toSigFigs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Modular Stats UI that displays real-time camera and hardware metrics.
@@ -25,10 +28,11 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatsUI(
-    stats: StatsSnapshot,
+    stats: StateFlow<StatsSnapshot>,
     isRecording: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val snapshot by stats.collectAsState()
     Box(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.TopStart
@@ -42,53 +46,53 @@ fun StatsUI(
             StatGroup("VIDEO") {
                 StatRow(
                     label = "SS",
-                    value = if (stats.shutterSpeed > 0) "1/${stats.shutterSpeed.roundToInt()}s" else "N/A"
+                    value = if (snapshot.shutterSpeed > 0) "1/${snapshot.shutterSpeed.roundToInt()}s" else "N/A"
                 )
-                StatRow(label = "ISO", value = "${stats.iso}")
+                StatRow(label = "ISO", value = "${snapshot.iso}")
 
                 StatRow(
                     label = "FPS",
-                    value = if (isRecording) "${stats.effectiveFps}" else "N/A"
+                    value = if (isRecording) "${snapshot.effectiveFps}" else "N/A"
                 )
                 StatRow(
                     label = "DROP",
-                    value = if (isRecording && stats.canMeasureDroppedFrames) "${stats.droppedFrames}" else "N/A"
+                    value = if (isRecording && snapshot.canMeasureDroppedFrames) "${snapshot.droppedFrames}" else "N/A"
                 )
             }
 
             // --- SECTION: STORAGE ---
             StatGroup("STORAGE") {
-                StatRow(label = "FREE", value = stats.storageRemainingFormatted)
-                StatRow(label = "TIME", value = stats.storageRemainingTime)
+                StatRow(label = "FREE", value = snapshot.storageRemainingFormatted)
+                StatRow(label = "TIME", value = snapshot.storageRemainingTime)
                 StatRow(
                     label = "BIT",
-                    value = if (isRecording) "${stats.actualBitrateMbps.toSigFigs()} Mbps" else "N/A"
+                    value = if (isRecording) "${snapshot.actualBitrateMbps.toSigFigs()} Mbps" else "N/A"
                 )
                 StatRow(
                     label = "SIZE",
-                    value = if (stats.displayedFileSizeWrittenBytes > 0L) "${(stats.displayedFileSizeWrittenBytes.toDouble() / (1024.0 * 1024.0)).toSigFigs()} MB" else "N/A"
+                    value = if (snapshot.displayedFileSizeWrittenBytes > 0L) "${(snapshot.displayedFileSizeWrittenBytes.toDouble() / (1024.0 * 1024.0)).toSigFigs()} MB" else "N/A"
                 )
             }
 
             // --- SECTION: THERMAL ---
             StatGroup("THERMAL") {
-                val statusColor = getThermalColorByStatus(stats.thermalStatus)
+                val statusColor = getThermalColorByStatus(snapshot.thermalStatus)
                 StatRow(
                     label = "STATE",
-                    value = stats.thermalStatus.label,
+                    value = snapshot.thermalStatus.label,
                     valueColor = statusColor
                 )
 
-                val forecastColor = getThermalForecastColor(stats.thermalForecast)
+                val forecastColor = getThermalForecastColor(snapshot.thermalForecast)
                 StatRow(
                     label = "IN 60s",
-                    value = stats.thermalForecast.toDisplayText(),
+                    value = snapshot.thermalForecast.toDisplayText(),
                     valueColor = forecastColor
                 )
 
                 StatRow(
                     label = "NET",
-                    value = "%.1f W".format(stats.netPowerWatts),
+                    value = "%.1f W".format(snapshot.netPowerWatts),
                     valueColor = Color.White
                 )
             }

@@ -34,12 +34,13 @@ object CameraInteropApplier {
         cameraControl: CameraControl,
         state: ManualControlsState,
         settings: InteropSettings,
-        capabilities: CameraCapabilities?
+        capabilities: CameraCapabilities?,
+        applyExposureCompensation: Boolean
     ) {
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
 
-        applyExposure(cameraControl, builder, state, capabilities)
+        applyExposure(cameraControl, builder, state, capabilities, applyExposureCompensation)
         applyFocus(builder, state)
         applyWhiteBalance(builder, state, capabilities)
         applyFps(builder, state)
@@ -49,19 +50,21 @@ object CameraInteropApplier {
         camera2Control.setCaptureRequestOptions(builder.build())
     }
 
+    fun exposureCompensationIndex(state: ManualControlsState): Int =
+        state.evValueIndex.takeIf { state.isManualEv } ?: 0
+
     // --- Exposure (ISO / SS / EV / AE mode) ---
 
     private fun applyExposure(
         cameraControl: CameraControl,
         builder: CaptureRequestOptions.Builder,
         state: ManualControlsState,
-        capabilities: CameraCapabilities?
+        capabilities: CameraCapabilities?,
+        applyExposureCompensation: Boolean
     ) {
         // Native CameraX EV
-        if (state.isManualEv && state.evValueIndex != 0) {
-            cameraControl.setExposureCompensationIndex(state.evValueIndex)
-        } else {
-            cameraControl.setExposureCompensationIndex(0)
+        if (applyExposureCompensation) {
+            cameraControl.setExposureCompensationIndex(exposureCompensationIndex(state))
         }
 
         var needsManualAe = false
@@ -69,15 +72,11 @@ object CameraInteropApplier {
         if (state.isManualSs && state.ssValueNanos != null) {
             builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
             needsManualAe = true
-        } else {
-            builder.clearCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME)
         }
 
         if (state.isManualIso && state.isoValue != null) {
             builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
             needsManualAe = true
-        } else {
-            builder.clearCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY)
         }
 
         if (needsManualAe) {
@@ -98,7 +97,6 @@ object CameraInteropApplier {
         if (state.isManualSs && state.isManualIso) {
             // Both manual: disable AE entirely.
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
-            builder.clearCaptureRequestOption(CaptureRequest.CONTROL_AE_PRIORITY_MODE)
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
             if (state.isManualSs) {
@@ -129,11 +127,6 @@ object CameraInteropApplier {
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
         }
-        if ((capabilities?.supportsShutterPriorityAe == true || capabilities?.supportsIsoPriorityAe == true) &&
-            Build.VERSION.SDK_INT >= 36
-        ) {
-            builder.clearCaptureRequestOption(CaptureRequest.CONTROL_AE_PRIORITY_MODE)
-        }
     }
 
     private fun canUseHybridAe(state: ManualControlsState, capabilities: CameraCapabilities?): Boolean = when {
@@ -151,7 +144,6 @@ object CameraInteropApplier {
             builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, state.focusDistanceDiopters)
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
-            builder.clearCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE)
         }
     }
 
@@ -172,11 +164,6 @@ object CameraInteropApplier {
             builder.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, state.wbTint ?: 0)
         } else {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
-            builder.clearCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_MODE)
-            if (Build.VERSION.SDK_INT >= 36) {
-                builder.clearCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE)
-                builder.clearCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_COLOR_TINT)
-            }
         }
     }
 
@@ -185,8 +172,6 @@ object CameraInteropApplier {
     private fun applyFps(builder: CaptureRequestOptions.Builder, state: ManualControlsState) {
         if (state.isManualFps && state.fpsRange != null) {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, state.fpsRange)
-        } else {
-            builder.clearCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE)
         }
     }
 

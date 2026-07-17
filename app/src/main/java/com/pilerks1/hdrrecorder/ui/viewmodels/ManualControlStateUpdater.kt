@@ -59,6 +59,19 @@ object ManualControlStateUpdater {
         if (newState.isManualFps != oldState.isManualFps) {
             triggersRebind = true
         }
+
+        // Automatic modes own their effective values through camera telemetry. Do not retain a
+        // previous manual setting here: it would otherwise be mistaken for a live auto value
+        // when the slider is opened again.
+        newState = newState.copy(
+            isoValue = newState.isoValue.takeIf { newState.isManualIso },
+            ssValueNanos = newState.ssValueNanos.takeIf { newState.isManualSs },
+            evValueIndex = newState.evValueIndex.takeIf { newState.isManualEv } ?: 0,
+            focusDistanceDiopters = newState.focusDistanceDiopters.takeIf { newState.isManualFocus },
+            wbTemp = newState.wbTemp.takeIf { newState.isManualWb },
+            wbTint = newState.wbTint.takeIf { newState.isManualWb },
+            fpsRange = newState.fpsRange.takeIf { newState.isManualFps }
+        )
         
         return Pair(newState, triggersRebind)
     }

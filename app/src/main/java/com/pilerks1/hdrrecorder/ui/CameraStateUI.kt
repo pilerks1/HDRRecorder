@@ -3,7 +3,6 @@ package com.pilerks1.hdrrecorder.ui
 import androidx.camera.core.MeteringPoint
 import com.pilerks1.hdrrecorder.model.ColorFormat
 import com.pilerks1.hdrrecorder.model.GammaCurve
-import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.Resolution
 import android.util.Range
 
@@ -49,10 +48,13 @@ internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState {
 
     return copy(
         isManualIso = false,
+        isoValue = null,
         isManualSs = false,
+        ssValueNanos = null,
         isManualEv = false,
         evValueIndex = 0,
         isManualFocus = false,
+        focusDistanceDiopters = null,
         isManualWb = false,
         wbTemp = null,
         wbTint = null
@@ -95,9 +97,6 @@ data class CameraUiState(
 
     // Storage
     val storageUri: String? = null,
-
-    // Stats
-    val stats: StatsSnapshot = StatsSnapshot(),
 
     // UI Visibility
     val isSettingsSheetVisible: Boolean = false
