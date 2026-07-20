@@ -23,6 +23,7 @@ import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.ColorFormat
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 @ExperimentalCamera2Interop
 @SuppressLint("MissingPermission")
@@ -109,10 +110,18 @@ class CameraManager(
 
         // --- Preview Use Case Configuration ---
         val previewResolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
+            .setAspectRatioStrategy(
+                AspectRatioStrategy(
+                    request.uiState.selectedAspectRatio.cameraXValue,
+                    AspectRatioStrategy.FALLBACK_RULE_NONE
+                )
+            )
             .setResolutionStrategy(
                 ResolutionStrategy(
-                    android.util.Size(1000, 750),
+                    android.util.Size(
+                        1000,
+                        (1000f / request.uiState.selectedAspectRatio.landscapeRatio).roundToInt()
+                    ),
                     ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
                 )
             )
@@ -142,7 +151,7 @@ class CameraManager(
         val recorder = Recorder.Builder()
             .setExecutor(cameraExecutor)
             .setQualitySelector(qualitySelector)
-            .setAspectRatio(AspectRatio.RATIO_4_3)
+            .setAspectRatio(request.uiState.selectedAspectRatio.cameraXValue)
             .setTargetVideoEncodingBitRate(bitrateBps)
             .build()
 

@@ -149,6 +149,11 @@ class CameraViewModel(
                     state.copy(selectedResolution = state.selectedResolution.next())
                 }
             }
+            is CameraUiEvent.CycleAspectRatio -> {
+                updateSettingsAndSave(requiresHardRebind = true) { state ->
+                    state.copy(selectedAspectRatio = state.selectedAspectRatio.next())
+                }
+            }
 
             // Format & Gamma (auto-saved)
             is CameraUiEvent.CycleColorFormat -> updateSettingsAndSave(requiresHardRebind = true) { state ->
@@ -234,8 +239,8 @@ class CameraViewModel(
      */
     fun onDisplayRotationChanged(rotation: Int) {
         lastDisplayRotation = rotation
-        if (_uiState.value.isRecording) return
-        cameraManager.updateRotation(rotation)
+        CameraRotationPolicy.targetRotation(rotation, _uiState.value.isRecording)
+            ?.let(cameraManager::updateRotation)
     }
 
     private fun toggleRecording() {

@@ -24,4 +24,11 @@ class VideoSettingsEnumTest {
         assertEquals(Resolution.HIGHEST, Resolution.fromStorageId("MAX"))
         assertEquals(Resolution.HIGHEST, Resolution.fromStorageId("Highest"))
     }
+
+    @Test
+    fun recordingAspectRatioReadsStableAndDisplayValues() {
+        assertEquals(RecordingAspectRatio.FOUR_THREE, RecordingAspectRatio.fromStorageId("4_3"))
+        assertEquals(RecordingAspectRatio.SIXTEEN_NINE, RecordingAspectRatio.fromStorageId("16:9"))
+        assertNull(RecordingAspectRatio.fromStorageId("unsupported"))
+    }
 }

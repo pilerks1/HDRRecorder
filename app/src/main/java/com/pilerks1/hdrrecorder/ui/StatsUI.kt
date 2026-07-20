@@ -5,7 +5,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -15,6 +14,8 @@ import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.ThermalForecast
 import com.pilerks1.hdrrecorder.model.ThermalStatus
 import com.pilerks1.hdrrecorder.model.toSigFigs
+import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
+import com.pilerks1.hdrrecorder.ui.layout.AxisStack
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.StateFlow
 
@@ -22,26 +23,17 @@ import kotlinx.coroutines.flow.StateFlow
  * Modular Stats UI that displays real-time camera and hardware metrics.
  * Designed to be expandable with consistent styling.
  * 
- * Uses FlowColumn to automatically wrap stats horizontally when in portrait mode,
- * ensuring all stats remain visible and upright.
+ * The root camera layout measures this content before assigning preview geometry.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatsUI(
     stats: StateFlow<StatsSnapshot>,
     isRecording: Boolean,
+    axis: AxisSpec,
     modifier: Modifier = Modifier
 ) {
     val snapshot by stats.collectAsState()
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.TopStart
-    ) {
-        FlowRow(
-            //modifier = Modifier.padding(top = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.Start),
-            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)
-        ) {
+    AxisStack(axis = axis, modifier = modifier, spacing = 8.dp) {
             // --- SECTION: CAMERA CAPTURE ---
             StatGroup("VIDEO") {
                 StatRow(
@@ -96,13 +88,11 @@ fun StatsUI(
                     valueColor = Color.White
                 )
             }
-        }
     }
 }
 
 /**
- * A private helper that groups a header and its stats into a single column.
- * This ensures that when the FlowRow wraps, it wraps the entire section together.
+ * A private helper that groups a header and its stats into one measurable section.
  */
 @Composable
 private fun StatGroup(
@@ -111,7 +101,9 @@ private fun StatGroup(
 ) {
     Column(
         verticalArrangement = Arrangement.spacedBy((-4).dp),
-        modifier = Modifier.padding(start = 4.dp)  // left side pad
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .width(104.dp)
     ) {
         StatSectionHeader(title)
         content()

@@ -1,131 +1,102 @@
 package com.pilerks1.hdrrecorder.ui
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveSliderPanel
-import com.pilerks1.hdrrecorder.ui.manualcontrols.ManualControlsGrid
-import com.pilerks1.hdrrecorder.ui.manualcontrols.SecondaryControlsSpacing
+import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
+import com.pilerks1.hdrrecorder.ui.layout.AxisStack
+import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
+import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
+import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveControlPanel
+import com.pilerks1.hdrrecorder.ui.manualcontrols.SecondaryControlsRail
+import com.pilerks1.hdrrecorder.ui.manualcontrols.availableControlPanels
 
 @Composable
-fun ControlsUISliders(
+fun ExpandedControlPanelUI(
     uiState: CameraUiState,
     actions: CameraActions,
-    isLandscape: Boolean,
+    axis: AxisSpec,
+    contentInsets: EdgeInsets,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier,
-        contentAlignment = if (isLandscape) Alignment.CenterEnd else Alignment.BottomCenter
-    ) {
-        ActiveSliderPanel(
-            state = uiState.manualControlsState,
-            caps = uiState.cameraCapabilities,
-            cameraTelemetry = actions.cameraTelemetry,
-            isRecording = uiState.isRecording,
-            isLandscape = isLandscape,
-            onClose = { actions.onManualControlsChange { it.copy(activeSlider = null) } },
-            onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value) } },
-            onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value) } },
-            onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: 0) } },
-            onSetNightMode = { enabled -> actions.onManualControlsChange { it.copy(isNightModeAeEnabled = enabled) } },
-            onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value) } },
-            onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp, wbTint = tint) } },
-            onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range) } },
-            autoFps = uiState.selectedFps,
-            onCycleFps = {
-                if (uiState.manualControlsState.isManualFps) {
-                    actions.onManualControlsChange { it.copy(isManualFps = false) }
-                } else {
-                    actions.onEvent(CameraUiEvent.CycleFps)
-                }
+    ActiveControlPanel(
+        state = uiState.manualControlsState,
+        caps = uiState.cameraCapabilities,
+        cameraTelemetry = actions.cameraTelemetry,
+        isRecording = uiState.isRecording,
+        selectedResolution = uiState.selectedResolution,
+        selectedAspectRatio = uiState.selectedAspectRatio,
+        axis = axis,
+        contentInsets = contentInsets,
+        onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
+        onCycleAspectRatio = { actions.onEvent(CameraUiEvent.CycleAspectRatio) },
+        onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value) } },
+        onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value) } },
+        onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: 0) } },
+        onSetNightMode = { enabled -> actions.onManualControlsChange { it.copy(isNightModeAeEnabled = enabled) } },
+        onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value) } },
+        onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp, wbTint = tint) } },
+        onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range) } },
+        autoFps = uiState.selectedFps,
+        onCycleFps = {
+            if (uiState.manualControlsState.isManualFps) {
+                actions.onManualControlsChange { it.copy(isManualFps = false) }
+            } else {
+                actions.onEvent(CameraUiEvent.CycleFps)
             }
-        )
-    }
+        },
+        modifier = modifier
+    )
 }
 
 @Composable
-fun ControlsUIButtons(
+fun SecondaryControlsUI(
     uiState: CameraUiState,
     actions: CameraActions,
-    isLandscape: Boolean,
+    axis: AxisSpec,
+    railSpec: ActionRailSpec,
     modifier: Modifier = Modifier
 ) {
-    if (isLandscape) {
-        Column(
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.SpaceBetween,
-            modifier = modifier
-                .fillMaxHeight()
-                .padding(top = 0.dp, bottom = 4.dp)
-        ) {
-            ManualControlsGrid(
-                state = uiState.manualControlsState,
-                caps = uiState.cameraCapabilities,
-                resLabel = uiState.selectedResolution.qualityName,
-                isRecording = uiState.isRecording,
-                onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
-                onToggleSlider = { control ->
-                    actions.onManualControlsChange {
-                        if (it.activeSlider == control) it.copy(activeSlider = null) else it.copy(activeSlider = control)
-                    }
-                },
-                isLandscape = isLandscape,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(bottom = SecondaryControlsSpacing)
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
-                PauseOrSettingsButton(uiState, actions.onEvent)
-                RecordButton(uiState, actions.onEvent)
+    val panels = availableControlPanels(uiState.cameraCapabilities)
+    SecondaryControlsRail(
+        panels = panels,
+        activePanel = uiState.manualControlsState.activePanel,
+        axis = axis,
+        railSpec = railSpec,
+        onTogglePanel = { panel ->
+            actions.onManualControlsChange {
+                it.copy(activePanel = if (it.activePanel == panel) null else panel)
             }
-        }
-    } else {
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(start = 0.dp, end = 4.dp)
-        ) {
-            ManualControlsGrid(
-                state = uiState.manualControlsState,
-                caps = uiState.cameraCapabilities,
-                resLabel = uiState.selectedResolution.qualityName,
-                isRecording = uiState.isRecording,
-                onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
-                onToggleSlider = { control ->
-                    actions.onManualControlsChange {
-                        if (it.activeSlider == control) it.copy(activeSlider = null) else it.copy(activeSlider = control)
-                    }
-                },
-                isLandscape = isLandscape,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = SecondaryControlsSpacing)
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
-                PauseOrSettingsButton(uiState, actions.onEvent)
-                RecordButton(uiState, actions.onEvent)
-            }
-        }
-    }
+        },
+        modifier = modifier
+    )
 }
 
-// --- Reused Components ---
+@Composable
+fun PrimaryActionsUI(
+    uiState: CameraUiState,
+    actions: CameraActions,
+    axis: AxisSpec,
+    modifier: Modifier = Modifier
+) {
+    if (uiState.manualControlsState.activePanel != null) return
+
+    AxisStack(axis = axis, modifier = modifier, spacing = 0.dp) {
+        PauseOrSettingsButton(uiState, actions.onEvent)
+        RecordButton(uiState, actions.onEvent)
+    }
+}
 
 @Composable
 fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
@@ -138,7 +109,7 @@ fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
         modifier = Modifier.size(64.dp)
     ) {
         Icon(
-            imageVector = if (uiState.isRecording) Icons.Filled.Stop else Icons.Default.RadioButtonChecked,
+            imageVector = if (uiState.isRecording) Icons.Filled.Stop else Icons.Filled.RadioButtonChecked,
             contentDescription = if (uiState.isRecording) "Stop" else "Record",
             tint = if (uiState.isRecording) Color.White else Color.Red,
             modifier = Modifier.fillMaxSize()
@@ -151,7 +122,7 @@ fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Un
     if (uiState.isRecording) {
         IconButton(onClick = { onEvent(CameraUiEvent.TogglePause) }) {
             Icon(
-                imageVector = if (uiState.isPaused) Icons.Filled.PlayArrow else Icons.Default.Pause,
+                imageVector = if (uiState.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                 contentDescription = if (uiState.isPaused) "Play" else "Pause",
                 tint = Color.White,
                 modifier = Modifier.size(32.dp)
@@ -160,7 +131,7 @@ fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Un
     } else {
         IconButton(onClick = { onEvent(CameraUiEvent.OpenSettings) }) {
             Icon(
-                imageVector = Icons.Default.Settings,
+                imageVector = Icons.Filled.Settings,
                 contentDescription = "Settings",
                 tint = Color.White,
                 modifier = Modifier.size(32.dp)

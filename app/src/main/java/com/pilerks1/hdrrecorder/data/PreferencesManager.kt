@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.pilerks1.hdrrecorder.model.ColorFormat
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
+import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import org.json.JSONObject
 import androidx.core.content.edit
@@ -37,6 +38,7 @@ class PreferencesManager(context: Context) {
         val json = JSONObject().apply {
             put("fps", state.selectedFps)
             put("res", state.selectedResolution.storageId)
+            put("aspect", state.selectedAspectRatio.storageId)
             put("color", state.colorFormat.storageId)
             put("gamma", state.gammaCurve.storageId)
             put("nr", state.isNoiseReductionEnabled)
@@ -60,10 +62,13 @@ class PreferencesManager(context: Context) {
             val json = JSONObject(str)
             val resolution = Resolution.fromStorageId(json.optString("res", ""))
                 ?: defaultState.selectedResolution
+            val aspectRatio = RecordingAspectRatio.fromStorageId(json.optString("aspect", ""))
+                ?: defaultState.selectedAspectRatio
 
             defaultState.copy(
                 selectedFps = json.optInt("fps", defaultState.selectedFps),
                 selectedResolution = resolution,
+                selectedAspectRatio = aspectRatio,
                 colorFormat = ColorFormat.fromStorageId(json.optString("color", ""))
                     ?: defaultState.colorFormat,
                 gammaCurve = GammaCurve.fromStorageId(json.optString("gamma", ""))

@@ -4,13 +4,14 @@ import androidx.camera.core.MeteringPoint
 import com.pilerks1.hdrrecorder.model.ColorFormat
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
+import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import android.util.Range
 
 /**
  * Represents the state of all manual controls.
  */
 data class ManualControlsState(
-    val activeSlider: ManualControl? = null,
+    val activePanel: CameraControlPanel? = null,
     
     // ISO
     val isManualIso: Boolean = false,
@@ -77,6 +78,7 @@ data class CameraUiState(
     // Settings / Configuration
     val selectedFps: Int = 30,
     val selectedResolution: Resolution = Resolution.FHD,
+    val selectedAspectRatio: RecordingAspectRatio = RecordingAspectRatio.FOUR_THREE,
 
     // Color Settings
     val colorFormat: ColorFormat = ColorFormat.HLG,
@@ -116,6 +118,7 @@ sealed interface CameraUiEvent {
     data object TogglePause : CameraUiEvent
     data object CycleFps : CameraUiEvent
     data object CycleResolution : CameraUiEvent
+    data object CycleAspectRatio : CameraUiEvent
 
     // Color Events
     data object CycleColorFormat : CameraUiEvent

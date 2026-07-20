@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -26,28 +25,23 @@ import androidx.camera.viewfinder.compose.MutableCoordinateTransformer
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.delay
+import com.pilerks1.hdrrecorder.ui.layout.LayoutRect
 
 /**
- * Camera preview composable. Accepts isLandscape from the parent (derived from the
- * actual Activity window dimensions. CameraX target rotation follows the display through
- * a DisplayListener, so preview layout and capture metadata stay in sync without custom
- * sensor mapping.
+ * Camera preview composable. Layout and capture rotation are owned outside this component.
  */
 @Composable
 fun PreviewUI(
     surfaceRequest: SurfaceRequest?,
     stats: StateFlow<StatsSnapshot>,
     isRecording: Boolean,
-    isLandscape: Boolean,
-    hasExpandedSlider: Boolean,
+    expandedPanelBounds: LayoutRect?,
     onEvent: (CameraUiEvent) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val statsSnapshot by stats.collectAsState()
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
     val coordinateTransformer = remember { MutableCoordinateTransformer() }
-    val sliderPanelThickness = if (isLandscape) 128.dp else 64.dp
-    val sliderPanelThicknessPx = with(LocalDensity.current) { sliderPanelThickness.toPx() }
 
     // ROOT CONTAINER: Always fills the space allocated by parent
     // and centers the content (the viewfinder).
@@ -55,18 +49,13 @@ fun PreviewUI(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // VIEWFINDER CONTAINER: Constrained to 4:3 Aspect Ratio
+        // VIEWFINDER CONTAINER: Its selected aspect ratio is assigned by the root slot layout.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(surfaceRequest, isLandscape, hasExpandedSlider, sliderPanelThicknessPx) {
+                .pointerInput(surfaceRequest, expandedPanelBounds) {
                     detectTapGestures { offset ->
-                        val isInsideExpandedSlider = hasExpandedSlider && if (isLandscape) {
-                            offset.x >= size.width - sliderPanelThicknessPx
-                        } else {
-                            offset.y >= size.height - sliderPanelThicknessPx
-                        }
-                        if (isInsideExpandedSlider) return@detectTapGestures
+                        if (expandedPanelBounds?.contains(offset.x, offset.y) == true) return@detectTapGestures
 
                         val request = surfaceRequest ?: return@detectTapGestures
                         val surfaceOffset = with(coordinateTransformer) {

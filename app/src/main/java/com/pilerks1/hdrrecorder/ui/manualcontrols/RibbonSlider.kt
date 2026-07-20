@@ -18,23 +18,24 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 
 private val ClipXAxisShape = object : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
@@ -54,40 +55,59 @@ private data class RibbonTickLayout(
     val label: TextLayoutResult?
 )
 
+internal data class RibbonAxisGeometry(
+    val axisStart: Float,
+    val axisEnd: Float
+)
+
+internal fun ribbonAxisGeometry(
+    width: Float,
+    edgePadding: Float,
+    reservedStart: Float,
+    reservedEnd: Float
+): RibbonAxisGeometry {
+    val axisStart = maxOf(edgePadding, reservedStart).coerceAtMost(width / 2f)
+    val axisEnd = minOf(width - edgePadding, width - reservedEnd).coerceAtLeast(axisStart)
+    return RibbonAxisGeometry(axisStart, axisEnd)
+}
+
 @Composable
 fun RibbonSlider(
     value: Float, // 0f..1f
     onValueChange: (Float) -> Unit,
-    isLandscape: Boolean,
+    axis: AxisSpec,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     labelString: String = "",
-    ticks: List<Pair<Float, String>> // fraction -> label
+    ticks: List<SliderTick>,
+    axisReservation: SliderAxisReservation = SliderAxisReservation()
 ) {
     // ==========================================
     // RIBBON SLIDER INTERNAL LAYOUT CONTROLS
     // ==========================================
-    val liveReadoutYOffset = if (isLandscape) (-40).dp else (-22).dp
-    val tickToTextPadding = if (isLandscape) 20.dp else 2.dp
-    val tickStartYOffset = if (isLandscape) 20.dp else 16.dp
+    val visualSpec = sliderVisualSpec(axis)
+    val liveReadoutYOffset = visualSpec.liveReadoutOffset
+    val tickToTextPadding = visualSpec.tickTextPadding
+    val tickStartYOffset = visualSpec.tickStartOffset
     // ==========================================
 
-    val textRotation = if (isLandscape) 90f else 0f
+    val textRotation = axis.contentCounterRotationDegrees
     
     val density = LocalDensity.current
-    val totalPanDistancePx = with(density) { 600.dp.toPx() } // How many pixels to drag from 0 to 1
     val tickStartYOffsetPx = with(density) { tickStartYOffset.toPx() }
     val tickToTextPaddingPx = with(density) { tickToTextPadding.toPx() }
-    val majorTickHeightPx = with(density) { 12.dp.toPx() }
-    val minorTickHeightPx = with(density) { 6.dp.toPx() }
-    val centerIndicatorHalfHeightPx = with(density) { 12.dp.toPx() }
-    val tickTextStyle = remember { TextStyle(color = Color.Gray, fontSize = 10.sp) }
+    val tickHeightPx = with(density) { SliderPaneStyle.sliderTickHeight.toPx() }
+    val axisEdgePaddingPx = with(density) { SliderPaneStyle.sliderAxisEdgePadding.toPx() }
+    val axisReservedStartPx = with(density) { axisReservation.start.toPx() }
+    val axisReservedEndPx = with(density) { axisReservation.end.toPx() }
+    val centerIndicatorHalfHeightPx = with(density) { SliderPaneStyle.centerIndicatorHalfHeight.toPx() }
+    val tickTextStyle = remember { SliderPaneStyle.tickTextStyle.copy(color = Color.Gray) }
     val textMeasurer = rememberTextMeasurer()
     val tickLayouts = remember(ticks, density, textMeasurer) {
-        ticks.map { (fraction, label) ->
+        ticks.map { tick ->
             RibbonTickLayout(
-                fraction = fraction,
-                label = label.takeIf(String::isNotEmpty)?.let {
+                fraction = tick.position,
+                label = tick.label.takeIf(String::isNotEmpty)?.let {
                     textMeasurer.measure(AnnotatedString(it), style = tickTextStyle)
                 }
             )
@@ -103,11 +123,26 @@ fun RibbonSlider(
     var dragAccumulator by remember { mutableFloatStateOf(value) }
     
     val sliderContent = @Composable {
+        var sliderSurfaceSize by remember { mutableStateOf(IntSize.Zero) }
+        val labelPrimaryOffset = if (sliderSurfaceSize.width > 0) {
+            val geometry = ribbonAxisGeometry(
+                width = sliderSurfaceSize.width.toFloat(),
+                edgePadding = axisEdgePaddingPx,
+                reservedStart = axisReservedStartPx,
+                reservedEnd = axisReservedEndPx
+            )
+            with(density) {
+                (((geometry.axisStart + geometry.axisEnd) / 2f) - sliderSurfaceSize.width / 2f).toDp()
+            }
+        } else {
+            0.dp
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .onSizeChanged { sliderSurfaceSize = it }
                 .clip(ClipXAxisShape)
-                .pointerInput(enabled) {
+                .pointerInput(enabled, axisReservation) {
                     if (!enabled) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { 
@@ -118,14 +153,26 @@ fun RibbonSlider(
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
                             velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            dragAccumulator -= (dragAmount / totalPanDistancePx)
+                            val trackLengthPx = ribbonAxisGeometry(
+                                width = size.width.toFloat(),
+                                edgePadding = axisEdgePaddingPx,
+                                reservedStart = axisReservedStartPx,
+                                reservedEnd = axisReservedEndPx
+                            ).let { (it.axisEnd - it.axisStart).coerceAtLeast(1f) }
+                            dragAccumulator -= (dragAmount / trackLengthPx)
                             val newValue = dragAccumulator.coerceIn(0f, 1f)
                             scope.launch { animatable.snapTo(newValue) }
                             onValueChange(newValue)
                         },
                         onDragEnd = {
                             val velocityPx = velocityTracker.calculateVelocity().x
-                            val velocityInValue = -(velocityPx / totalPanDistancePx)
+                            val trackLengthPx = ribbonAxisGeometry(
+                                width = size.width.toFloat(),
+                                edgePadding = axisEdgePaddingPx,
+                                reservedStart = axisReservedStartPx,
+                                reservedEnd = axisReservedEndPx
+                            ).let { (it.axisEnd - it.axisStart).coerceAtLeast(1f) }
+                            val velocityInValue = -(velocityPx / trackLengthPx)
                             
                             scope.launch {
                                 val decay = exponentialDecay<Float>(frictionMultiplier = 2f)
@@ -139,12 +186,12 @@ fun RibbonSlider(
                                 }
                                 
                                 val finalValue = animatable.value.coerceIn(0f, 1f)
-                                val closestTick = ticks.minByOrNull { abs(it.first - finalValue) }
+                                val closestTick = ticks.minByOrNull { abs(it.position - finalValue) }
                                 if (closestTick != null) {
-                                    val distanceToTick = abs(finalValue - closestTick.first)
+                                    val distanceToTick = abs(finalValue - closestTick.position)
                                     if (distanceToTick < 0.01f) {
                                         animatable.animateTo(
-                                            targetValue = closestTick.first,
+                                            targetValue = closestTick.position,
                                             animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
                                         ) {
                                             val clamped = this.value.coerceIn(0f, 1f)
@@ -164,34 +211,48 @@ fun RibbonSlider(
                     .fillMaxSize()
                     .clip(ClipXAxisShape)
             ) {
-                val centerX = size.width / 2f
+                val axisGeometry = ribbonAxisGeometry(
+                    width = size.width,
+                    edgePadding = axisEdgePaddingPx,
+                    reservedStart = axisReservedStartPx,
+                    reservedEnd = axisReservedEndPx
+                )
+                val centerX = (axisGeometry.axisStart + axisGeometry.axisEnd) / 2f
                 val centerY = size.height / 2f
+                val totalPanDistancePx = (axisGeometry.axisEnd - axisGeometry.axisStart).coerceAtLeast(1f)
 
-                tickLayouts.forEachIndexed { index, tick ->
-                    val tickX = centerX + (tick.fraction - value) * totalPanDistancePx
-                    val tickHeight = if (index % 3 == 0) majorTickHeightPx else minorTickHeightPx
-                    val tickTop = centerY + tickStartYOffsetPx
-                    drawLine(
-                        color = Color.White,
-                        start = Offset(tickX, tickTop),
-                        end = Offset(tickX, tickTop + tickHeight),
-                        strokeWidth = 1.dp.toPx()
-                    )
-
-                    tick.label?.let { label ->
-                        val topLeft = Offset(
-                            x = tickX - label.size.width / 2f,
-                            y = tickTop + tickHeight + tickToTextPaddingPx
+                clipRect(left = axisGeometry.axisStart, right = axisGeometry.axisEnd) {
+                    tickLayouts.forEach { tick ->
+                        val tickX = centerX + (tick.fraction - value) * totalPanDistancePx
+                        val tickTop = centerY + tickStartYOffsetPx
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(tickX, tickTop),
+                            end = Offset(tickX, tickTop + tickHeightPx),
+                            strokeWidth = 1.dp.toPx()
                         )
-                        if (isLandscape) {
-                            rotate(
-                                degrees = textRotation,
-                                pivot = Offset(tickX, topLeft.y + label.size.height / 2f)
-                            ) {
-                                drawText(label, topLeft = topLeft)
+
+                        tick.label?.let { label ->
+                            val topLeft = Offset(
+                                x = tickX - label.size.width / 2f,
+                                y = tickTop + tickHeightPx + tickToTextPaddingPx
+                            )
+                            val labelPrimaryHalfExtent = if (textRotation == 0f) {
+                                label.size.width / 2f
+                            } else {
+                                label.size.height / 2f
                             }
-                        } else {
-                            drawText(label, topLeft = topLeft)
+                            if (
+                                tickX - labelPrimaryHalfExtent >= axisGeometry.axisStart &&
+                                tickX + labelPrimaryHalfExtent <= axisGeometry.axisEnd
+                            ) {
+                                rotate(
+                                    degrees = textRotation,
+                                    pivot = Offset(tickX, topLeft.y + label.size.height / 2f)
+                                ) {
+                                    drawText(label, topLeft = topLeft)
+                                }
+                            }
                         }
                     }
                 }
@@ -207,27 +268,19 @@ fun RibbonSlider(
             if (labelString.isNotEmpty()) {
                 Text(
                     text = labelString,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = SliderPaneStyle.liveReadoutTextStyle.copy(color = Color.White),
                     maxLines = 1,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier
-                        .offset(y = liveReadoutYOffset)
+                        .offset(x = labelPrimaryOffset, y = liveReadoutYOffset)
                         .graphicsLayer { rotationZ = textRotation }
                 )
             }
         }
     }
 
-    if (isLandscape) {
-        Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            Box(modifier = Modifier.rotateVertical()) {
-                sliderContent()
-            }
-        }
-    } else {
-        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.rotateForAxis(axis)) {
             sliderContent()
         }
     }

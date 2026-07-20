@@ -1,34 +1,33 @@
 package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
+import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 
 /**
- * Rotates content 270° and swaps its measured width/height so a horizontally-authored
- * slider lays out correctly in a vertical (landscape) track. Shared by RibbonSlider and
- * FpsSlider so the rotation/remeasure math lives in exactly one place.
+ * Keeps a horizontally-authored slider's measured, drawn, and hit-test bounds identical
+ * after it is rotated into the vertical camera-control axis.
  */
-fun Modifier.rotateVertical(): Modifier = this
-    .graphicsLayer {
-        rotationZ = 270f
-        transformOrigin = TransformOrigin(0.5f, 0.5f)
-    }
-    .layout { measurable, constraints ->
+fun Modifier.rotateForAxis(axis: AxisSpec): Modifier {
+    if (!axis.usesVerticalTrack) return this
+
+    return layout { measurable, constraints ->
         val placeable = measurable.measure(
             Constraints(
                 minWidth = constraints.minHeight,
                 maxWidth = constraints.maxHeight,
                 minHeight = constraints.minWidth,
-                maxHeight = constraints.maxWidth,
+                maxHeight = constraints.maxWidth
             )
         )
         layout(placeable.height, placeable.width) {
-            placeable.place(
-                -placeable.width / 2 + placeable.height / 2,
-                -placeable.height / 2 + placeable.width / 2
-            )
+            placeable.placeWithLayer(
+                x = (placeable.height - placeable.width) / 2,
+                y = (placeable.width - placeable.height) / 2
+            ) {
+                rotationZ = 270f
+            }
         }
     }
+}
