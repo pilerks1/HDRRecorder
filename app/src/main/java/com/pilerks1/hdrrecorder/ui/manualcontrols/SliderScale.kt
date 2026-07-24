@@ -3,7 +3,9 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.log2
+import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -33,6 +35,7 @@ data class StandardSliderBinding<T : Any>(
 object SliderScales {
     private const val MAX_TICK_COUNT = 15
     private const val LABEL_INTERVAL = 2
+    private const val MAX_EV_MAJOR_LABEL_COUNT = 7
 
     fun iso(caps: CameraCapabilities?): SliderScale<Int> {
         return isoRange(caps?.isoRange?.lower ?: 100, caps?.isoRange?.upper ?: 3200)
@@ -106,11 +109,18 @@ object SliderScales {
         val format: (Int) -> String = { index ->
             formatEv(index, stepNumerator, stepDenominator)
         }
-        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
-        val valueLabels = if (upper.toLong() - lower.toLong() <= 200L) {
-            (lower..upper).map(format)
-        } else {
-            listOf(format(lower), format(upper), format(fromProgress(0.5f)))
+        val ticks = exposureCompensationTicks(
+            lower = lower,
+            upper = upper,
+            stepNumerator = stepNumerator,
+            stepDenominator = stepDenominator,
+            toProgress = toProgress,
+            format = format
+        )
+        val valueLabels = buildList {
+            add(format(lower))
+            if (lower <= 0 && upper >= 0) add(format(0))
+            add(format(upper))
         }
         return SliderScale(
             fallbackValue = 0.coerceIn(lower, upper),
@@ -208,6 +218,51 @@ object SliderScales {
             .filter(String::isNotEmpty)
             .distinct()
 
+    private fun exposureCompensationTicks(
+        lower: Int,
+        upper: Int,
+        stepNumerator: Int,
+        stepDenominator: Int,
+        toProgress: (Int) -> Float,
+        format: (Int) -> String
+    ): List<SliderTick> {
+        val safeDenominator = stepDenominator.toLong().takeIf { it != 0L } ?: 1L
+        val stepEv = abs(stepNumerator.toDouble() / safeDenominator.toDouble())
+            .takeIf { it > 0.0 && it.isFinite() } ?: 1.0
+        val spanEv = (upper.toLong() - lower.toLong()).toDouble() * stepEv
+        val targetMajorInterval = maxOf(
+            1.0,
+            spanEv / (MAX_EV_MAJOR_LABEL_COUNT - 1).toDouble()
+        )
+        val majorIntervalEv = niceEvInterval(targetMajorInterval)
+        val majorIndexStride = (majorIntervalEv / stepEv)
+            .roundToLong()
+            .coerceAtLeast(1L)
+
+        return (lower..upper).map { evIndex ->
+            val shouldLabel = evIndex == lower ||
+                evIndex == upper ||
+                evIndex == 0 ||
+                evIndex.toLong() % majorIndexStride == 0L
+            SliderTick(
+                position = toProgress(evIndex),
+                label = if (shouldLabel) format(evIndex) else ""
+            )
+        }
+    }
+
+    private fun niceEvInterval(target: Double): Double {
+        val magnitude = 10.0.pow(floor(log10(target)))
+        val normalized = target / magnitude
+        val multiplier = when {
+            normalized <= 1.0 -> 1.0
+            normalized <= 2.0 -> 2.0
+            normalized <= 5.0 -> 5.0
+            else -> 10.0
+        }
+        return multiplier * magnitude
+    }
+
     private fun discreteIntervals(lower: Int, upper: Int): Int =
         (upper.toLong() - lower.toLong()).coerceIn(0L, (MAX_TICK_COUNT - 1).toLong()).toInt()
 
@@ -248,27 +303,31 @@ object SliderScales {
     }
 
     private fun formatEv(index: Int, stepNumerator: Int, stepDenominator: Int): String {
-        val safeDenominator = stepDenominator.takeIf { it != 0 } ?: 1
+        val safeDenominator = stepDenominator.toLong().takeIf { it != 0L } ?: 1L
         val rawNumerator = index.toLong() * stepNumerator.toLong()
-        if (rawNumerator == 0L) return "0"
-
-        val sign = if (rawNumerator * safeDenominator > 0L) "+" else "-"
-        val numerator = abs(rawNumerator)
-        val denominator = abs(safeDenominator.toLong())
-        val divisor = greatestCommonDivisor(numerator, denominator)
-        val reducedNumerator = numerator / divisor
-        val reducedDenominator = denominator / divisor
-        val whole = reducedNumerator / reducedDenominator
-        val remainder = reducedNumerator % reducedDenominator
+        val decimalPlaces = evDecimalPlaces(stepNumerator, safeDenominator)
+        val magnitude = abs(rawNumerator.toDouble() / safeDenominator.toDouble())
+        val formattedMagnitude = String.format(Locale.US, "%.${decimalPlaces}f", magnitude)
         return when {
-            remainder == 0L -> "$sign$whole"
-            whole == 0L -> "$sign$remainder/$reducedDenominator"
-            else -> "$sign$whole $remainder/$reducedDenominator"
+            rawNumerator == 0L -> formattedMagnitude
+            (rawNumerator > 0L) == (safeDenominator > 0L) -> "+$formattedMagnitude"
+            else -> "-$formattedMagnitude"
         }
     }
 
-    private tailrec fun greatestCommonDivisor(first: Long, second: Long): Long =
-        if (second == 0L) first.coerceAtLeast(1L) else greatestCommonDivisor(second, first % second)
+    private fun evDecimalPlaces(stepNumerator: Int, stepDenominator: Long): Int {
+        val numeratorMagnitude = abs(stepNumerator.toLong())
+        if (numeratorMagnitude == 0L) return 1
+
+        val denominatorMagnitude = abs(stepDenominator).coerceAtLeast(1L)
+        var decimalPlaces = 1
+        var decimalScale = 10L
+        while (numeratorMagnitude * decimalScale < denominatorMagnitude) {
+            decimalPlaces++
+            decimalScale *= 10L
+        }
+        return decimalPlaces
+    }
 }
 
 private fun Float.finiteProgress(): Float = if (isFinite()) coerceIn(0f, 1f) else 0.5f

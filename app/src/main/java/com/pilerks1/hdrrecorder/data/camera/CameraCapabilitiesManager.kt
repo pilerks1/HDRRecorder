@@ -1,6 +1,7 @@
 package com.pilerks1.hdrrecorder.data.camera
 
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
 import android.os.Build
 import android.util.Range
 import android.util.Rational
@@ -19,6 +20,12 @@ data class CameraCapabilities(
     val evStep: Rational? = null,
     val focusMinDistanceDiopters: Float = 0f,
     val fpsRanges: List<Range<Int>> = emptyList(),
+    val supportsManualSensor: Boolean = false,
+    val supportsFullManualExposure: Boolean = false,
+    val hasManualIsoControl: Boolean = false,
+    val hasManualShutterControl: Boolean = false,
+    val hasExposureCompensationControl: Boolean = false,
+    val hasManualFocusControl: Boolean = false,
     val supportsCCT: Boolean = false,
     val cctTemperatureRange: Range<Int>? = null,
     val supportsShutterPriorityAe: Boolean = false,
@@ -51,7 +58,15 @@ object CameraCapabilitiesManager {
         // 5. FPS Ranges
         val fpsArray = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
         val fpsRanges = fpsArray?.toList() ?: emptyList()
-        
+
+        val requestCapabilities = camera2Info.getCameraCharacteristic(
+            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+        )
+        val supportsManualSensor = requestCapabilities
+            ?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+        val hasValidIsoRange = isoRange?.let { it.lower < it.upper } == true
+        val hasValidShutterRange = ssRange?.let { it.lower < it.upper } == true
+
         // API 36-only capability probes are gated here so the checker's @RequiresApi(36)
         // methods are never called on older devices.
         val isApi36 = Build.VERSION.SDK_INT >= 36
@@ -60,6 +75,21 @@ object CameraCapabilitiesManager {
         } else {
             null
         }
+        val supportsShutterPriorityAe =
+            isApi36 && DeviceCompatibilityChecker.supportsShutterPriorityAe(camera2Info)
+        val supportsIsoPriorityAe =
+            isApi36 && DeviceCompatibilityChecker.supportsIsoPriorityAe(camera2Info)
+        val supportsFullManualExposure =
+            supportsManualSensor && hasValidIsoRange && hasValidShutterRange
+        val hasExposureCompensationControl = evRange?.let { range ->
+            evStep?.let { step ->
+                val hasNonZeroRange = range.lower != 0 || range.upper != 0
+                val hasPositiveStep = step.numerator != 0 &&
+                    step.denominator != 0 &&
+                    (step.numerator > 0) == (step.denominator > 0)
+                hasNonZeroRange && hasPositiveStep
+            }
+        } == true
 
         return CameraCapabilities(
             isoRange = isoRange,
@@ -68,10 +98,18 @@ object CameraCapabilitiesManager {
             evStep = evStep,
             focusMinDistanceDiopters = minFocus,
             fpsRanges = fpsRanges,
+            supportsManualSensor = supportsManualSensor,
+            supportsFullManualExposure = supportsFullManualExposure,
+            hasManualIsoControl = hasValidIsoRange &&
+                (supportsFullManualExposure || supportsIsoPriorityAe),
+            hasManualShutterControl = hasValidShutterRange &&
+                (supportsFullManualExposure || supportsShutterPriorityAe),
+            hasExposureCompensationControl = hasExposureCompensationControl,
+            hasManualFocusControl = supportsManualSensor && minFocus > 0f,
             supportsCCT = isApi36 && DeviceCompatibilityChecker.supportsCct(camera2Info),
             cctTemperatureRange = cctTemperatureRange,
-            supportsShutterPriorityAe = isApi36 && DeviceCompatibilityChecker.supportsShutterPriorityAe(camera2Info),
-            supportsIsoPriorityAe = isApi36 && DeviceCompatibilityChecker.supportsIsoPriorityAe(camera2Info),
+            supportsShutterPriorityAe = supportsShutterPriorityAe,
+            supportsIsoPriorityAe = supportsIsoPriorityAe,
             supportsNightMode = isApi36 && DeviceCompatibilityChecker.supportsNightMode(camera2Info)
         )
     }

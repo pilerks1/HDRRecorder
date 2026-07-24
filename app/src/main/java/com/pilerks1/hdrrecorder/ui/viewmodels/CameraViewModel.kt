@@ -316,7 +316,16 @@ class CameraViewModel(
                 uiState = _uiState.value,
                 displayRotation = lastDisplayRotation,
                 onCameraBound = { control, caps ->
-                    _uiState.update { it.copy(cameraCapabilities = caps, isCameraReady = true) }
+                    _uiState.update {
+                        it.copy(
+                            cameraCapabilities = caps,
+                            manualControlsState = ManualControlStateUpdater.sanitizeForCapabilities(
+                                it.manualControlsState,
+                                caps
+                            ),
+                            isCameraReady = true
+                        )
+                    }
                     applyInterop()
                 }
             )
@@ -366,7 +375,10 @@ class CameraViewModel(
         )
         if (lastInteropControl === cameraControl && lastInteropSubmission == submission) return
 
-        val exposureCompensationIndex = CameraInteropApplier.exposureCompensationIndex(submission.controls)
+        val exposureCompensationIndex = CameraInteropApplier.exposureCompensationIndex(
+            submission.controls,
+            submission.capabilities
+        )
         val shouldApplyExposureCompensation = lastInteropControl !== cameraControl ||
             lastExposureCompensationIndex != exposureCompensationIndex
         CameraInteropApplier.apply(

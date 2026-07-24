@@ -24,7 +24,9 @@ internal object SliderPaneStyle {
     val resolutionContentPadding = 8.dp
     val sliderAxisEdgePadding = 8.dp
     val sliderTickHeight = 8.dp
-    val centerIndicatorHalfHeight = 12.dp
+    val standardElementGap = 2.dp
+    val standardPaneEdgePadding = 2.dp
+    val centerIndicatorHalfHeight = 10.dp
     val rangeThumbHalfHeight = 12.dp
     val rangeThumbLabelOffset = 24.dp
     val rangeTickOffset = 16.dp
@@ -35,27 +37,6 @@ internal object SliderPaneStyle {
     val rangeTickTextStyle = TextStyle(fontSize = 7.sp)
     val rangeThumbTextStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold)
 }
-
-internal data class SliderVisualSpec(
-    val liveReadoutOffset: Dp,
-    val tickTextPadding: Dp,
-    val tickStartOffset: Dp
-)
-
-internal fun sliderVisualSpec(axis: AxisSpec): SliderVisualSpec =
-    if (axis.usesVerticalTrack) {
-        SliderVisualSpec(
-            liveReadoutOffset = (-40).dp,
-            tickTextPadding = 20.dp,
-            tickStartOffset = 20.dp
-        )
-    } else {
-        SliderVisualSpec(
-            liveReadoutOffset = (-22).dp,
-            tickTextPadding = 2.dp,
-            tickStartOffset = 16.dp
-        )
-    }
 
 internal data class SliderPaneSizing(
     private val thicknesses: Map<CameraOrientation, Map<CameraControlPanel, Float>>
@@ -83,9 +64,21 @@ internal fun rememberSliderPaneSizing(
         SliderPaneSizing(
             thicknesses = orientations.associate { axis ->
                 axis.orientation to panels.associateWith { panel ->
-                    val labels = panelLayoutLabels(panel, caps)
-                    val standardLiveSize = labels.maxMeasuredSize(textMeasurer, SliderPaneStyle.liveReadoutTextStyle)
-                    val standardTickSize = labels.maxMeasuredSize(textMeasurer, SliderPaneStyle.tickTextStyle)
+                    val scale = panelScale(panel, caps)
+                    val liveLabels = scale?.layoutLabels ?: fpsLayoutLabels(caps)
+                    val tickLabels = scale?.ticks
+                        ?.map(SliderTick::label)
+                        ?.filter(String::isNotEmpty)
+                        .orEmpty()
+                        .ifEmpty { liveLabels }
+                    val standardLiveSize = liveLabels.maxMeasuredSize(
+                        textMeasurer,
+                        SliderPaneStyle.liveReadoutTextStyle
+                    )
+                    val standardTickSize = tickLabels.maxMeasuredSize(
+                        textMeasurer,
+                        SliderPaneStyle.tickTextStyle
+                    )
                     val thickness = with(density) {
                         if (panel == CameraControlPanel.RESOLUTION) {
                             val fpsLabels = fpsLayoutLabels(caps)
@@ -131,23 +124,47 @@ internal fun standardPaneThicknessPx(
     tickLabelHeightPx: Float,
     dpToPx: (Dp) -> Float
 ): Float {
-    val visual = sliderVisualSpec(axis)
-    val liveCrossHalf = if (axis.usesVerticalTrack) liveLabelWidthPx / 2f else liveLabelHeightPx / 2f
-    val tickCrossHalf = if (axis.usesVerticalTrack) tickLabelWidthPx / 2f else tickLabelHeightPx / 2f
-    val tickCenterOffset = dpToPx(visual.tickStartOffset) +
-        dpToPx(SliderPaneStyle.sliderTickHeight) +
-        dpToPx(visual.tickTextPadding) +
-        tickLabelHeightPx / 2f
-    val upperExtent = max(
-        dpToPx(SliderPaneStyle.centerIndicatorHalfHeight),
-        -dpToPx(visual.liveReadoutOffset) + liveCrossHalf
+    val upperExtent = standardSliderTopExtentPx(
+        axis = axis,
+        liveLabelWidthPx = liveLabelWidthPx,
+        liveLabelHeightPx = liveLabelHeightPx,
+        dpToPx = dpToPx
     )
-    val lowerExtent = max(
-        dpToPx(SliderPaneStyle.centerIndicatorHalfHeight),
-        tickCenterOffset + tickCrossHalf
+    val lowerExtent = standardSliderBottomExtentPx(
+        axis = axis,
+        tickLabelWidthPx = tickLabelWidthPx,
+        tickLabelHeightPx = tickLabelHeightPx,
+        dpToPx = dpToPx
     )
     val actionMinimum = dpToPx(SliderPaneStyle.actionButtonSize)
-    return max(actionMinimum, 2f * max(upperExtent, lowerExtent))
+    val edgePadding = 2f * dpToPx(SliderPaneStyle.standardPaneEdgePadding)
+    return max(actionMinimum, upperExtent + lowerExtent + edgePadding)
+}
+
+internal fun standardSliderTopExtentPx(
+    axis: AxisSpec,
+    liveLabelWidthPx: Float,
+    liveLabelHeightPx: Float,
+    dpToPx: (Dp) -> Float
+): Float {
+    val liveCrossExtent = if (axis.usesVerticalTrack) liveLabelWidthPx else liveLabelHeightPx
+    return dpToPx(SliderPaneStyle.centerIndicatorHalfHeight) +
+        dpToPx(SliderPaneStyle.standardElementGap) +
+        liveCrossExtent
+}
+
+internal fun standardSliderBottomExtentPx(
+    axis: AxisSpec,
+    tickLabelWidthPx: Float,
+    tickLabelHeightPx: Float,
+    dpToPx: (Dp) -> Float
+): Float {
+    val labelCrossExtent = if (axis.usesVerticalTrack) tickLabelWidthPx else tickLabelHeightPx
+    return dpToPx(SliderPaneStyle.centerIndicatorHalfHeight) +
+        dpToPx(SliderPaneStyle.standardElementGap) +
+        dpToPx(SliderPaneStyle.sliderTickHeight) +
+        dpToPx(SliderPaneStyle.standardElementGap) +
+        labelCrossExtent
 }
 
 internal fun rangePaneThicknessPx(
@@ -175,17 +192,17 @@ internal fun rangePaneThicknessPx(
     return max(actionMinimum, contentThickness + padding)
 }
 
-private fun panelLayoutLabels(
+private fun panelScale(
     panel: CameraControlPanel,
     caps: CameraCapabilities?
-): List<String> = when (panel) {
-    CameraControlPanel.RESOLUTION -> fpsLayoutLabels(caps)
-    CameraControlPanel.ISO -> SliderScales.iso(caps).layoutLabels
-    CameraControlPanel.SHUTTER -> SliderScales.shutter(caps).layoutLabels
-    CameraControlPanel.EXPOSURE_COMPENSATION -> SliderScales.exposureCompensation(caps).layoutLabels
-    CameraControlPanel.FOCUS -> SliderScales.focus(caps).layoutLabels
-    CameraControlPanel.WHITE_BALANCE -> SliderScales.whiteBalance(caps).layoutLabels
-    CameraControlPanel.TINT -> SliderScales.tint().layoutLabels
+): SliderScale<*>? = when (panel) {
+    CameraControlPanel.RESOLUTION -> null
+    CameraControlPanel.ISO -> SliderScales.iso(caps)
+    CameraControlPanel.SHUTTER -> SliderScales.shutter(caps)
+    CameraControlPanel.EXPOSURE_COMPENSATION -> SliderScales.exposureCompensation(caps)
+    CameraControlPanel.FOCUS -> SliderScales.focus(caps)
+    CameraControlPanel.WHITE_BALANCE -> SliderScales.whiteBalance(caps)
+    CameraControlPanel.TINT -> SliderScales.tint()
 }
 
 private fun fpsLayoutLabels(caps: CameraCapabilities?): List<String> {

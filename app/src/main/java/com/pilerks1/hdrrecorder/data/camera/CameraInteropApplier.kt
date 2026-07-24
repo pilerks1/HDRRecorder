@@ -41,7 +41,7 @@ object CameraInteropApplier {
         val builder = CaptureRequestOptions.Builder()
 
         applyExposure(cameraControl, builder, state, capabilities, applyExposureCompensation)
-        applyFocus(builder, state)
+        applyFocus(builder, state, capabilities)
         applyWhiteBalance(builder, state, capabilities)
         applyFps(builder, state)
         applyNoiseReduction(builder, settings.isNoiseReductionEnabled)
@@ -50,8 +50,12 @@ object CameraInteropApplier {
         camera2Control.setCaptureRequestOptions(builder.build())
     }
 
-    fun exposureCompensationIndex(state: ManualControlsState): Int =
-        state.evValueIndex.takeIf { state.isManualEv } ?: 0
+    fun exposureCompensationIndex(
+        state: ManualControlsState,
+        capabilities: CameraCapabilities?
+    ): Int = state.evValueIndex.takeIf {
+        state.isManualEv && capabilities?.hasExposureCompensationControl == true
+    } ?: 0
 
     // --- Exposure (ISO / SS / EV / AE mode) ---
 
@@ -63,54 +67,57 @@ object CameraInteropApplier {
         applyExposureCompensation: Boolean
     ) {
         // Native CameraX EV
-        if (applyExposureCompensation) {
-            cameraControl.setExposureCompensationIndex(exposureCompensationIndex(state))
+        if (applyExposureCompensation && capabilities?.hasExposureCompensationControl == true) {
+            cameraControl.setExposureCompensationIndex(
+                exposureCompensationIndex(state, capabilities)
+            )
         }
 
-        var needsManualAe = false
+        val manualShutter = state.isManualSs &&
+            state.ssValueNanos != null &&
+            capabilities?.hasManualShutterControl == true
+        val manualIso = state.isManualIso &&
+            state.isoValue != null &&
+            capabilities?.hasManualIsoControl == true
 
-        if (state.isManualSs && state.ssValueNanos != null) {
-            builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
-            needsManualAe = true
-        }
-
-        if (state.isManualIso && state.isoValue != null) {
-            builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
-            needsManualAe = true
-        }
-
-        if (needsManualAe) {
-            if (canUseHybridAe(state, capabilities) && Build.VERSION.SDK_INT >= 36) {
-                applyHybridAe(builder, state)
-            } else {
-                // Device lacks Hybrid AE: manual ISO/SS forces AE off entirely.
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+        when {
+            manualShutter && manualIso && capabilities.supportsFullManualExposure -> {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
+                builder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CameraMetadata.CONTROL_AE_MODE_OFF
+                )
             }
-        } else {
-            applyAutoExposure(builder, state, capabilities)
+            manualShutter && !manualIso &&
+                capabilities.supportsShutterPriorityAe &&
+                Build.VERSION.SDK_INT >= 36 -> {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
+                applyHybridAe(builder, usesShutterPriority = true)
+            }
+            manualIso && !manualShutter &&
+                capabilities.supportsIsoPriorityAe &&
+                Build.VERSION.SDK_INT >= 36 -> {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
+                applyHybridAe(builder, usesShutterPriority = false)
+            }
+            else -> applyAutoExposure(builder, state, capabilities)
         }
     }
 
     /** Hybrid AE priority modes are Android 16 (API 36) only. */
     @RequiresApi(36)
-    private fun applyHybridAe(builder: CaptureRequestOptions.Builder, state: ManualControlsState) {
-        if (state.isManualSs && state.isManualIso) {
-            // Both manual: disable AE entirely.
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+    private fun applyHybridAe(
+        builder: CaptureRequestOptions.Builder,
+        usesShutterPriority: Boolean
+    ) {
+        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
+        val priorityMode = if (usesShutterPriority) {
+            CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY
         } else {
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
-            if (state.isManualSs) {
-                builder.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                    CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY
-                )
-            } else if (state.isManualIso) {
-                builder.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                    CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY
-                )
-            }
+            CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY
         }
+        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_PRIORITY_MODE, priorityMode)
     }
 
     private fun applyAutoExposure(
@@ -119,7 +126,11 @@ object CameraInteropApplier {
         capabilities: CameraCapabilities?
     ) {
         // Night Mode (AE Low Light Boost) is API 36 only.
-        if (state.isNightModeAeEnabled && Build.VERSION.SDK_INT >= 36) {
+        if (
+            state.isNightModeAeEnabled &&
+            capabilities?.supportsNightMode == true &&
+            Build.VERSION.SDK_INT >= 36
+        ) {
             builder.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AE_MODE,
                 CameraMetadata.CONTROL_AE_MODE_ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY
@@ -129,20 +140,21 @@ object CameraInteropApplier {
         }
     }
 
-    private fun canUseHybridAe(state: ManualControlsState, capabilities: CameraCapabilities?): Boolean = when {
-        state.isManualIso && state.isManualSs -> false
-        state.isManualIso -> capabilities?.supportsIsoPriorityAe == true
-        state.isManualSs -> capabilities?.supportsShutterPriorityAe == true
-        else -> false
-    }
-
     // --- Focus ---
 
-    private fun applyFocus(builder: CaptureRequestOptions.Builder, state: ManualControlsState) {
-        if (state.isManualFocus && state.focusDistanceDiopters != null) {
+    private fun applyFocus(
+        builder: CaptureRequestOptions.Builder,
+        state: ManualControlsState,
+        capabilities: CameraCapabilities?
+    ) {
+        if (
+            state.isManualFocus &&
+            state.focusDistanceDiopters != null &&
+            capabilities?.hasManualFocusControl == true
+        ) {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
             builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, state.focusDistanceDiopters)
-        } else {
+        } else if ((capabilities?.focusMinDistanceDiopters ?: 0f) > 0f) {
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
         }
     }

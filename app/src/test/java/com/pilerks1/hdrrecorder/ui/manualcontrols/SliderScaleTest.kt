@@ -73,26 +73,41 @@ class SliderScaleTest {
     }
 
     @Test
-    fun evTicksRepresentSupportedDeviceIndicesExactlyOnce() {
+    fun evTicksAlignWithTheirSupportedDeviceIndices() {
         val scale = SliderScales.exposureCompensationRange(
-            minimumIndex = -3,
-            maximumIndex = 3,
+            minimumIndex = -30,
+            maximumIndex = 30,
             stepNumerator = 1,
-            stepDenominator = 3
+            stepDenominator = 10
         )
 
-        assertEquals((-3..3).toList(), scale.ticks.map { scale.value(it.position) })
-        assertEquals("-1", scale.formatValue(-3))
-        assertEquals("-1/3", scale.formatValue(-1))
-        assertEquals("+1/3", scale.formatValue(1))
-        assertEquals("+1", scale.formatValue(3))
+        val representedIndices = scale.ticks.map { scale.value(it.position) }
+        assertEquals(61, scale.ticks.size)
+        assertEquals((-30..30).toList(), representedIndices)
+        assertEquals(representedIndices.size, representedIndices.distinct().size)
+        assertTrue(-30 in representedIndices)
+        assertTrue(0 in representedIndices)
+        assertTrue(30 in representedIndices)
+        scale.ticks.forEach { tick ->
+            assertEquals(tick.position, scale.progress(scale.value(tick.position)), 0.000001f)
+        }
+        assertEquals("-3.0", scale.formatValue(-30))
+        assertEquals("-0.3", scale.formatValue(-3))
+        assertEquals("0.0", scale.formatValue(0))
+        assertEquals("+0.3", scale.formatValue(3))
+        assertEquals("+3.0", scale.formatValue(30))
+        assertEquals(
+            listOf("-3.0", "-2.0", "-1.0", "0.0", "+1.0", "+2.0", "+3.0"),
+            scale.ticks.map { it.label }.filter(String::isNotEmpty)
+        )
     }
 
     @Test
-    fun evFormattingUsesTheDeviceReportedFraction() {
-        val scale = SliderScales.exposureCompensationRange(-6, 6, 1, 6)
+    fun evFormattingUsesPrecisionNeededForTheDeviceStep() {
+        val scale = SliderScales.exposureCompensationRange(-12, 12, 1, 12)
 
-        assertEquals("-5/6", scale.formatValue(-5))
-        assertEquals("+1/2", scale.formatValue(3))
+        assertEquals("-0.42", scale.formatValue(-5))
+        assertEquals("+0.50", scale.formatValue(6))
+        assertEquals("+1.00", scale.formatValue(12))
     }
 }

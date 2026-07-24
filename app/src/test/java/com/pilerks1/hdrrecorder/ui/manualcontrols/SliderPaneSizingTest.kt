@@ -30,6 +30,7 @@ class SliderPaneSizingTest {
         )
 
         assertTrue(shutterLabel > shortLabel)
+        assertEquals(152f, shutterLabel, 0f)
     }
 
     @Test
@@ -52,6 +53,14 @@ class SliderPaneSizingTest {
         )
 
         assertEquals(shortLabel, longLabel, 0f)
+        assertEquals(62f, shortLabel, 0f)
+    }
+
+    @Test
+    fun standardSliderUsesTwoDpSpacingAndShorterStationaryIndicator() {
+        assertEquals(2f, SliderPaneStyle.standardElementGap.value, 0f)
+        assertEquals(2f, SliderPaneStyle.standardPaneEdgePadding.value, 0f)
+        assertEquals(10f, SliderPaneStyle.centerIndicatorHalfHeight.value, 0f)
     }
 
     @Test

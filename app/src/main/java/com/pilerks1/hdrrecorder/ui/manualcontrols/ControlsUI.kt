@@ -37,10 +37,10 @@ private data class EffectiveWhiteBalance(val temperatureKelvin: Int, val tint: I
 fun availableControlPanels(
     caps: CameraCapabilities?
 ): List<CameraControlPanel> = orderedControlPanels(
-    hasShutter = caps?.ssRangeNanos != null,
-    hasIso = caps?.isoRange != null,
-    hasExposureCompensation = caps?.evRange != null,
-    hasFocus = (caps?.focusMinDistanceDiopters ?: 0f) > 0f,
+    hasShutter = caps?.hasManualShutterControl == true,
+    hasIso = caps?.hasManualIsoControl == true,
+    hasExposureCompensation = caps?.hasExposureCompensationControl == true,
+    hasFocus = caps?.hasManualFocusControl == true,
     hasWhiteBalance = caps?.supportsCCT == true
 )
 
@@ -270,11 +270,13 @@ fun ActiveControlPanel(
                     axis = axis,
                     labelString = scale.formatValue(state.evValueIndex),
                     ticks = scale.ticks,
+                    layoutLabels = scale.layoutLabels,
                     onValueChange = { onSetEv(true, scale.value(it)) },
                     primaryButtonText = "RES",
-                    primaryButtonEnabled = !aeIsOff && isManualEv,
+                    sliderEnabled = !aeIsOff,
+                    primaryButtonEnabled = true,
                     primaryButtonColor = if (isManualEv) Color.White else Color.DarkGray,
-                    primaryButtonTextColor = if (isManualEv && !aeIsOff) Color.Black else Color.Gray,
+                    primaryButtonTextColor = if (isManualEv) Color.Black else Color.LightGray,
                     onPrimaryButtonClick = { onSetEv(true, 0) },
                     secondaryButtonText = if (caps?.supportsNightMode == true) "NHT" else null,
                     secondaryButtonEnabled = !aeIsOff,
@@ -415,6 +417,7 @@ private fun <T : Any> StandardSlider(
         axis = axis,
         labelString = scale.formatValue(binding.effectiveValue),
         ticks = scale.ticks,
+        layoutLabels = scale.layoutLabels,
         onValueChange = { binding.onManualValue(scale.value(it)) },
         primaryButtonText = if (binding.isManual) "MAN" else "AUTO",
         primaryButtonColor = if (binding.isManual) Color.DarkGray else Color.White,

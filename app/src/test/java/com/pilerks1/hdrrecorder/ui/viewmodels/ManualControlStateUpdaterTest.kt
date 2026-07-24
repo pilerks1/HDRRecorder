@@ -12,12 +12,18 @@ class ManualControlStateUpdaterTest {
         isoValue = 400,
         shutterNanos = 10_000_000L
     )
+    private val fullManualCaps = CameraCapabilities(
+        supportsManualSensor = true,
+        supportsFullManualExposure = true,
+        hasManualIsoControl = true,
+        hasManualShutterControl = true
+    )
 
     @Test
     fun unsupportedHybridAeEnablesBothControlsWithCompleteValues() {
         val (state) = ManualControlStateUpdater.calculateNextState(
             oldState = ManualControlsState(),
-            caps = CameraCapabilities(),
+            caps = fullManualCaps,
             exposureDefaults = defaults
         ) { it.copy(isManualIso = true) }
 
@@ -37,7 +43,7 @@ class ManualControlStateUpdaterTest {
         )
         val (state) = ManualControlStateUpdater.calculateNextState(
             oldState = oldState,
-            caps = CameraCapabilities(),
+            caps = fullManualCaps,
             exposureDefaults = defaults
         ) { it.copy(isManualIso = false) }
 
@@ -49,7 +55,10 @@ class ManualControlStateUpdaterTest {
     fun hybridAeAllowsIndependentControls() {
         val (state) = ManualControlStateUpdater.calculateNextState(
             oldState = ManualControlsState(),
-            caps = CameraCapabilities(supportsIsoPriorityAe = true, supportsShutterPriorityAe = true),
+            caps = CameraCapabilities(
+                hasManualIsoControl = true,
+                supportsIsoPriorityAe = true
+            ),
             exposureDefaults = defaults
         ) { it.copy(isManualIso = true, isoValue = 400) }
 
@@ -58,8 +67,11 @@ class ManualControlStateUpdaterTest {
     }
 
     @Test
-    fun partialHybridAeFallsBackOnlyForTheUnsupportedControl() {
-        val shutterOnlyCaps = CameraCapabilities(supportsShutterPriorityAe = true)
+    fun partialHybridAeKeepsOnlyTheSupportedControl() {
+        val shutterOnlyCaps = CameraCapabilities(
+            hasManualShutterControl = true,
+            supportsShutterPriorityAe = true
+        )
 
         val (shutterState) = ManualControlStateUpdater.calculateNextState(
             oldState = ManualControlsState(),
@@ -74,9 +86,9 @@ class ManualControlStateUpdaterTest {
             caps = shutterOnlyCaps,
             exposureDefaults = defaults
         ) { it.copy(isManualIso = true, isoValue = 400) }
-        assertTrue(isoState.isManualIso)
-        assertTrue(isoState.isManualSs)
-        assertEquals(10_000_000L, isoState.ssValueNanos)
+        assertFalse(isoState.isManualIso)
+        assertFalse(isoState.isManualSs)
+        assertEquals(null, isoState.isoValue)
     }
 
     @Test

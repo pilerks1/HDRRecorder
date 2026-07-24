@@ -32,4 +32,18 @@ class RibbonAxisGeometryTest {
         assertEquals(172f, (startCutoff.axisStart + startCutoff.axisEnd) / 2f, 0f)
         assertEquals(128f, (endCutoff.axisStart + endCutoff.axisEnd) / 2f, 0f)
     }
+
+    @Test
+    fun landscapeLabelKeepsPaddingAfterCounterRotation() {
+        val labelTop = ribbonTickLabelTop(
+            tickBottom = 10f,
+            labelPadding = 2f,
+            labelWidth = 50f,
+            labelHeight = 10f,
+            textRotation = 90f
+        )
+        val rotatedVisualTop = labelTop + 10f / 2f - 50f / 2f
+
+        assertEquals(12f, rotatedVisualTop, 0f)
+    }
 }

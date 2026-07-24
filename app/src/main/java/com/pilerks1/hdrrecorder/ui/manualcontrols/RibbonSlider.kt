@@ -71,6 +71,18 @@ internal fun ribbonAxisGeometry(
     return RibbonAxisGeometry(axisStart, axisEnd)
 }
 
+internal fun ribbonTickLabelTop(
+    tickBottom: Float,
+    labelPadding: Float,
+    labelWidth: Float,
+    labelHeight: Float,
+    textRotation: Float
+): Float = if (textRotation == 0f) {
+    tickBottom + labelPadding
+} else {
+    tickBottom + labelPadding + labelWidth / 2f - labelHeight / 2f
+}
+
 @Composable
 fun RibbonSlider(
     value: Float, // 0f..1f
@@ -80,15 +92,14 @@ fun RibbonSlider(
     enabled: Boolean = true,
     labelString: String = "",
     ticks: List<SliderTick>,
+    layoutLabels: List<String>,
     axisReservation: SliderAxisReservation = SliderAxisReservation()
 ) {
     // ==========================================
     // RIBBON SLIDER INTERNAL LAYOUT CONTROLS
     // ==========================================
-    val visualSpec = sliderVisualSpec(axis)
-    val liveReadoutYOffset = visualSpec.liveReadoutOffset
-    val tickToTextPadding = visualSpec.tickTextPadding
-    val tickStartYOffset = visualSpec.tickStartOffset
+    val tickToTextPadding = SliderPaneStyle.standardElementGap
+    val tickStartYOffset = SliderPaneStyle.centerIndicatorHalfHeight + SliderPaneStyle.standardElementGap
     // ==========================================
 
     val textRotation = axis.contentCounterRotationDegrees
@@ -101,7 +112,10 @@ fun RibbonSlider(
     val axisReservedStartPx = with(density) { axisReservation.start.toPx() }
     val axisReservedEndPx = with(density) { axisReservation.end.toPx() }
     val centerIndicatorHalfHeightPx = with(density) { SliderPaneStyle.centerIndicatorHalfHeight.toPx() }
+    val standardElementGapPx = with(density) { SliderPaneStyle.standardElementGap.toPx() }
+    val standardPaneEdgePaddingPx = with(density) { SliderPaneStyle.standardPaneEdgePadding.toPx() }
     val tickTextStyle = remember { SliderPaneStyle.tickTextStyle.copy(color = Color.Gray) }
+    val liveTextStyle = remember { SliderPaneStyle.liveReadoutTextStyle.copy(color = Color.White) }
     val textMeasurer = rememberTextMeasurer()
     val tickLayouts = remember(ticks, density, textMeasurer) {
         ticks.map { tick ->
@@ -113,6 +127,30 @@ fun RibbonSlider(
             )
         }
     }
+    val maximumLiveLabelSize = remember(layoutLabels, density, textMeasurer) {
+        layoutLabels.fold(IntSize.Zero) { maximum, label ->
+            val size = textMeasurer.measure(AnnotatedString(label), style = liveTextStyle).size
+            IntSize(
+                width = maxOf(maximum.width, size.width),
+                height = maxOf(maximum.height, size.height)
+            )
+        }
+    }
+    val sliderTopExtentPx = standardSliderTopExtentPx(
+        axis = axis,
+        liveLabelWidthPx = maximumLiveLabelSize.width.toFloat(),
+        liveLabelHeightPx = maximumLiveLabelSize.height.toFloat(),
+        dpToPx = { with(density) { it.toPx() } }
+    )
+    val liveLabelCrossExtentPx = if (axis.usesVerticalTrack) {
+        maximumLiveLabelSize.width.toFloat()
+    } else {
+        maximumLiveLabelSize.height.toFloat()
+    }
+    val liveLabelRelativeCenterPx = -(
+        centerIndicatorHalfHeightPx + standardElementGapPx + liveLabelCrossExtentPx / 2f
+        )
+    val maximumLiveLabelWidth = with(density) { maximumLiveLabelSize.width.toDp() }
     
     val currentVal by rememberUpdatedState(value)
     
@@ -137,6 +175,14 @@ fun RibbonSlider(
         } else {
             0.dp
         }
+        val sliderCrossCenterOffset = if (sliderSurfaceSize.height > 0) {
+            with(density) {
+                (standardPaneEdgePaddingPx + sliderTopExtentPx - sliderSurfaceSize.height / 2f).toDp()
+            }
+        } else {
+            0.dp
+        }
+        val liveLabelCrossOffset = with(density) { liveLabelRelativeCenterPx.toDp() }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -218,7 +264,7 @@ fun RibbonSlider(
                     reservedEnd = axisReservedEndPx
                 )
                 val centerX = (axisGeometry.axisStart + axisGeometry.axisEnd) / 2f
-                val centerY = size.height / 2f
+                val centerY = standardPaneEdgePaddingPx + sliderTopExtentPx
                 val totalPanDistancePx = (axisGeometry.axisEnd - axisGeometry.axisStart).coerceAtLeast(1f)
 
                 clipRect(left = axisGeometry.axisStart, right = axisGeometry.axisEnd) {
@@ -233,9 +279,16 @@ fun RibbonSlider(
                         )
 
                         tick.label?.let { label ->
+                            val labelTop = ribbonTickLabelTop(
+                                tickBottom = tickTop + tickHeightPx,
+                                labelPadding = tickToTextPaddingPx,
+                                labelWidth = label.size.width.toFloat(),
+                                labelHeight = label.size.height.toFloat(),
+                                textRotation = textRotation
+                            )
                             val topLeft = Offset(
                                 x = tickX - label.size.width / 2f,
-                                y = tickTop + tickHeightPx + tickToTextPaddingPx
+                                y = labelTop
                             )
                             val labelPrimaryHalfExtent = if (textRotation == 0f) {
                                 label.size.width / 2f
@@ -268,11 +321,15 @@ fun RibbonSlider(
             if (labelString.isNotEmpty()) {
                 Text(
                     text = labelString,
-                    style = SliderPaneStyle.liveReadoutTextStyle.copy(color = Color.White),
+                    style = liveTextStyle,
                     maxLines = 1,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier
-                        .offset(x = labelPrimaryOffset, y = liveReadoutYOffset)
+                        .width(maximumLiveLabelWidth)
+                        .offset(
+                            x = labelPrimaryOffset,
+                            y = sliderCrossCenterOffset + liveLabelCrossOffset
+                        )
                         .graphicsLayer { rotationZ = textRotation }
                 )
             }

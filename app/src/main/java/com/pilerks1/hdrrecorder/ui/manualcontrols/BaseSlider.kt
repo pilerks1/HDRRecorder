@@ -47,9 +47,11 @@ fun BaseSlider(
     axis: AxisSpec,
     labelString: String,
     ticks: List<SliderTick>,
+    layoutLabels: List<String>,
     onValueChange: (Float) -> Unit,
     primaryButtonText: String,
     modifier: Modifier = Modifier,
+    sliderEnabled: Boolean = true,
     primaryButtonEnabled: Boolean = true,
     primaryButtonColor: Color,
     primaryButtonTextColor: Color,
@@ -90,6 +92,8 @@ fun BaseSlider(
                 axis = axis,
                 labelString = labelString,
                 ticks = ticks,
+                layoutLabels = layoutLabels,
+                enabled = sliderEnabled,
                 axisReservation = axisReservation,
                 modifier = sliderModifier.fillMaxSize()
             )
