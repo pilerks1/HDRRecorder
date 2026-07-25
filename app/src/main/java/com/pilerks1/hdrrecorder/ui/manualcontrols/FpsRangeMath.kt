@@ -2,34 +2,85 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import android.util.Range
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /** Specialized two-thumb FPS snapping; standard slider math lives in [SliderScale]. */
-object FpsRangeMath {
+internal object FpsRangeMath {
     fun clampToSupportedRange(
         newRange: ClosedFloatingPointRange<Float>,
         oldRange: ClosedFloatingPointRange<Float>,
+        draggedBound: FpsRangeBound,
+        dragDirection: Float,
         validRanges: List<Range<Int>>
     ): ClosedFloatingPointRange<Float> {
         if (validRanges.isEmpty()) return newRange
 
-        val newStart = newRange.start.roundToInt()
-        val newEnd = newRange.endInclusive.roundToInt()
-        val draggedStart = newStart != oldRange.start.roundToInt()
-        val anchoredMatches = validRanges.filter { range ->
-            if (draggedStart) range.lower == newStart else range.upper == newEnd
+        val releasedValue = when (draggedBound) {
+            FpsRangeBound.LOWER -> newRange.start
+            FpsRangeBound.UPPER -> newRange.endInclusive
         }
-        val candidates = anchoredMatches.ifEmpty { validRanges }
-        val bestMatch = candidates.minByOrNull { range ->
-            if (draggedStart && anchoredMatches.isNotEmpty()) {
-                abs(range.upper - newEnd)
-            } else if (!draggedStart && anchoredMatches.isNotEmpty()) {
-                abs(range.lower - newStart)
-            } else {
-                abs(range.lower - newStart) + abs(range.upper - newEnd)
+        val startingValue = when (draggedBound) {
+            FpsRangeBound.LOWER -> oldRange.start
+            FpsRangeBound.UPPER -> oldRange.endInclusive
+        }
+        val supportedEndpoints = validRanges
+            .map { range ->
+                when (draggedBound) {
+                    FpsRangeBound.LOWER -> range.lower
+                    FpsRangeBound.UPPER -> range.upper
+                }
             }
+            .distinct()
+            .sorted()
+        val minimumDistance = supportedEndpoints.minOfOrNull { endpoint ->
+            abs(endpoint - releasedValue)
         } ?: return newRange
+        val nearestEndpoints = supportedEndpoints.filter { endpoint ->
+            abs(abs(endpoint - releasedValue) - minimumDistance) <= SNAP_TIE_EPSILON
+        }
+        val snappedEndpoint = when {
+            nearestEndpoints.size == 1 -> nearestEndpoints.first()
+            dragDirection > 0f -> nearestEndpoints.last()
+            dragDirection < 0f -> nearestEndpoints.first()
+            else -> nearestEndpoints.minWithOrNull(
+                compareBy<Int> { endpoint -> abs(endpoint - startingValue) }
+                    .thenBy { endpoint -> endpoint }
+            ) ?: return newRange
+        }
+        val candidates = validRanges.filter { range ->
+            when (draggedBound) {
+                FpsRangeBound.LOWER -> range.lower == snappedEndpoint
+                FpsRangeBound.UPPER -> range.upper == snappedEndpoint
+            }
+        }
+        val stationaryValue = when (draggedBound) {
+            FpsRangeBound.LOWER -> newRange.endInclusive
+            FpsRangeBound.UPPER -> newRange.start
+        }
+        val bestMatch = candidates.minWithOrNull(
+            compareBy<Range<Int>> { range ->
+                val otherEndpoint = when (draggedBound) {
+                    FpsRangeBound.LOWER -> range.upper
+                    FpsRangeBound.UPPER -> range.lower
+                }
+                abs(otherEndpoint - stationaryValue)
+            }
+                .thenBy { range ->
+                    if (
+                        range.lower.toFloat() == oldRange.start &&
+                        range.upper.toFloat() == oldRange.endInclusive
+                    ) 0 else 1
+                }
+                .thenBy { range -> range.lower }
+                .thenBy { range -> range.upper }
+        ) ?: return newRange
 
         return bestMatch.lower.toFloat()..bestMatch.upper.toFloat()
     }
+
+    private const val SNAP_TIE_EPSILON = 0.0001f
+}
+
+internal enum class FpsRangeBound {
+    LOWER,
+    UPPER
 }

@@ -4,6 +4,7 @@ import android.util.Range
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private data class RangeSliderTickLayout(
@@ -29,11 +31,47 @@ private data class RangeSliderTickLayout(
     val label: TextLayoutResult?
 )
 
+private data class RangeSliderGeometry(
+    val axisStart: Float,
+    val axisEnd: Float
+) {
+    private val axisLength: Float
+        get() = (axisEnd - axisStart).coerceAtLeast(0f)
+
+    fun positionAt(fraction: Float): Float =
+        axisStart + axisLength * fraction.coerceIn(0f, 1f)
+
+    fun fractionAt(positionX: Float): Float =
+        ((positionX - axisStart) / axisLength.coerceAtLeast(1f)).coerceIn(0f, 1f)
+}
+
+private fun rangeSliderGeometry(
+    width: Float,
+    reservedStart: Float,
+    reservedEnd: Float,
+    thumbHalfWidth: Float
+): RangeSliderGeometry {
+    val axisStart = (reservedStart + thumbHalfWidth).coerceAtMost(width / 2f)
+    val axisEnd = (width - reservedEnd - thumbHalfWidth).coerceAtLeast(axisStart)
+    return RangeSliderGeometry(axisStart, axisEnd)
+}
+
+private fun valueFraction(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>
+): Float {
+    val length = valueRange.endInclusive - valueRange.start
+    return if (length == 0f) 0.5f else (value - valueRange.start) / length
+}
+
 @Composable
 private fun RangeSliderTickAxis(
     ticks: List<SliderTick>,
     color: Color,
     axis: AxisSpec,
+    reservedStartPx: Float,
+    reservedEndPx: Float,
+    thumbHalfWidthPx: Float,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -63,11 +101,16 @@ private fun RangeSliderTickAxis(
         modifier = modifier
             .fillMaxWidth()
             .height(32.dp)
-            .padding(horizontal = 10.dp)
             .offset(y = SliderPaneStyle.rangeTickOffset)
     ) {
+        val geometry = rangeSliderGeometry(
+            width = size.width,
+            reservedStart = reservedStartPx,
+            reservedEnd = reservedEndPx,
+            thumbHalfWidth = thumbHalfWidthPx
+        )
         tickLayouts.forEach { tick ->
-            val tickX = size.width * tick.fraction
+            val tickX = geometry.positionAt(tick.fraction)
             val tickHeight = with(density) { SliderPaneStyle.sliderTickHeight.toPx() }
             drawLine(
                 color = color,
@@ -93,13 +136,18 @@ private fun RangeSliderTickAxis(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RotatingRangeSlider(
+private fun RotatingRangeSlider(
     value: ClosedFloatingPointRange<Float>,
     onValueChange: (ClosedFloatingPointRange<Float>) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
     axis: AxisSpec,
     modifier: Modifier = Modifier,
-    onValueChangeFinished: (() -> Unit)? = null,
+    onValueChangeFinished: ((
+        releasedRange: ClosedFloatingPointRange<Float>,
+        startingRange: ClosedFloatingPointRange<Float>,
+        draggedBound: FpsRangeBound,
+        dragDirection: Float
+    ) -> Unit)? = null,
     enabled: Boolean = true,
     isActive: Boolean = true,
     ticks: List<SliderTick> = emptyList(),
@@ -114,107 +162,254 @@ fun RotatingRangeSlider(
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnFinished by rememberUpdatedState(onValueChangeFinished)
     var draggedThumb by remember { mutableStateOf<RangeThumb?>(null) }
+    var gestureStartRange by remember { mutableStateOf(value) }
+    var latestGestureRange by remember { mutableStateOf(value) }
     val density = LocalDensity.current
-    val reservedStartPx = with(density) { axisReservation.start.toPx() }
-    val reservedEndPx = with(density) { axisReservation.end.toPx() }
+    val resolvedAxisReservation = SliderAxisReservation(
+        start = maxOf(axisReservation.start, SliderPaneStyle.actionEdgePadding),
+        end = maxOf(axisReservation.end, SliderPaneStyle.actionEdgePadding)
+    )
+    val reservedStartPx = with(density) { resolvedAxisReservation.start.toPx() }
+    val reservedEndPx = with(density) { resolvedAxisReservation.end.toPx() }
+    val thumbHalfWidthPx = with(density) { SliderPaneStyle.rangeThumbHalfWidth.toPx() }
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = mainColor,
+        activeTrackColor = mainColor,
+        inactiveTrackColor = secondaryColor,
+        disabledThumbColor = mainColor,
+        disabledActiveTrackColor = mainColor,
+        disabledInactiveTrackColor = secondaryColor
+    )
 
     fun valueAt(positionX: Float, width: Float): Float {
-        val trackLength = (width - reservedStartPx - reservedEndPx).coerceAtLeast(1f)
-        val fraction = ((positionX - reservedStartPx) / trackLength).coerceIn(0f, 1f)
+        val geometry = rangeSliderGeometry(
+            width = width,
+            reservedStart = reservedStartPx,
+            reservedEnd = reservedEndPx,
+            thumbHalfWidth = thumbHalfWidthPx
+        )
+        val fraction = geometry.fractionAt(positionX)
         return valueRange.start + fraction * (valueRange.endInclusive - valueRange.start)
+    }
+
+    fun thumbAt(
+        positionX: Float,
+        width: Float,
+        range: ClosedFloatingPointRange<Float>,
+        deferOverlappingThumbs: Boolean
+    ): RangeThumb? {
+        if (range.start != range.endInclusive) {
+            val touchedValue = valueAt(positionX, width)
+            return if (
+                abs(touchedValue - range.start) <=
+                abs(touchedValue - range.endInclusive)
+            ) RangeThumb.START else RangeThumb.END
+        }
+
+        val geometry = rangeSliderGeometry(
+            width = width,
+            reservedStart = reservedStartPx,
+            reservedEnd = reservedEndPx,
+            thumbHalfWidth = thumbHalfWidthPx
+        )
+        val sharedPosition = geometry.positionAt(valueFraction(range.start, valueRange))
+        return when {
+            positionX < sharedPosition - thumbHalfWidthPx -> RangeThumb.START
+            positionX > sharedPosition + thumbHalfWidthPx -> RangeThumb.END
+            deferOverlappingThumbs -> null
+            positionX < sharedPosition -> RangeThumb.START
+            else -> RangeThumb.END
+        }
+    }
+
+    fun rangeWithValue(
+        range: ClosedFloatingPointRange<Float>,
+        thumb: RangeThumb,
+        newValue: Float
+    ): ClosedFloatingPointRange<Float> = when (thumb) {
+        RangeThumb.START -> newValue.coerceAtMost(range.endInclusive)..range.endInclusive
+        RangeThumb.END -> range.start..newValue.coerceAtLeast(range.start)
     }
 
     val sliderContent = @Composable {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(enabled, axisReservation, valueRange) {
+                .pointerInput(enabled, resolvedAxisReservation, valueRange, thumbHalfWidthPx) {
+                    if (!enabled) return@pointerInput
+                    detectTapGestures(
+                        onTap = { offset ->
+                            val width = size.width.toFloat()
+                            val geometry = rangeSliderGeometry(
+                                width = width,
+                                reservedStart = reservedStartPx,
+                                reservedEnd = reservedEndPx,
+                                thumbHalfWidth = thumbHalfWidthPx
+                            )
+                            if (offset.x !in geometry.axisStart..geometry.axisEnd) {
+                                return@detectTapGestures
+                            }
+
+                            val startingRange = currentValue
+                            val thumb = thumbAt(
+                                positionX = offset.x,
+                                width = width,
+                                range = startingRange,
+                                deferOverlappingThumbs = false
+                            ) ?: return@detectTapGestures
+                            val releasedRange = rangeWithValue(
+                                range = startingRange,
+                                thumb = thumb,
+                                newValue = valueAt(offset.x, width)
+                            )
+                            val startingValue = when (thumb) {
+                                RangeThumb.START -> startingRange.start
+                                RangeThumb.END -> startingRange.endInclusive
+                            }
+                            val releasedValue = when (thumb) {
+                                RangeThumb.START -> releasedRange.start
+                                RangeThumb.END -> releasedRange.endInclusive
+                            }
+                            currentOnValueChange(releasedRange)
+                            currentOnFinished?.invoke(
+                                releasedRange,
+                                startingRange,
+                                thumb.toFpsRangeBound(),
+                                releasedValue - startingValue
+                            )
+                        }
+                    )
+                }
+                .pointerInput(enabled, resolvedAxisReservation, valueRange, thumbHalfWidthPx) {
                     if (!enabled) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
-                            val touchedValue = valueAt(offset.x, size.width.toFloat())
-                            draggedThumb = if (
-                                kotlin.math.abs(touchedValue - currentValue.start) <=
-                                kotlin.math.abs(touchedValue - currentValue.endInclusive)
-                            ) RangeThumb.START else RangeThumb.END
+                            gestureStartRange = currentValue
+                            latestGestureRange = currentValue
+                            draggedThumb = thumbAt(
+                                positionX = offset.x,
+                                width = size.width.toFloat(),
+                                range = currentValue,
+                                deferOverlappingThumbs = true
+                            )
                         },
-                        onHorizontalDrag = { change, _ ->
+                        onHorizontalDrag = { change, dragAmount ->
                             change.consume()
-                            val newValue = valueAt(change.position.x, size.width.toFloat())
-                            val updated = when (draggedThumb) {
-                                RangeThumb.START -> newValue.coerceAtMost(currentValue.endInclusive)..currentValue.endInclusive
-                                RangeThumb.END -> currentValue.start..newValue.coerceAtLeast(currentValue.start)
-                                null -> currentValue
+                            if (draggedThumb == null) {
+                                draggedThumb = when {
+                                    dragAmount < 0f -> RangeThumb.START
+                                    dragAmount > 0f -> RangeThumb.END
+                                    else -> null
+                                }
                             }
+                            val baseRange = latestGestureRange
+                            val newValue = valueAt(change.position.x, size.width.toFloat())
+                            val updated = draggedThumb?.let { thumb ->
+                                rangeWithValue(baseRange, thumb, newValue)
+                            } ?: baseRange
+                            latestGestureRange = updated
                             currentOnValueChange(updated)
                         },
                         onDragEnd = {
+                            draggedThumb?.let { thumb ->
+                                val releasedRange = latestGestureRange
+                                val startingValue = when (thumb) {
+                                    RangeThumb.START -> gestureStartRange.start
+                                    RangeThumb.END -> gestureStartRange.endInclusive
+                                }
+                                val releasedValue = when (thumb) {
+                                    RangeThumb.START -> releasedRange.start
+                                    RangeThumb.END -> releasedRange.endInclusive
+                                }
+                                currentOnFinished?.invoke(
+                                    releasedRange,
+                                    gestureStartRange,
+                                    thumb.toFpsRangeBound(),
+                                    releasedValue - startingValue
+                                )
+                            }
                             draggedThumb = null
-                            currentOnFinished?.invoke()
                         },
                         onDragCancel = { draggedThumb = null }
                     )
-                },
+            },
             contentAlignment = Alignment.Center
         ) {
+            RangeSliderTickAxis(
+                ticks = ticks,
+                color = secondaryColor,
+                axis = axis,
+                reservedStartPx = reservedStartPx,
+                reservedEndPx = reservedEndPx,
+                thumbHalfWidthPx = thumbHalfWidthPx
+            )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = axisReservation.start, end = axisReservation.end),
+                    .padding(
+                        start = resolvedAxisReservation.start,
+                        end = resolvedAxisReservation.end
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                RangeSliderTickAxis(
-                    ticks = ticks,
-                    color = secondaryColor,
-                    axis = axis
-                )
                 RangeSlider(
-                value = value,
-                onValueChange = {},
-                valueRange = valueRange,
-                enabled = false,
-                colors = SliderDefaults.colors(
-                    thumbColor = mainColor,
-                    activeTrackColor = mainColor,
-                    inactiveTrackColor = secondaryColor,
-                    disabledThumbColor = mainColor,
-                    disabledActiveTrackColor = mainColor,
-                    disabledInactiveTrackColor = secondaryColor
-                ),
-                startThumb = {
-                    Box(
-                        modifier = Modifier.size(width = 8.dp, height = 24.dp).background(mainColor, androidx.compose.foundation.shape.CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "${value.start.toInt()}",
-                            color = if (isActive) Color.White else mainColor,
-                            style = SliderPaneStyle.rangeThumbTextStyle,
+                    value = value,
+                    onValueChange = {},
+                    valueRange = valueRange,
+                    enabled = false,
+                    colors = sliderColors,
+                    startThumb = {
+                        Box(
                             modifier = Modifier
-                                .wrapContentSize(unbounded = true)
-                                .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
-                                .graphicsLayer { rotationZ = textRotation }
-                        )
-                    }
-                },
-                endThumb = {
-                    Box(
-                        modifier = Modifier.size(width = 8.dp, height = 24.dp).background(mainColor, androidx.compose.foundation.shape.CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "${value.endInclusive.toInt()}",
-                            color = if (isActive) Color.White else mainColor,
-                            style = SliderPaneStyle.rangeThumbTextStyle,
+                                .size(
+                                    width = SliderPaneStyle.rangeThumbWidth,
+                                    height = SliderPaneStyle.rangeThumbHeight
+                                )
+                                .background(mainColor, androidx.compose.foundation.shape.CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${value.start.toInt()}",
+                                color = if (isActive) Color.White else mainColor,
+                                style = SliderPaneStyle.rangeThumbTextStyle,
+                                modifier = Modifier
+                                    .wrapContentSize(unbounded = true)
+                                    .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
+                                    .graphicsLayer { rotationZ = textRotation }
+                            )
+                        }
+                    },
+                    endThumb = {
+                        Box(
                             modifier = Modifier
-                                .wrapContentSize(unbounded = true)
-                                .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
-                                .graphicsLayer { rotationZ = textRotation }
+                                .size(
+                                    width = SliderPaneStyle.rangeThumbWidth,
+                                    height = SliderPaneStyle.rangeThumbHeight
+                                )
+                                .background(mainColor, androidx.compose.foundation.shape.CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${value.endInclusive.toInt()}",
+                                color = if (isActive) Color.White else mainColor,
+                                style = SliderPaneStyle.rangeThumbTextStyle,
+                                modifier = Modifier
+                                    .wrapContentSize(unbounded = true)
+                                    .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
+                                    .graphicsLayer { rotationZ = textRotation }
+                            )
+                        }
+                    },
+                    track = { rangeSliderState ->
+                        SliderDefaults.Track(
+                            rangeSliderState = rangeSliderState,
+                            modifier = Modifier.height(SliderPaneStyle.rangeTrackThickness),
+                            colors = sliderColors,
+                            enabled = false
                         )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -257,9 +452,15 @@ fun FpsSlider(
         onValueChange = { newRange ->
             if (!isRecording || isManualFps) localRange = newRange
         },
-        onValueChangeFinished = {
+        onValueChangeFinished = { releasedRange, startingRange, draggedBound, dragDirection ->
             if (!isRecording || isManualFps) {
-                val clamped = FpsRangeMath.clampToSupportedRange(localRange, currentRange, validRanges)
+                val clamped = FpsRangeMath.clampToSupportedRange(
+                    newRange = releasedRange,
+                    oldRange = startingRange,
+                    draggedBound = draggedBound,
+                    dragDirection = dragDirection,
+                    validRanges = validRanges
+                )
                 localRange = clamped
                 onValueChange(clamped)
             }
@@ -277,4 +478,9 @@ fun FpsSlider(
 private enum class RangeThumb {
     START,
     END
+}
+
+private fun RangeThumb.toFpsRangeBound(): FpsRangeBound = when (this) {
+    RangeThumb.START -> FpsRangeBound.LOWER
+    RangeThumb.END -> FpsRangeBound.UPPER
 }

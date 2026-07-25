@@ -27,15 +27,19 @@ internal object SliderPaneStyle {
     val standardElementGap = 2.dp
     val standardPaneEdgePadding = 2.dp
     val centerIndicatorHalfHeight = 10.dp
-    val rangeThumbHalfHeight = 12.dp
+    val rangeTrackThickness = 4.dp
+    val rangeThumbWidth = 6.dp
+    val rangeThumbHeight = 28.dp
+    val rangeThumbHalfWidth = rangeThumbWidth / 2
+    val rangeThumbHalfHeight = rangeThumbHeight / 2
     val rangeThumbLabelOffset = 24.dp
     val rangeTickOffset = 16.dp
     val rangeTickTextPadding = 2.dp
 
     val liveReadoutTextStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold)
     val tickTextStyle = TextStyle(fontSize = 10.sp)
-    val rangeTickTextStyle = TextStyle(fontSize = 7.sp)
-    val rangeThumbTextStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    val rangeTickTextStyle = TextStyle(fontSize = 9.sp)
+    val rangeThumbTextStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold)
 }
 
 internal data class SliderPaneSizing(
