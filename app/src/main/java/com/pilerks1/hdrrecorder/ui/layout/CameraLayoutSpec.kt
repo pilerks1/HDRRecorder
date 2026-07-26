@@ -74,7 +74,7 @@ object CameraLayoutCalculator {
     private const val PREFERRED_BUTTON_DP = 54f
     private const val MIN_BUTTON_DP = 36f
     private const val PRIMARY_ACTION_INSET_DP = 8f
-    private const val STATS_GAP_DP = 8f
+    private const val STATS_GAP_DP = 2f
     private const val RECORD_BUTTON_DP = 64f
     private const val SECONDARY_ACTION_DP = 48f
 

@@ -13,7 +13,7 @@ class CameraLayoutCalculatorTest {
 
         assertEquals(CameraLayoutMode.CENTERED_RESERVED, spec.mode)
         assertEquals(1_018f, spec.expandedPanel.left, 0.01f)
-        assertEquals(563f, (spec.preview.left + spec.preview.right) / 2f, 0.01f)
+        assertEquals(560f, (spec.preview.left + spec.preview.right) / 2f, 0.01f)
         assertFalse(intersects(spec.expandedPanel, spec.preview))
         assertRatio(spec, 4f / 3f)
     }
@@ -23,7 +23,7 @@ class CameraLayoutCalculatorTest {
         val spec = landscape(width = 1000)
 
         assertEquals(CameraLayoutMode.SLIDER_OVERLAY, spec.mode)
-        assertEquals(spec.stats.right + 8f, spec.preview.left, 0.01f)
+        assertEquals(spec.stats.right + 2f, spec.preview.left, 0.01f)
         assertEquals(600f, spec.preview.height, 0.01f)
         assertTrue(intersects(spec.expandedPanel, spec.preview))
         assertTrue(spec.preview.right <= spec.secondaryControls.left)
@@ -35,7 +35,7 @@ class CameraLayoutCalculatorTest {
         val spec = landscape(width = 900)
 
         assertEquals(CameraLayoutMode.SHRUNK, spec.mode)
-        assertEquals(spec.stats.right + 8f, spec.preview.left, 0.01f)
+        assertEquals(spec.stats.right + 2f, spec.preview.left, 0.01f)
         assertEquals(spec.secondaryControls.left, spec.preview.right, 0.01f)
         assertEquals((spec.preview.top + spec.preview.bottom) / 2f, 300f, 0.01f)
         assertRatio(spec, 4f / 3f)
@@ -47,7 +47,7 @@ class CameraLayoutCalculatorTest {
 
         assertEquals(CameraLayoutMode.SHRUNK, spec.mode)
         assertEquals(80f, spec.stats.bottom, 0.01f)
-        assertTrue(spec.preview.top >= spec.stats.bottom + 8f)
+        assertTrue(spec.preview.top >= spec.stats.bottom + 2f)
         assertRatio(spec, 3f / 4f)
     }
 

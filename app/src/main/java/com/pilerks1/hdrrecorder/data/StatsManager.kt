@@ -8,7 +8,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.CameraTelemetry
-import com.pilerks1.hdrrecorder.model.toSigFigs
+import com.pilerks1.hdrrecorder.model.formatDataSize
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -208,13 +208,7 @@ class StatsManager(private val context: Context) {
     }
 
     private fun formatStorageInfo(availableBytes: Long, currentBitrate: Double): Pair<String, String> {
-        val mbValue = availableBytes.toDouble() / 1_000_000.0
-
-        val formattedStorage = if (mbValue >= 1000.0) {
-            (mbValue / 1000.0).toSigFigs() + " GB"
-        } else {
-            mbValue.toSigFigs() + " MB"
-        }
+        val formattedStorage = formatDataSize(availableBytes)
 
         val bitrateToUse = if (isRecording && currentBitrate > 0) currentBitrate else targetBitrateMbps.toDouble()
         val bytesPerSec = (bitrateToUse * 1_000_000.0) / 8.0

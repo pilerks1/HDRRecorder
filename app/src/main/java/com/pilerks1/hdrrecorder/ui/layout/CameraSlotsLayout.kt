@@ -11,6 +11,7 @@ import kotlin.math.roundToInt
 
 private enum class CameraSlot {
     STATS,
+    STATS_FULLSCREEN,
     PREVIEW,
     SECONDARY_CONTROLS,
     EXPANDED_PANEL,
@@ -43,21 +44,49 @@ fun CameraSlotsLayout(
 
         val axis = CameraLayoutCalculator.axisFor(width, height)
         val panelThicknessSpec = panelThickness(axis)
-        val statsPlaceable = subcompose(CameraSlot.STATS) { stats(axis) }
+        val safeWidth = (
+            width - cutoutInsets.left.roundToInt() - cutoutInsets.right.roundToInt()
+            ).coerceAtLeast(0)
+        val safeHeight = (
+            height - cutoutInsets.top.roundToInt() - cutoutInsets.bottom.roundToInt()
+            ).coerceAtLeast(0)
+        val safeStatsPlaceable = subcompose(CameraSlot.STATS) { stats(axis) }
             .single()
-            .measure(Constraints(0, width, 0, height))
-        val spec = CameraLayoutCalculator.calculate(
-            widthPx = width,
-            heightPx = height,
-            density = density,
-            aspectRatio = aspectRatio,
-            secondaryButtonCount = secondaryButtonCount,
-            statsWidthPx = statsPlaceable.width,
-            statsHeightPx = statsPlaceable.height,
-            activePanelThicknessPx = panelThicknessSpec.activeThicknessPx,
-            maximumPanelThicknessPx = panelThicknessSpec.maximumThicknessPx,
-            cutoutInsets = cutoutInsets
-        )
+            .measure(Constraints(0, safeWidth, 0, safeHeight))
+
+        fun calculate(statsWidth: Int, statsHeight: Int) = CameraLayoutCalculator.calculate(
+                widthPx = width,
+                heightPx = height,
+                density = density,
+                aspectRatio = aspectRatio,
+                secondaryButtonCount = secondaryButtonCount,
+                statsWidthPx = statsWidth,
+                statsHeightPx = statsHeight,
+                activePanelThicknessPx = panelThicknessSpec.activeThicknessPx,
+                maximumPanelThicknessPx = panelThicknessSpec.maximumThicknessPx,
+                cutoutInsets = cutoutInsets
+            )
+
+        val safeSpec = calculate(safeStatsPlaceable.width, safeStatsPlaceable.height)
+        val useFullscreenStats = safeSpec.mode == CameraLayoutMode.SHRUNK &&
+            (safeWidth != width || safeHeight != height)
+        val fullscreenStatsPlaceable = if (useFullscreenStats) {
+            subcompose(CameraSlot.STATS_FULLSCREEN) { stats(axis) }
+                .single()
+                .measure(Constraints(0, width, 0, height))
+        } else {
+            null
+        }
+        val fullscreenSpec = fullscreenStatsPlaceable?.let {
+            calculate(it.width, it.height)
+        }
+        val keepFullscreenStats = fullscreenSpec?.mode == CameraLayoutMode.SHRUNK
+        val statsPlaceable = if (keepFullscreenStats) {
+            checkNotNull(fullscreenStatsPlaceable)
+        } else {
+            safeStatsPlaceable
+        }
+        val spec = if (keepFullscreenStats) checkNotNull(fullscreenSpec) else safeSpec
 
         val previewPlaceable = subcompose(CameraSlot.PREVIEW) {
             Box(Modifier.fillMaxSize()) { preview(spec) }
