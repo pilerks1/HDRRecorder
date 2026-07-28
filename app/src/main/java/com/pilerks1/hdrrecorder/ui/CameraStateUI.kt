@@ -16,6 +16,7 @@ data class ManualControlsState(
     // ISO
     val isManualIso: Boolean = false,
     val isoValue: Int? = null,
+    val postRawSensitivityBoost: Int? = null,
     
     // Shutter Speed (SS)
     val isManualSs: Boolean = false,
@@ -24,7 +25,7 @@ data class ManualControlsState(
     // Exposure Value (EV)
     val isManualEv: Boolean = false,
     val evValueIndex: Int = 0,
-    val isNightModeAeEnabled: Boolean = false,
+    val isLowLightBoostEnabled: Boolean = false,
     
     // Focus
     val isManualFocus: Boolean = false,
@@ -50,6 +51,7 @@ internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState {
     return copy(
         isManualIso = false,
         isoValue = null,
+        postRawSensitivityBoost = null,
         isManualSs = false,
         ssValueNanos = null,
         isManualEv = false,
@@ -74,6 +76,7 @@ data class CameraUiState(
     val isCameraReady: Boolean = false,
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
+    val isLowLightBoostActive: Boolean = false,
 
     // Settings / Configuration
     val selectedFps: Int = 30,
@@ -119,6 +122,7 @@ sealed interface CameraUiEvent {
     data object CycleFps : CameraUiEvent
     data object CycleResolution : CameraUiEvent
     data object CycleAspectRatio : CameraUiEvent
+    data class SetLowLightBoost(val enabled: Boolean) : CameraUiEvent
 
     // Color Events
     data object CycleColorFormat : CameraUiEvent

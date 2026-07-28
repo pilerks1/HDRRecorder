@@ -66,6 +66,7 @@ data class CameraLayoutSpec(
     val expandedPanel: LayoutRect,
     val maximumPanelReservation: LayoutRect,
     val primaryActions: LayoutRect,
+    val lowLightBoostIndicator: LayoutRect,
     val actionRail: ActionRailSpec
 )
 
@@ -75,8 +76,11 @@ object CameraLayoutCalculator {
     private const val MIN_BUTTON_DP = 36f
     private const val PRIMARY_ACTION_INSET_DP = 8f
     private const val STATS_GAP_DP = 2f
-    private const val RECORD_BUTTON_DP = 64f
-    private const val SECONDARY_ACTION_DP = 48f
+    private const val RECORD_BUTTON_DP = 48f
+    private const val SECONDARY_ACTION_DP = 32f
+    private const val PRIMARY_ACTION_GAP_DP = 0f
+    private const val LOW_LIGHT_BOOST_INDICATOR_DP = 16f
+    private const val LOW_LIGHT_BOOST_INDICATOR_INSET_DP = 8f
 
     fun axisFor(widthPx: Int, heightPx: Int): AxisSpec {
         val orientation = if (widthPx > heightPx) CameraOrientation.LANDSCAPE else CameraOrientation.PORTRAIT
@@ -321,21 +325,55 @@ object CameraLayoutCalculator {
 
     private fun primaryActions(
         preview: LayoutRect,
+        expandedPanel: LayoutRect,
         axis: AxisSpec,
         density: Float
     ): LayoutRect {
         val inset = PRIMARY_ACTION_INSET_DP * density
         val recordSize = RECORD_BUTTON_DP * density
         val secondarySize = SECONDARY_ACTION_DP * density
-        return if (axis.usesVerticalTrack) {
-            val groupHeight = recordSize + secondarySize
-            val top = preview.top + (preview.height - groupHeight) / 2f
-            LayoutRect(preview.right - inset - recordSize, top, preview.right - inset, top + groupHeight)
+        val gap = PRIMARY_ACTION_GAP_DP * density
+        val groupLength = recordSize + gap + secondarySize
+        val panelLength = primaryLength(expandedPanel, axis)
+        val panelOverlapsPreview = panelLength > 0f &&
+            primaryStart(expandedPanel, axis) < primaryEnd(preview, axis) &&
+            primaryEnd(expandedPanel, axis) > primaryStart(preview, axis)
+        val trailingBoundary = if (panelOverlapsPreview) {
+            minOf(primaryEnd(preview, axis), primaryStart(expandedPanel, axis))
         } else {
-            val groupWidth = recordSize + secondarySize
-            val left = preview.left + (preview.width - groupWidth) / 2f
-            LayoutRect(left, preview.bottom - inset - recordSize, left + groupWidth, preview.bottom - inset)
+            primaryEnd(preview, axis)
         }
+        return if (axis.usesVerticalTrack) {
+            val top = preview.top + (preview.height - groupLength) / 2f
+            LayoutRect(
+                trailingBoundary - inset - recordSize,
+                top,
+                trailingBoundary - inset,
+                top + groupLength
+            )
+        } else {
+            val left = preview.left + (preview.width - groupLength) / 2f
+            LayoutRect(
+                left,
+                trailingBoundary - inset - recordSize,
+                left + groupLength,
+                trailingBoundary - inset
+            )
+        }
+    }
+
+    private fun lowLightBoostIndicator(
+        preview: LayoutRect,
+        density: Float
+    ): LayoutRect {
+        val size = LOW_LIGHT_BOOST_INDICATOR_DP * density
+        val inset = LOW_LIGHT_BOOST_INDICATOR_INSET_DP * density
+        return LayoutRect(
+            left = preview.left + inset,
+            top = preview.top + inset,
+            right = preview.left + inset + size,
+            bottom = preview.top + inset + size
+        )
     }
 
     private fun buildSpec(
@@ -352,7 +390,8 @@ object CameraLayoutCalculator {
         secondaryControls = geometry.controls,
         expandedPanel = geometry.expandedPanel,
         maximumPanelReservation = geometry.maximumPanelReservation,
-        primaryActions = primaryActions(preview, axis, density),
+        primaryActions = primaryActions(preview, geometry.expandedPanel, axis, density),
+        lowLightBoostIndicator = lowLightBoostIndicator(preview, density),
         actionRail = geometry.actionRail
     )
 

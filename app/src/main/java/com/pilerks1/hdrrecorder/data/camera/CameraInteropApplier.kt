@@ -84,6 +84,15 @@ object CameraInteropApplier {
             manualShutter && manualIso && capabilities.supportsFullManualExposure -> {
                 builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
                 builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
+                if (
+                    state.postRawSensitivityBoost != null &&
+                    capabilities.postRawSensitivityBoostRange != null
+                ) {
+                    builder.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
+                        state.postRawSensitivityBoost
+                    )
+                }
                 builder.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AE_MODE,
                     CameraMetadata.CONTROL_AE_MODE_OFF
@@ -101,7 +110,9 @@ object CameraInteropApplier {
                 builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
                 applyHybridAe(builder, usesShutterPriority = false)
             }
-            else -> applyAutoExposure(builder, state, capabilities)
+            // CameraX owns automatic AE, including low-light boost. Omitting the Camera2
+            // override here also clears a previous manual/hybrid AE override.
+            else -> Unit
         }
     }
 
@@ -118,26 +129,6 @@ object CameraInteropApplier {
             CameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY
         }
         builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_PRIORITY_MODE, priorityMode)
-    }
-
-    private fun applyAutoExposure(
-        builder: CaptureRequestOptions.Builder,
-        state: ManualControlsState,
-        capabilities: CameraCapabilities?
-    ) {
-        // Night Mode (AE Low Light Boost) is API 36 only.
-        if (
-            state.isNightModeAeEnabled &&
-            capabilities?.supportsNightMode == true &&
-            Build.VERSION.SDK_INT >= 36
-        ) {
-            builder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AE_MODE,
-                CameraMetadata.CONTROL_AE_MODE_ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY
-            )
-        } else {
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
-        }
     }
 
     // --- Focus ---

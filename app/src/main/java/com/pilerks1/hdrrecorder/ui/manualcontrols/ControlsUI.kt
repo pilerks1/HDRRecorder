@@ -39,7 +39,9 @@ fun availableControlPanels(
 ): List<CameraControlPanel> = orderedControlPanels(
     hasShutter = caps?.hasManualShutterControl == true,
     hasIso = caps?.hasManualIsoControl == true,
-    hasExposureCompensation = caps?.hasExposureCompensationControl == true,
+    hasExposureCompensation = caps?.let {
+        it.hasExposureCompensationControl || it.supportsLowLightBoost
+    } == true,
     hasFocus = caps?.hasManualFocusControl == true,
     hasWhiteBalance = caps?.supportsCCT == true
 )
@@ -170,7 +172,7 @@ fun ActiveControlPanel(
     onSetIso: (Boolean, Int?) -> Unit,
     onSetSs: (Boolean, Long?) -> Unit,
     onSetEv: (Boolean, Int?) -> Unit,
-    onSetNightMode: (Boolean) -> Unit,
+    onSetLowLightBoost: (Boolean) -> Unit,
     onSetFocus: (Boolean, Float?) -> Unit,
     onSetWb: (Boolean, Int?, Int?) -> Unit,
     onSetFps: (Boolean, Range<Int>?) -> Unit,
@@ -278,12 +280,15 @@ fun ActiveControlPanel(
                     primaryButtonColor = if (isManualEv) Color.White else Color.DarkGray,
                     primaryButtonTextColor = if (isManualEv) Color.Black else Color.LightGray,
                     onPrimaryButtonClick = { onSetEv(true, 0) },
-                    secondaryButtonText = if (caps?.supportsNightMode == true) "NHT" else null,
-                    secondaryButtonEnabled = !aeIsOff,
-                    secondaryButtonColor = if (state.isNightModeAeEnabled && !aeIsOff) Color.Yellow else Color.DarkGray,
-                    secondaryButtonTextColor = if (state.isNightModeAeEnabled && !aeIsOff) Color.Black else Color.LightGray,
-                    onSecondaryButtonClick = if (caps?.supportsNightMode == true) {
-                        { onSetNightMode(!state.isNightModeAeEnabled) }
+                    secondaryButtonText = if (caps?.supportsLowLightBoost == true) "NHT" else null,
+                    secondaryButtonEnabled = !isRecording || maxOf(
+                        if (state.isManualFps) state.fpsRange?.upper ?: autoFps else autoFps,
+                        0
+                    ) <= 30,
+                    secondaryButtonColor = if (state.isLowLightBoostEnabled) Color.Yellow else Color.DarkGray,
+                    secondaryButtonTextColor = if (state.isLowLightBoostEnabled) Color.Black else Color.LightGray,
+                    onSecondaryButtonClick = if (caps?.supportsLowLightBoost == true) {
+                        { onSetLowLightBoost(!state.isLowLightBoostEnabled) }
                     } else null
                 )
             }

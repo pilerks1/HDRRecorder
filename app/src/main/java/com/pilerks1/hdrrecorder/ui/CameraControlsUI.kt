@@ -1,5 +1,7 @@
 package com.pilerks1.hdrrecorder.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -9,8 +11,8 @@ import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -44,7 +46,7 @@ fun ExpandedControlPanelUI(
         onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value) } },
         onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value) } },
         onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: 0) } },
-        onSetNightMode = { enabled -> actions.onManualControlsChange { it.copy(isNightModeAeEnabled = enabled) } },
+        onSetLowLightBoost = { enabled -> actions.onEvent(CameraUiEvent.SetLowLightBoost(enabled)) },
         onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value) } },
         onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp, wbTint = tint) } },
         onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range) } },
@@ -90,23 +92,28 @@ fun PrimaryActionsUI(
     axis: AxisSpec,
     modifier: Modifier = Modifier
 ) {
-    if (uiState.manualControlsState.activePanel != null) return
-
     AxisStack(axis = axis, modifier = modifier, spacing = 0.dp) {
-        PauseOrSettingsButton(uiState, actions.onEvent)
-        RecordButton(uiState, actions.onEvent)
+        if (axis.usesVerticalTrack) {
+            RecordButton(uiState, actions.onEvent)
+            PauseOrSettingsButton(uiState, actions.onEvent)
+        } else {
+            PauseOrSettingsButton(uiState, actions.onEvent)
+            RecordButton(uiState, actions.onEvent)
+        }
     }
 }
 
 @Composable
 fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
-    IconButton(
-        enabled = uiState.isCameraReady,
-        onClick = {
-            if (uiState.isSettingsSheetVisible) return@IconButton
-            onEvent(CameraUiEvent.ToggleRecording)
-        },
-        modifier = Modifier.size(64.dp)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(48.dp)
+            .clickable(enabled = uiState.isCameraReady) {
+                if (!uiState.isSettingsSheetVisible) {
+                    onEvent(CameraUiEvent.ToggleRecording)
+                }
+            }
     ) {
         Icon(
             imageVector = if (uiState.isRecording) Icons.Filled.Stop else Icons.Filled.RadioButtonChecked,
@@ -120,21 +127,31 @@ fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
 @Composable
 fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
     if (uiState.isRecording) {
-        IconButton(onClick = { onEvent(CameraUiEvent.TogglePause) }) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(32.dp)
+                .clickable { onEvent(CameraUiEvent.TogglePause) }
+        ) {
             Icon(
                 imageVector = if (uiState.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                 contentDescription = if (uiState.isPaused) "Play" else "Pause",
                 tint = Color.White,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.fillMaxSize()
             )
         }
     } else {
-        IconButton(onClick = { onEvent(CameraUiEvent.OpenSettings) }) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(32.dp)
+                .clickable { onEvent(CameraUiEvent.OpenSettings) }
+        ) {
             Icon(
                 imageVector = Icons.Filled.Settings,
                 contentDescription = "Settings",
                 tint = Color.White,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

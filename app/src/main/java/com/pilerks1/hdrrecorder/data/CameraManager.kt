@@ -17,6 +17,8 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
@@ -24,6 +26,8 @@ import com.pilerks1.hdrrecorder.model.ColorFormat
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 @ExperimentalCamera2Interop
 @SuppressLint("MissingPermission")
@@ -38,6 +42,10 @@ class CameraManager(
     private var preview: Preview? = null
     var videoCapture: VideoCapture<Recorder>? = null
         private set
+    private val _isLowLightBoostActive = MutableStateFlow(false)
+    val isLowLightBoostActive = _isLowLightBoostActive.asStateFlow()
+    private var lowLightBoostStateSource: LiveData<Int>? = null
+    private var lowLightBoostStateObserver: Observer<Int>? = null
 
     private var pendingBind: BindRequest? = null
     private var isWaitingForProvider = false
@@ -86,6 +94,7 @@ class CameraManager(
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindUseCases(cameraProvider: ProcessCameraProvider, request: BindRequest) {
+        clearLowLightBoostObserver()
         cameraProvider.unbindAll()
 
         val cameraSelector = CameraSelector.Builder()
@@ -174,6 +183,7 @@ class CameraManager(
             camera = boundCamera
             preview = newPreview
             videoCapture = newVideoCapture
+            observeLowLightBoostState(boundCamera.cameraInfo)
             
             // Extract characteristics and pass back to ViewModel
             val caps = com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager.extractCapabilities(boundCamera.cameraInfo)
@@ -197,6 +207,9 @@ class CameraManager(
         return camera?.cameraControl
     }
 
+    fun setLowLightBoostEnabled(enabled: Boolean) =
+        camera?.cameraControl?.enableLowLightBoostAsync(enabled)
+
     fun tapToMeter(meteringPoint: MeteringPoint) {
         val action = FocusMeteringAction.Builder(
             meteringPoint,
@@ -208,12 +221,35 @@ class CameraManager(
     }
 
     fun release() {
+        clearLowLightBoostObserver()
         cameraExecutor.shutdown()
         pendingBind = null
         camera = null
         preview = null
         videoCapture = null
         cameraProvider?.unbindAll()
+    }
+
+    private fun observeLowLightBoostState(cameraInfo: CameraInfo) {
+        clearLowLightBoostObserver()
+        if (!cameraInfo.isLowLightBoostSupported) return
+
+        val source = cameraInfo.lowLightBoostState
+        val observer = Observer<Int> { state ->
+            _isLowLightBoostActive.value = state == LowLightBoostState.ACTIVE
+        }
+        lowLightBoostStateSource = source
+        lowLightBoostStateObserver = observer
+        source.observeForever(observer)
+    }
+
+    private fun clearLowLightBoostObserver() {
+        val source = lowLightBoostStateSource
+        val observer = lowLightBoostStateObserver
+        if (source != null && observer != null) source.removeObserver(observer)
+        lowLightBoostStateSource = null
+        lowLightBoostStateObserver = null
+        _isLowLightBoostActive.value = false
     }
 
     private data class BindRequest(

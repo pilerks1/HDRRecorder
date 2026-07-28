@@ -62,18 +62,4 @@ object DeviceCompatibilityChecker {
         }
     }
 
-    /**
-     * Checks if the device supports AE Low Light Boost (Night Mode).
-     * Requires Android 16 (API 36).
-     */
-    @RequiresApi(36)
-    @OptIn(ExperimentalCamera2Interop::class)
-    fun supportsNightMode(camera2Info: Camera2CameraInfo): Boolean {
-        return try {
-            val modes = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES)
-            modes?.contains(CameraMetadata.CONTROL_AE_MODE_ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY) == true
-        } catch (e: Exception) {
-            false
-        }
-    }
 }

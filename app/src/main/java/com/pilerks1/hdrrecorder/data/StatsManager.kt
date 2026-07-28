@@ -234,6 +234,9 @@ class StatsManager(private val context: Context) {
     val previewStatsCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
             val iso = result.get(TotalCaptureResult.SENSOR_SENSITIVITY)
+            val postRawSensitivityBoost = result.get(
+                TotalCaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST
+            )
             currentIso = iso ?: 0
             val expTime = result.get(TotalCaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
             if (expTime > 0) currentShutterSpeed = 1_000_000_000.0 / expTime
@@ -254,6 +257,7 @@ class StatsManager(private val context: Context) {
             if (nowElapsedNanos - lastTelemetryEmissionElapsedNanos >= TELEMETRY_INTERVAL_NANOS) {
                 val telemetry = CameraTelemetry(
                     iso = iso,
+                    postRawSensitivityBoost = postRawSensitivityBoost,
                     shutterNanos = expTime.takeIf { it > 0L },
                     focusDistanceDiopters = focusDistance,
                     cctTemperatureKelvin = cctTemperature,

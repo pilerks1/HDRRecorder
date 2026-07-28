@@ -8,6 +8,7 @@ package com.pilerks1.hdrrecorder.model
  */
 data class CameraTelemetry(
     val iso: Int? = null,
+    val postRawSensitivityBoost: Int? = null,
     val shutterNanos: Long? = null,
     val focusDistanceDiopters: Float? = null,
     val cctTemperatureKelvin: Int? = null,

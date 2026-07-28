@@ -15,6 +15,7 @@ import androidx.camera.core.CameraInfo
  */
 data class CameraCapabilities(
     val isoRange: Range<Int>? = null,
+    val postRawSensitivityBoostRange: Range<Int>? = null,
     val ssRangeNanos: Range<Long>? = null,
     val evRange: Range<Int>? = null,
     val evStep: Rational? = null,
@@ -30,7 +31,7 @@ data class CameraCapabilities(
     val cctTemperatureRange: Range<Int>? = null,
     val supportsShutterPriorityAe: Boolean = false,
     val supportsIsoPriorityAe: Boolean = false,
-    val supportsNightMode: Boolean = false
+    val supportsLowLightBoost: Boolean = false
 )
 
 object CameraCapabilitiesManager {
@@ -44,6 +45,9 @@ object CameraCapabilitiesManager {
         
         // 1. ISO (Sensitivity)
         val isoRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val postRawSensitivityBoostRange = camera2Info.getCameraCharacteristic(
+            CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE
+        )
         
         // 2. Shutter Speed (Exposure Time in Nanos)
         val ssRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
@@ -93,6 +97,7 @@ object CameraCapabilitiesManager {
 
         return CameraCapabilities(
             isoRange = isoRange,
+            postRawSensitivityBoostRange = postRawSensitivityBoostRange,
             ssRangeNanos = ssRange,
             evRange = evRange,
             evStep = evStep,
@@ -110,7 +115,7 @@ object CameraCapabilitiesManager {
             cctTemperatureRange = cctTemperatureRange,
             supportsShutterPriorityAe = supportsShutterPriorityAe,
             supportsIsoPriorityAe = supportsIsoPriorityAe,
-            supportsNightMode = isApi36 && DeviceCompatibilityChecker.supportsNightMode(camera2Info)
+            supportsLowLightBoost = cameraInfo.isLowLightBoostSupported
         )
     }
 }

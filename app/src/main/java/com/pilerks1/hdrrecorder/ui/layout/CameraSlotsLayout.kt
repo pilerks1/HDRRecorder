@@ -15,7 +15,8 @@ private enum class CameraSlot {
     PREVIEW,
     SECONDARY_CONTROLS,
     EXPANDED_PANEL,
-    PRIMARY_ACTIONS
+    PRIMARY_ACTIONS,
+    LOW_LIGHT_BOOST_INDICATOR
 }
 
 data class PanelThicknessSpec(
@@ -35,6 +36,7 @@ fun CameraSlotsLayout(
     secondaryControls: @Composable (CameraLayoutSpec) -> Unit,
     expandedPanel: @Composable (CameraLayoutSpec) -> Unit,
     primaryActions: @Composable (CameraLayoutSpec) -> Unit,
+    lowLightBoostIndicator: @Composable (CameraLayoutSpec) -> Unit,
     modifier: Modifier = Modifier
 ) {
     SubcomposeLayout(modifier = modifier) { constraints ->
@@ -108,6 +110,11 @@ fun CameraSlotsLayout(
         }
             .single()
             .measure(spec.primaryActions.fixedConstraints())
+        val lowLightBoostPlaceable = subcompose(CameraSlot.LOW_LIGHT_BOOST_INDICATOR) {
+            Box(Modifier.fillMaxSize()) { lowLightBoostIndicator(spec) }
+        }
+            .single()
+            .measure(spec.lowLightBoostIndicator.fixedConstraints())
 
         layout(width, height) {
             previewPlaceable.place(spec.preview.left.roundToInt(), spec.preview.top.roundToInt())
@@ -118,6 +125,10 @@ fun CameraSlotsLayout(
             )
             expandedPlaceable.place(spec.expandedPanel.left.roundToInt(), spec.expandedPanel.top.roundToInt())
             primaryPlaceable.place(spec.primaryActions.left.roundToInt(), spec.primaryActions.top.roundToInt())
+            lowLightBoostPlaceable.place(
+                spec.lowLightBoostIndicator.left.roundToInt(),
+                spec.lowLightBoostIndicator.top.roundToInt()
+            )
         }
     }
 }
