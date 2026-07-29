@@ -44,6 +44,14 @@ fun ExpandedControlPanelUI(
         onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
         onCycleAspectRatio = { actions.onEvent(CameraUiEvent.CycleAspectRatio) },
         onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value) } },
+        onSetPostRawSensitivity = { isManual, value ->
+            actions.onManualControlsChange {
+                it.copy(
+                    isManualPostRawSensitivity = isManual,
+                    postRawSensitivityBoost = value
+                )
+            }
+        },
         onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value) } },
         onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: 0) } },
         onSetLowLightBoost = { enabled -> actions.onEvent(CameraUiEvent.SetLowLightBoost(enabled)) },
@@ -58,6 +66,7 @@ fun ExpandedControlPanelUI(
                 actions.onEvent(CameraUiEvent.CycleFps)
             }
         },
+        controlsEnabled = !uiState.isExposureTransitioning,
         modifier = modifier
     )
 }

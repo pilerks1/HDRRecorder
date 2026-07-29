@@ -5,7 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -170,6 +172,7 @@ fun ActiveControlPanel(
     onCycleResolution: () -> Unit,
     onCycleAspectRatio: () -> Unit,
     onSetIso: (Boolean, Int?) -> Unit,
+    onSetPostRawSensitivity: (Boolean, Int?) -> Unit,
     onSetSs: (Boolean, Long?) -> Unit,
     onSetEv: (Boolean, Int?) -> Unit,
     onSetLowLightBoost: (Boolean) -> Unit,
@@ -178,6 +181,7 @@ fun ActiveControlPanel(
     onSetFps: (Boolean, Range<Int>?) -> Unit,
     autoFps: Int,
     onCycleFps: () -> Unit,
+    controlsEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val activePanel = state.activePanel ?: return
@@ -220,26 +224,22 @@ fun ActiveControlPanel(
                     onCycleResolution = onCycleResolution,
                     onCycleAspectRatio = onCycleAspectRatio,
                     onCycleFps = onCycleFps,
-                    onSetFps = onSetFps
+                    onSetFps = onSetFps,
+                    controlsEnabled = controlsEnabled
                 )
                 return@panelContent
             }
 
             when (activePanel.manualControl) {
             ManualControl.ISO -> {
-                val scale = remember(caps?.isoRange) { SliderScales.iso(caps) }
-                val effective = telemetry.iso ?: state.isoValue ?: scale.fallbackValue
-                StandardSlider(
-                    scale = scale,
-                    binding = StandardSliderBinding(
-                        isManual = state.isManualIso,
-                        effectiveValue = if (state.isManualIso) state.isoValue ?: effective else effective,
-                        onToggleAuto = {
-                            if (state.isManualIso) onSetIso(false, null) else onSetIso(true, effective)
-                        },
-                        onManualValue = { onSetIso(true, it) }
-                    ),
-                    axis = axis
+                IsoPanel(
+                    state = state,
+                    caps = caps,
+                    telemetry = telemetry,
+                    axis = axis,
+                    enabled = controlsEnabled,
+                    onSetIso = onSetIso,
+                    onSetPostRawSensitivity = onSetPostRawSensitivity
                 )
             }
             ManualControl.SHUTTER -> {
@@ -255,7 +255,8 @@ fun ActiveControlPanel(
                         },
                         onManualValue = { onSetSs(true, it) }
                     ),
-                    axis = axis
+                    axis = axis,
+                    enabled = controlsEnabled
                 )
             }
             ManualControl.EXPOSURE_COMPENSATION -> {
@@ -362,9 +363,10 @@ private fun ResolutionPanel(
     onCycleResolution: () -> Unit,
     onCycleAspectRatio: () -> Unit,
     onCycleFps: () -> Unit,
-    onSetFps: (Boolean, Range<Int>?) -> Unit
+    onSetFps: (Boolean, Range<Int>?) -> Unit,
+    controlsEnabled: Boolean
 ) {
-    val currentRange = state.fpsRange ?: Range(30, 30)
+    val currentRange = state.fpsRange ?: Range(autoFps, autoFps)
     SliderPanelLayout(
         axis = axis,
         actionCount = 3,
@@ -399,12 +401,16 @@ private fun ResolutionPanel(
                 isManualFps = state.isManualFps,
                 currentRange = currentRange.lower.toFloat()..currentRange.upper.toFloat(),
                 isRecording = isRecording,
+                isExposureFullyManual = state.isManualIso &&
+                    state.isManualSs &&
+                    caps?.supportsFullManualExposure == true,
                 caps = caps,
                 onValueChange = { newRange ->
                     onSetFps(true, Range(newRange.start.roundToInt(), newRange.endInclusive.roundToInt()))
                 },
                 axis = axis,
                 axisReservation = axisReservation,
+                enabled = controlsEnabled,
                 modifier = sliderModifier
             )
         }
@@ -415,7 +421,9 @@ private fun ResolutionPanel(
 private fun <T : Any> StandardSlider(
     scale: SliderScale<T>,
     binding: StandardSliderBinding<T>,
-    axis: AxisSpec
+    axis: AxisSpec,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     BaseSlider(
         value = scale.progress(binding.effectiveValue),
@@ -424,11 +432,97 @@ private fun <T : Any> StandardSlider(
         ticks = scale.ticks,
         layoutLabels = scale.layoutLabels,
         onValueChange = { binding.onManualValue(scale.value(it)) },
+        modifier = modifier,
+        sliderEnabled = enabled,
+        primaryButtonEnabled = enabled,
         primaryButtonText = if (binding.isManual) "MAN" else "AUTO",
         primaryButtonColor = if (binding.isManual) Color.DarkGray else Color.White,
         primaryButtonTextColor = if (binding.isManual) Color.White else Color.Black,
         onPrimaryButtonClick = binding.onToggleAuto
     )
+}
+
+@Composable
+private fun IsoPanel(
+    state: ManualControlsState,
+    caps: CameraCapabilities?,
+    telemetry: CameraTelemetry,
+    axis: AxisSpec,
+    enabled: Boolean,
+    onSetIso: (Boolean, Int?) -> Unit,
+    onSetPostRawSensitivity: (Boolean, Int?) -> Unit
+) {
+    val isoScale = remember(caps?.isoRange) { SliderScales.iso(caps) }
+    val effectiveIso = telemetry.iso ?: state.isoValue ?: isoScale.fallbackValue
+    val sensorSlider: @Composable (Modifier) -> Unit = { modifier ->
+        StandardSlider(
+            scale = isoScale,
+            binding = StandardSliderBinding(
+                isManual = state.isManualIso,
+                effectiveValue = if (state.isManualIso) {
+                    state.isoValue ?: effectiveIso
+                } else {
+                    effectiveIso
+                },
+                onToggleAuto = {
+                    if (state.isManualIso) onSetIso(false, null)
+                    else onSetIso(true, effectiveIso)
+                },
+                onManualValue = { onSetIso(true, it) }
+            ),
+            axis = axis,
+            modifier = modifier,
+            enabled = enabled
+        )
+    }
+
+    if (caps?.supportsPostRawSensitivityBoost != true) {
+        sensorSlider(Modifier.fillMaxSize())
+        return
+    }
+
+    val postScale = remember(caps.postRawSensitivityBoostRange) {
+        SliderScales.postRawSensitivity(caps)
+    }
+    val effectivePost = telemetry.postRawSensitivityBoost
+        ?: state.postRawSensitivityBoost
+        ?: postScale.fallbackValue
+    val postSlider: @Composable (Modifier) -> Unit = { modifier ->
+        StandardSlider(
+            scale = postScale,
+            binding = StandardSliderBinding(
+                isManual = state.isManualPostRawSensitivity,
+                effectiveValue = if (state.isManualPostRawSensitivity) {
+                    state.postRawSensitivityBoost ?: effectivePost
+                } else {
+                    effectivePost
+                },
+                onToggleAuto = {
+                    if (state.isManualPostRawSensitivity) {
+                        onSetPostRawSensitivity(false, null)
+                    } else {
+                        onSetPostRawSensitivity(true, effectivePost)
+                    }
+                },
+                onManualValue = { onSetPostRawSensitivity(true, it) }
+            ),
+            axis = axis,
+            modifier = modifier,
+            enabled = enabled
+        )
+    }
+
+    if (axis.usesVerticalTrack) {
+        Row(Modifier.fillMaxSize()) {
+            postSlider(Modifier.weight(1f))
+            sensorSlider(Modifier.weight(1f))
+        }
+    } else {
+        Column(Modifier.fillMaxSize()) {
+            postSlider(Modifier.weight(1f))
+            sensorSlider(Modifier.weight(1f))
+        }
+    }
 }
 
 private fun resolveEffectiveWhiteBalance(

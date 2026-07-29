@@ -15,12 +15,14 @@ import androidx.camera.core.CameraInfo
  */
 data class CameraCapabilities(
     val isoRange: Range<Int>? = null,
+    val maxAnalogSensitivityIso: Int? = null,
     val postRawSensitivityBoostRange: Range<Int>? = null,
     val ssRangeNanos: Range<Long>? = null,
     val evRange: Range<Int>? = null,
     val evStep: Rational? = null,
     val focusMinDistanceDiopters: Float = 0f,
     val fpsRanges: List<Range<Int>> = emptyList(),
+    val maxFrameDurationNanos: Long? = null,
     val supportsManualSensor: Boolean = false,
     val supportsFullManualExposure: Boolean = false,
     val hasManualIsoControl: Boolean = false,
@@ -31,6 +33,8 @@ data class CameraCapabilities(
     val cctTemperatureRange: Range<Int>? = null,
     val supportsShutterPriorityAe: Boolean = false,
     val supportsIsoPriorityAe: Boolean = false,
+    val supportsAeLock: Boolean = false,
+    val supportsPostRawSensitivityBoost: Boolean = false,
     val supportsLowLightBoost: Boolean = false
 )
 
@@ -45,6 +49,9 @@ object CameraCapabilitiesManager {
         
         // 1. ISO (Sensitivity)
         val isoRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val maxAnalogSensitivityIso = camera2Info.getCameraCharacteristic(
+            CameraCharacteristics.SENSOR_MAX_ANALOG_SENSITIVITY
+        )
         val postRawSensitivityBoostRange = camera2Info.getCameraCharacteristic(
             CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE
         )
@@ -62,6 +69,15 @@ object CameraCapabilitiesManager {
         // 5. FPS Ranges
         val fpsArray = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
         val fpsRanges = fpsArray?.toList() ?: emptyList()
+        val maxFrameDurationNanos = camera2Info.getCameraCharacteristic(
+            CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION
+        )
+        val supportsAeLock = camera2Info.getCameraCharacteristic(
+            CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE
+        ) == true
+        val supportsPostRawSensitivityBoost = postRawSensitivityBoostRange?.let { range ->
+            range.lower != range.upper && !(range.lower == 100 && range.upper == 100)
+        } == true
 
         val requestCapabilities = camera2Info.getCameraCharacteristic(
             CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
@@ -97,12 +113,14 @@ object CameraCapabilitiesManager {
 
         return CameraCapabilities(
             isoRange = isoRange,
+            maxAnalogSensitivityIso = maxAnalogSensitivityIso,
             postRawSensitivityBoostRange = postRawSensitivityBoostRange,
             ssRangeNanos = ssRange,
             evRange = evRange,
             evStep = evStep,
             focusMinDistanceDiopters = minFocus,
             fpsRanges = fpsRanges,
+            maxFrameDurationNanos = maxFrameDurationNanos,
             supportsManualSensor = supportsManualSensor,
             supportsFullManualExposure = supportsFullManualExposure,
             hasManualIsoControl = hasValidIsoRange &&
@@ -115,6 +133,8 @@ object CameraCapabilitiesManager {
             cctTemperatureRange = cctTemperatureRange,
             supportsShutterPriorityAe = supportsShutterPriorityAe,
             supportsIsoPriorityAe = supportsIsoPriorityAe,
+            supportsAeLock = supportsAeLock,
+            supportsPostRawSensitivityBoost = supportsPostRawSensitivityBoost,
             supportsLowLightBoost = cameraInfo.isLowLightBoostSupported
         )
     }

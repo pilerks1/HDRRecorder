@@ -65,6 +65,34 @@ private fun valueFraction(
 }
 
 @Composable
+private fun FpsSliderThumb(
+    value: Float,
+    color: Color,
+    textColor: Color,
+    textRotation: Float
+) {
+    Box(
+        modifier = Modifier
+            .size(
+                width = SliderPaneStyle.rangeThumbWidth,
+                height = SliderPaneStyle.rangeThumbHeight
+            )
+            .background(color, androidx.compose.foundation.shape.CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "${value.toInt()}",
+            color = textColor,
+            style = SliderPaneStyle.rangeThumbTextStyle,
+            modifier = Modifier
+                .wrapContentSize(unbounded = true)
+                .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
+                .graphicsLayer { rotationZ = textRotation }
+        )
+    }
+}
+
+@Composable
 private fun RangeSliderTickAxis(
     ticks: List<SliderTick>,
     color: Color,
@@ -150,6 +178,7 @@ private fun RotatingRangeSlider(
     ) -> Unit)? = null,
     enabled: Boolean = true,
     isActive: Boolean = true,
+    singleThumb: Boolean = false,
     ticks: List<SliderTick> = emptyList(),
     axisReservation: SliderAxisReservation = SliderAxisReservation()
 ) {
@@ -198,6 +227,7 @@ private fun RotatingRangeSlider(
         range: ClosedFloatingPointRange<Float>,
         deferOverlappingThumbs: Boolean
     ): RangeThumb? {
+        if (singleThumb) return RangeThumb.END
         if (range.start != range.endInclusive) {
             val touchedValue = valueAt(positionX, width)
             return if (
@@ -226,16 +256,25 @@ private fun RotatingRangeSlider(
         range: ClosedFloatingPointRange<Float>,
         thumb: RangeThumb,
         newValue: Float
-    ): ClosedFloatingPointRange<Float> = when (thumb) {
-        RangeThumb.START -> newValue.coerceAtMost(range.endInclusive)..range.endInclusive
-        RangeThumb.END -> range.start..newValue.coerceAtLeast(range.start)
+    ): ClosedFloatingPointRange<Float> {
+        if (singleThumb) return newValue..newValue
+        return when (thumb) {
+            RangeThumb.START -> newValue.coerceAtMost(range.endInclusive)..range.endInclusive
+            RangeThumb.END -> range.start..newValue.coerceAtLeast(range.start)
+        }
     }
 
     val sliderContent = @Composable {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(enabled, resolvedAxisReservation, valueRange, thumbHalfWidthPx) {
+                .pointerInput(
+                    enabled,
+                    singleThumb,
+                    resolvedAxisReservation,
+                    valueRange,
+                    thumbHalfWidthPx
+                ) {
                     if (!enabled) return@pointerInput
                     detectTapGestures(
                         onTap = { offset ->
@@ -280,7 +319,13 @@ private fun RotatingRangeSlider(
                         }
                     )
                 }
-                .pointerInput(enabled, resolvedAxisReservation, valueRange, thumbHalfWidthPx) {
+                .pointerInput(
+                    enabled,
+                    singleThumb,
+                    resolvedAxisReservation,
+                    valueRange,
+                    thumbHalfWidthPx
+                ) {
                     if (!enabled) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
@@ -352,64 +397,65 @@ private fun RotatingRangeSlider(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                RangeSlider(
-                    value = value,
-                    onValueChange = {},
-                    valueRange = valueRange,
-                    enabled = false,
-                    colors = sliderColors,
-                    startThumb = {
-                        Box(
-                            modifier = Modifier
-                                .size(
-                                    width = SliderPaneStyle.rangeThumbWidth,
-                                    height = SliderPaneStyle.rangeThumbHeight
-                                )
-                                .background(mainColor, androidx.compose.foundation.shape.CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "${value.start.toInt()}",
-                                color = if (isActive) Color.White else mainColor,
-                                style = SliderPaneStyle.rangeThumbTextStyle,
-                                modifier = Modifier
-                                    .wrapContentSize(unbounded = true)
-                                    .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
-                                    .graphicsLayer { rotationZ = textRotation }
+                if (singleThumb) {
+                    Slider(
+                        value = value.endInclusive,
+                        onValueChange = {},
+                        valueRange = valueRange,
+                        enabled = false,
+                        colors = sliderColors,
+                        thumb = {
+                            FpsSliderThumb(
+                                value = value.endInclusive,
+                                color = mainColor,
+                                textColor = if (isActive) Color.White else mainColor,
+                                textRotation = textRotation
                             )
-                        }
-                    },
-                    endThumb = {
-                        Box(
-                            modifier = Modifier
-                                .size(
-                                    width = SliderPaneStyle.rangeThumbWidth,
-                                    height = SliderPaneStyle.rangeThumbHeight
-                                )
-                                .background(mainColor, androidx.compose.foundation.shape.CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "${value.endInclusive.toInt()}",
-                                color = if (isActive) Color.White else mainColor,
-                                style = SliderPaneStyle.rangeThumbTextStyle,
-                                modifier = Modifier
-                                    .wrapContentSize(unbounded = true)
-                                    .offset(y = -SliderPaneStyle.rangeThumbLabelOffset)
-                                    .graphicsLayer { rotationZ = textRotation }
+                        },
+                        track = { sliderState ->
+                            SliderDefaults.Track(
+                                sliderState = sliderState,
+                                modifier = Modifier.height(SliderPaneStyle.rangeTrackThickness),
+                                colors = sliderColors,
+                                enabled = false
                             )
-                        }
-                    },
-                    track = { rangeSliderState ->
-                        SliderDefaults.Track(
-                            rangeSliderState = rangeSliderState,
-                            modifier = Modifier.height(SliderPaneStyle.rangeTrackThickness),
-                            colors = sliderColors,
-                            enabled = false
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    RangeSlider(
+                        value = value,
+                        onValueChange = {},
+                        valueRange = valueRange,
+                        enabled = false,
+                        colors = sliderColors,
+                        startThumb = {
+                            FpsSliderThumb(
+                                value = value.start,
+                                color = mainColor,
+                                textColor = if (isActive) Color.White else mainColor,
+                                textRotation = textRotation
+                            )
+                        },
+                        endThumb = {
+                            FpsSliderThumb(
+                                value = value.endInclusive,
+                                color = mainColor,
+                                textColor = if (isActive) Color.White else mainColor,
+                                textRotation = textRotation
+                            )
+                        },
+                        track = { rangeSliderState ->
+                            SliderDefaults.Track(
+                                rangeSliderState = rangeSliderState,
+                                modifier = Modifier.height(SliderPaneStyle.rangeTrackThickness),
+                                colors = sliderColors,
+                                enabled = false
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
@@ -426,10 +472,12 @@ fun FpsSlider(
     isManualFps: Boolean,
     currentRange: ClosedFloatingPointRange<Float>,
     isRecording: Boolean,
+    isExposureFullyManual: Boolean,
     caps: CameraCapabilities?,
     onValueChange: (ClosedFloatingPointRange<Float>) -> Unit,
     axis: AxisSpec,
     axisReservation: SliderAxisReservation = SliderAxisReservation(),
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val validRanges = caps?.fpsRanges ?: emptyList<Range<Int>>()
@@ -447,13 +495,76 @@ fun FpsSlider(
     }
     var localRange by remember(currentRange) { mutableStateOf(currentRange) }
 
+    if (isExposureFullyManual) {
+        val legalFrameRates = remember(caps?.fpsRanges) {
+            FpsRangeMath.fixedFrameRates(validRanges)
+        }
+        val requestedFps = currentRange.endInclusive.roundToInt()
+        val initialFps = FpsRangeMath.nearestFixedFrameRate(
+            requestedFps = requestedFps,
+            validRanges = validRanges
+        ) ?: requestedFps
+        val manualTicks = legalFrameRates.map { fps ->
+            SliderTick(
+                position = valueFraction(fps.toFloat(), minFps..maxFps),
+                label = fps.toString()
+            )
+        }
+        var manualRange by remember(initialFps, legalFrameRates) {
+            mutableStateOf(initialFps.toFloat()..initialFps.toFloat())
+        }
+
+        RotatingRangeSlider(
+            value = manualRange,
+            onValueChange = { draggedRange ->
+                if ((!isRecording || isManualFps) && enabled) {
+                    val snappedFps = FpsRangeMath.nearestFixedFrameRate(
+                        requestedFps = draggedRange.endInclusive.roundToInt(),
+                        validRanges = validRanges
+                    )
+                    if (snappedFps != null) {
+                        val snapped = snappedFps.toFloat()
+                        manualRange = snapped..snapped
+                    }
+                }
+            },
+            onValueChangeFinished = { releasedRange, _, _, _ ->
+                if ((!isRecording || isManualFps) && enabled) {
+                    val snappedFps = FpsRangeMath.nearestFixedFrameRate(
+                        requestedFps = releasedRange.endInclusive.roundToInt(),
+                        validRanges = validRanges
+                    )
+                    if (snappedFps != null) {
+                        val snapped = snappedFps.toFloat()
+                        manualRange = snapped..snapped
+                        localRange = manualRange
+                        onValueChange(manualRange)
+                    }
+                }
+            },
+            valueRange = minFps..maxFps,
+            axis = axis,
+            ticks = manualTicks,
+            isActive = isManualFps,
+            singleThumb = true,
+            enabled = enabled &&
+                legalFrameRates.isNotEmpty() &&
+                (!isRecording || isManualFps),
+            axisReservation = axisReservation,
+            modifier = modifier.fillMaxSize()
+        )
+        return
+    }
+
     RotatingRangeSlider(
         value = localRange,
         onValueChange = { newRange ->
-            if (!isRecording || isManualFps) localRange = newRange
+            if ((!isRecording || isManualFps) && enabled) {
+                localRange = newRange
+            }
         },
         onValueChangeFinished = { releasedRange, startingRange, draggedBound, dragDirection ->
-            if (!isRecording || isManualFps) {
+            if ((!isRecording || isManualFps) && enabled) {
                 val clamped = FpsRangeMath.clampToSupportedRange(
                     newRange = releasedRange,
                     oldRange = startingRange,
@@ -469,7 +580,7 @@ fun FpsSlider(
         axis = axis,
         ticks = ticks,
         isActive = isManualFps,
-        enabled = !isRecording || isManualFps,
+        enabled = enabled && (!isRecording || isManualFps),
         axisReservation = axisReservation,
         modifier = modifier.fillMaxSize()
     )

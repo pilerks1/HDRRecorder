@@ -38,7 +38,51 @@ object SliderScales {
     private const val MAX_EV_MAJOR_LABEL_COUNT = 7
 
     fun iso(caps: CameraCapabilities?): SliderScale<Int> {
-        return isoRange(caps?.isoRange?.lower ?: 100, caps?.isoRange?.upper ?: 3200)
+        val scale = isoRange(
+            caps?.isoRange?.lower ?: 100,
+            caps?.isoRange?.upper ?: 3200
+        )
+        val analogBoundary = caps?.maxAnalogSensitivityIso
+            ?.takeIf { boundary -> caps.isoRange?.contains(boundary) == true }
+            ?: return scale
+        val boundaryLabel = analogBoundary.toString()
+        val ticks = (scale.ticks + SliderTick(scale.progress(analogBoundary), boundaryLabel))
+            .distinctBy { it.position }
+            .sortedBy { it.position }
+        return SliderScale(
+            fallbackValue = scale.fallbackValue,
+            valueToProgress = scale.valueToProgress,
+            progressToValue = scale.progressToValue,
+            formatValue = scale.formatValue,
+            ticks = ticks,
+            layoutLabels = (scale.layoutLabels + boundaryLabel).distinct()
+        )
+    }
+
+    fun postRawSensitivity(caps: CameraCapabilities?): SliderScale<Int> {
+        val range = caps?.postRawSensitivityBoostRange
+        val lower = range?.lower ?: 100
+        val upper = (range?.upper ?: 100).coerceAtLeast(lower)
+        val toProgress: (Int) -> Float = { value ->
+            linearProgress(value.toFloat(), lower.toFloat(), upper.toFloat())
+        }
+        val fromProgress: (Float) -> Int = { progress ->
+            linearValue(progress, lower.toFloat(), upper.toFloat())
+                .roundToInt()
+                .coerceIn(lower, upper)
+        }
+        val format: (Int) -> String = { value ->
+            String.format(Locale.US, "%.2f×", value / 100.0)
+        }
+        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
+        return SliderScale(
+            fallbackValue = 100.coerceIn(lower, upper),
+            valueToProgress = toProgress,
+            progressToValue = fromProgress,
+            formatValue = format,
+            ticks = ticks,
+            layoutLabels = layoutLabels(ticks, format(lower), format(upper))
+        )
     }
 
     internal fun isoRange(minimum: Int, maximum: Int): SliderScale<Int> {

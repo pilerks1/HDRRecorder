@@ -113,7 +113,14 @@ internal fun rememberSliderPaneSizing(
                             )
                         }
                     }
-                    thickness
+                    if (
+                        panel == CameraControlPanel.ISO &&
+                        caps?.supportsPostRawSensitivityBoost == true
+                    ) {
+                        thickness * 2f
+                    } else {
+                        thickness
+                    }
                 }
             }
         )

@@ -26,6 +26,7 @@ object ManualControlStateUpdater {
 
         if (caps != null) {
             newState = clearUnsupportedControls(newState, caps)
+            newState = resolvePostRawExposureOwnership(oldState, newState, caps)
             newState = resolveHybridOnlyConflict(oldState, newState, caps)
             newState = resolveLowLightBoostConflict(oldState, newState)
 
@@ -38,6 +39,8 @@ object ManualControlStateUpdater {
                     newState = newState.copy(
                         isManualIso = true,
                         isManualSs = true,
+                        isManualPostRawSensitivity =
+                            caps.supportsPostRawSensitivityBoost,
                         isoValue = newState.isoValue
                             ?: exposureDefaults.isoValue
                             ?: caps.isoRange?.lower,
@@ -85,8 +88,10 @@ object ManualControlStateUpdater {
     ): ManualControlsState = state.copy(
         activePanel = state.activePanel?.takeIf { panelIsAvailable(it, caps) },
         isManualIso = state.isManualIso && caps.hasManualIsoControl,
+        isManualPostRawSensitivity = state.isManualPostRawSensitivity &&
+            caps.supportsPostRawSensitivityBoost,
         postRawSensitivityBoost = state.postRawSensitivityBoost.takeIf {
-            caps.postRawSensitivityBoostRange != null
+            caps.supportsPostRawSensitivityBoost
         },
         isManualSs = state.isManualSs && caps.hasManualShutterControl,
         isManualEv = state.isManualEv && caps.hasExposureCompensationControl,
@@ -105,7 +110,9 @@ object ManualControlStateUpdater {
 
         val enabledManualExposure =
             (!oldState.isManualIso && newState.isManualIso) ||
-                (!oldState.isManualSs && newState.isManualSs)
+                (!oldState.isManualSs && newState.isManualSs) ||
+                (!oldState.isManualPostRawSensitivity &&
+                    newState.isManualPostRawSensitivity)
         val selectedHighFrameRate = newState.isManualFps &&
             (newState.fpsRange?.upper ?: 0) > LOW_LIGHT_BOOST_MAX_FPS
         return if (enabledManualExposure || selectedHighFrameRate) {
@@ -130,16 +137,19 @@ object ManualControlStateUpdater {
             enabledIso && !enabledShutter -> newState.copy(
                 isManualSs = false,
                 ssValueNanos = null,
+                isManualPostRawSensitivity = false,
                 postRawSensitivityBoost = null
             )
             enabledShutter && !enabledIso -> newState.copy(
                 isManualIso = false,
                 isoValue = null,
+                isManualPostRawSensitivity = false,
                 postRawSensitivityBoost = null
             )
             else -> newState.copy(
                 isManualIso = false,
                 isoValue = null,
+                isManualPostRawSensitivity = false,
                 postRawSensitivityBoost = null,
                 isManualSs = false,
                 ssValueNanos = null
@@ -154,8 +164,11 @@ object ManualControlStateUpdater {
         state: ManualControlsState
     ): ManualControlsState = state.copy(
         isoValue = state.isoValue.takeIf { state.isManualIso },
+        isManualPostRawSensitivity = state.isManualPostRawSensitivity &&
+            state.isManualIso &&
+            state.isManualSs,
         postRawSensitivityBoost = state.postRawSensitivityBoost.takeIf {
-            state.isManualIso && state.isManualSs
+            state.isManualPostRawSensitivity && state.isManualIso && state.isManualSs
         },
         ssValueNanos = state.ssValueNanos.takeIf { state.isManualSs },
         evValueIndex = state.evValueIndex.takeIf { state.isManualEv } ?: 0,
@@ -187,6 +200,59 @@ object ManualControlStateUpdater {
         state.isManualIso && state.isManualSs -> true
         state.isManualIso -> !caps.supportsIsoPriorityAe
         else -> !caps.supportsShutterPriorityAe
+    }
+
+    private fun resolvePostRawExposureOwnership(
+        oldState: ManualControlsState,
+        newState: ManualControlsState,
+        caps: CameraCapabilities
+    ): ManualControlsState {
+        if (!caps.supportsPostRawSensitivityBoost) {
+            return newState.copy(
+                isManualPostRawSensitivity = false,
+                postRawSensitivityBoost = null
+            )
+        }
+
+        val leftFullManualThroughSensorControl =
+            (oldState.isManualIso && !newState.isManualIso) ||
+                (oldState.isManualSs && !newState.isManualSs)
+        if (leftFullManualThroughSensorControl) {
+            return newState.copy(
+                isManualPostRawSensitivity = false,
+                postRawSensitivityBoost = null
+            )
+        }
+
+        val returnedPostRawToAuto =
+            oldState.isManualPostRawSensitivity && !newState.isManualPostRawSensitivity
+        if (returnedPostRawToAuto) {
+            return newState.copy(
+                isManualIso = false,
+                isoValue = null,
+                isManualPostRawSensitivity = false,
+                postRawSensitivityBoost = null,
+                isManualSs = false,
+                ssValueNanos = null
+            )
+        }
+
+        if (newState.isManualPostRawSensitivity) {
+            return newState.copy(
+                isManualIso = true,
+                isManualSs = true
+            )
+        }
+
+        val remainsFullManual = newState.isManualIso && newState.isManualSs
+        return if (remainsFullManual) {
+            newState.copy(isManualPostRawSensitivity = true)
+        } else {
+            newState.copy(
+                isManualPostRawSensitivity = false,
+                postRawSensitivityBoost = null
+            )
+        }
     }
 
     private fun returnsToAutoFromUnsupportedHybrid(

@@ -2,6 +2,7 @@ package com.pilerks1.hdrrecorder.ui.viewmodels
 
 import android.app.Application
 import android.content.Intent
+import android.hardware.camera2.CameraMetadata
 import android.os.SystemClock
 import android.util.Log
 import android.util.Range
@@ -20,6 +21,7 @@ import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.camera.CameraInteropApplier
 import com.pilerks1.hdrrecorder.data.camera.InteropSettings
 import com.pilerks1.hdrrecorder.model.GammaCurve
+import com.pilerks1.hdrrecorder.model.ExposureCaptureResult
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
@@ -32,9 +34,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlin.math.roundToInt
 
 /**
@@ -59,6 +64,8 @@ class CameraViewModel(
     private var cameraRebindJob: kotlinx.coroutines.Job? = null
     private var interopApplyJob: kotlinx.coroutines.Job? = null
     private var lowLightBoostApplyJob: Job? = null
+    private var exposureTransitionJob: Job? = null
+    private var exposureTransitionGeneration = 0L
     private var lastInteropControl: CameraControl? = null
     private var lastInteropSubmission: InteropSubmission? = null
     private var lastExposureCompensationIndex: Int? = null
@@ -225,13 +232,11 @@ class CameraViewModel(
             }
 
             is CameraUiEvent.TapToMeter -> {
-                val manualControls = _uiState.value.manualControlsState
-                val automaticControls = manualControls.resetForTapToMeter()
-                if (automaticControls != manualControls) {
-                    _uiState.update { it.copy(manualControlsState = automaticControls) }
-                    applyInterop()
+                updateManualControls { it.resetForTapToMeter() }
+                viewModelScope.launch {
+                    exposureTransitionJob?.join()
+                    cameraManager.tapToMeter(event.meteringPoint)
                 }
-                cameraManager.tapToMeter(event.meteringPoint)
             }
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
             is CameraUiEvent.CloseSettings -> {
@@ -288,47 +293,304 @@ class CameraViewModel(
     }
 
     fun updateManualControls(updater: (ManualControlsState) -> ManualControlsState) {
-        val caps = _uiState.value.cameraCapabilities
+        val currentUi = _uiState.value
+        if (currentUi.isExposureTransitioning) return
+        val caps = currentUi.cameraCapabilities
         val telemetry = cameraTelemetry.value
-        var triggersRebind = false
-        var lowLightBoostChanged = false
-        _uiState.update {
-            val oldControls = it.manualControlsState
-            val exposureDefaults = ManualControlStateUpdater.ExposureDefaults(
-                isoValue = telemetry.iso,
-                shutterNanos = telemetry.shutterNanos,
-                postRawSensitivityBoost = telemetry.postRawSensitivityBoost
-            )
-            val (calculatedState, rebind) = ManualControlStateUpdater.calculateNextState(
-                it.manualControlsState,
-                caps,
-                exposureDefaults,
-                updater
-            )
-            val newState = if (
-                oldControls.isLowLightBoostEnabled &&
-                calculatedState.isLowLightBoostEnabled &&
-                oldControls.isManualFps &&
-                !calculatedState.isManualFps &&
-                it.selectedFps > LOW_LIGHT_BOOST_MAX_FPS
-            ) {
-                calculatedState.copy(isLowLightBoostEnabled = false)
-            } else {
-                calculatedState
-            }
-            triggersRebind = rebind
-            lowLightBoostChanged =
-                oldControls.isLowLightBoostEnabled != newState.isLowLightBoostEnabled
-
-            it.copy(
-                manualControlsState = newState
-            )
+        val oldControls = currentUi.manualControlsState
+        val exposureDefaults = ManualControlStateUpdater.ExposureDefaults(
+            isoValue = telemetry.iso,
+            shutterNanos = telemetry.shutterNanos,
+            postRawSensitivityBoost = telemetry.postRawSensitivityBoost
+        )
+        val (calculatedState, triggersRebind) = ManualControlStateUpdater.calculateNextState(
+            oldControls,
+            caps,
+            exposureDefaults,
+            updater
+        )
+        val newState = if (
+            oldControls.isLowLightBoostEnabled &&
+            calculatedState.isLowLightBoostEnabled &&
+            oldControls.isManualFps &&
+            !calculatedState.isManualFps &&
+            currentUi.selectedFps > LOW_LIGHT_BOOST_MAX_FPS
+        ) {
+            calculatedState.copy(isLowLightBoostEnabled = false)
+        } else {
+            calculatedState
         }
+        val lowLightBoostChanged =
+            oldControls.isLowLightBoostEnabled != newState.isLowLightBoostEnabled
+
+        if (
+            caps != null &&
+            exposureMode(oldControls, caps) != exposureMode(newState, caps)
+        ) {
+            beginExposureTransition(
+                oldControls = oldControls,
+                targetControls = newState,
+                defaults = exposureDefaults,
+                triggersRebind = triggersRebind,
+                lowLightBoostChanged = lowLightBoostChanged
+            )
+            return
+        }
+
+        _uiState.update { it.copy(manualControlsState = newState) }
 
         if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
         else if (triggersRebind) scheduleCameraRebind(debounce = true)
         applyInterop(coalesce = true)
         if (lowLightBoostChanged) applyLowLightBoostPreference()
+    }
+
+    private fun beginExposureTransition(
+        oldControls: ManualControlsState,
+        targetControls: ManualControlsState,
+        defaults: ManualControlStateUpdater.ExposureDefaults,
+        triggersRebind: Boolean,
+        lowLightBoostChanged: Boolean
+    ) {
+        val caps = _uiState.value.cameraCapabilities ?: return
+        exposureTransitionJob?.cancel()
+        val generation = ++exposureTransitionGeneration
+        _uiState.update {
+            it.copy(
+                isExposureTransitioning = true,
+                exposureTransitionMessage = null
+            )
+        }
+
+        exposureTransitionJob = viewModelScope.launch {
+            try {
+                val oldMode = exposureMode(oldControls, caps)
+                val targetMode = exposureMode(targetControls, caps)
+                var resolvedTarget = targetControls
+
+                if (oldMode == ExposureMode.FULL_MANUAL) {
+                    if (oldControls.isManualFps) {
+                        val lastManualFps = oldControls.fpsRange?.upper
+                        resolvedTarget = resolvedTarget.copy(
+                            fpsRange = lastManualFps?.let { Range(it, it) }
+                                ?: resolvedTarget.fpsRange
+                        )
+                    }
+                    val locked = lockAndAwait(resolvedTarget)
+                    if (targetMode == ExposureMode.SENSITIVITY_PRIORITY) {
+                        resolvedTarget = resolvedTarget.copy(
+                            isoValue = requestedOrLocked(
+                                requested = targetControls.isoValue,
+                                previousAutomatic = defaults.isoValue,
+                                locked = locked.sensorSensitivityIso
+                            )
+                        )
+                    } else if (targetMode == ExposureMode.SHUTTER_PRIORITY) {
+                        resolvedTarget = resolvedTarget.copy(
+                            ssValueNanos = requestedOrLocked(
+                                requested = targetControls.ssValueNanos,
+                                previousAutomatic = defaults.shutterNanos,
+                                locked = locked.shutterNanos
+                            )
+                        )
+                    }
+                } else {
+                    val locked = lockAndAwait(oldControls)
+                    resolvedTarget = when (targetMode) {
+                        ExposureMode.FULL_MANUAL -> {
+                            val resolvedShutterNanos = requestedOrLocked(
+                                requested = targetControls.ssValueNanos,
+                                previousAutomatic = defaults.shutterNanos,
+                                locked = locked.shutterNanos
+                            )
+                            targetControls.copy(
+                                isoValue = requestedOrLocked(
+                                    requested = targetControls.isoValue,
+                                    previousAutomatic = defaults.isoValue,
+                                    locked = locked.sensorSensitivityIso
+                                ),
+                                ssValueNanos = resolvedShutterNanos,
+                                isManualPostRawSensitivity =
+                                    caps.supportsPostRawSensitivityBoost,
+                                postRawSensitivityBoost =
+                                    if (caps.supportsPostRawSensitivityBoost) {
+                                        requestedOrLocked(
+                                            requested =
+                                                targetControls.postRawSensitivityBoost,
+                                            previousAutomatic =
+                                                defaults.postRawSensitivityBoost,
+                                            locked = locked.postRawSensitivityBoost
+                                        )
+                                    } else {
+                                        null
+                                    },
+                                fpsRange = manualFpsRangeForShutter(
+                                    controls = targetControls,
+                                    shutterNanos = resolvedShutterNanos,
+                                    caps = caps
+                                )
+                            )
+                        }
+                        ExposureMode.SENSITIVITY_PRIORITY -> targetControls.copy(
+                            isoValue = requestedOrLocked(
+                                requested = targetControls.isoValue,
+                                previousAutomatic = defaults.isoValue,
+                                locked = locked.sensorSensitivityIso
+                            )
+                        )
+                        ExposureMode.SHUTTER_PRIORITY -> targetControls.copy(
+                            ssValueNanos = requestedOrLocked(
+                                requested = targetControls.ssValueNanos,
+                                previousAutomatic = defaults.shutterNanos,
+                                locked = locked.shutterNanos
+                            )
+                        )
+                        ExposureMode.AUTO -> targetControls
+                    }
+                }
+
+                if (generation != exposureTransitionGeneration) return@launch
+                submitTransitionRequest(resolvedTarget, aeLocked = false)
+                _uiState.update {
+                    it.copy(
+                        manualControlsState = resolvedTarget,
+                        isExposureTransitioning = false
+                    )
+                }
+                lastInteropSubmission = null
+
+                if (triggersRebind && _uiState.value.isSettingsSheetVisible) {
+                    pendingHardRebind = true
+                } else if (triggersRebind) {
+                    scheduleCameraRebind(debounce = true)
+                }
+                if (lowLightBoostChanged) applyLowLightBoostPreference()
+            } catch (cancelled: CancellationException) {
+                if (generation == exposureTransitionGeneration) {
+                    _uiState.update { it.copy(isExposureTransitioning = false) }
+                    lastInteropSubmission = null
+                    submitInteropIfChanged()
+                }
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("CameraViewModel", "Exposure transition failed", error)
+                restoreAutoAfterTransitionFailure(generation)
+            }
+        }
+    }
+
+    private suspend fun lockAndAwait(
+        controls: ManualControlsState
+    ): ExposureCaptureResult {
+        val caps = _uiState.value.cameraCapabilities
+        if (caps?.supportsAeLock != true) {
+            return statsManager.latestExposureCaptureResult.value
+                ?: throw IllegalStateException("No exposure result available")
+        }
+
+        return withTimeout(EXPOSURE_TRANSITION_TIMEOUT_MS) {
+            val startingFrame =
+                statsManager.latestExposureCaptureResult.value?.frameNumber ?: -1L
+            submitTransitionRequest(controls, aeLocked = true)
+            statsManager.latestExposureCaptureResult
+                .filterNotNull()
+                .first { result ->
+                    result.frameNumber > startingFrame &&
+                        result.aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED &&
+                        result.aeLocked != false
+                }
+        }
+    }
+
+    private suspend fun submitTransitionRequest(
+        controls: ManualControlsState,
+        aeLocked: Boolean
+    ) {
+        val cameraControl = cameraManager.getCameraControl()
+            ?: throw IllegalStateException("Camera control unavailable")
+        withTimeout(EXPOSURE_TRANSITION_TIMEOUT_MS) {
+            CameraInteropApplier.apply(
+                cameraControl = cameraControl,
+                state = controls,
+                settings = currentInteropSettings(),
+                capabilities = _uiState.value.cameraCapabilities,
+                applyExposureCompensation = false,
+                aeLockOverride = aeLocked
+            ).await()
+        }
+        lastInteropControl = cameraControl
+        lastInteropSubmission = null
+        lastInteropSubmissionElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    private fun manualFpsRangeForShutter(
+        controls: ManualControlsState,
+        shutterNanos: Long?,
+        caps: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+    ): Range<Int>? {
+        if (!controls.isManualFps) return controls.fpsRange
+        val fallback = controls.fpsRange?.upper ?: _uiState.value.selectedFps
+        val legalFps = shutterNanos
+            ?.let { selectedShutter ->
+                FpsRangeMath.nearestFixedFrameRateForShutter(
+                    shutterNanos = selectedShutter,
+                    validRanges = caps.fpsRanges
+                )
+            }
+            ?: FpsRangeMath.nearestFixedFrameRate(
+                requestedFps = fallback,
+                validRanges = caps.fpsRanges
+            )
+            ?: fallback
+        return Range(legalFps, legalFps)
+    }
+
+    private fun <T> requestedOrLocked(
+        requested: T?,
+        previousAutomatic: T?,
+        locked: T?
+    ): T? = if (requested != null && requested != previousAutomatic) requested else locked ?: requested
+
+    private fun restoreAutoAfterTransitionFailure(generation: Long) {
+        if (generation != exposureTransitionGeneration) return
+        val current = _uiState.value.manualControlsState
+        val automatic = current.copy(
+            isManualIso = false,
+            isoValue = null,
+            isManualPostRawSensitivity = false,
+            postRawSensitivityBoost = null,
+            isManualSs = false,
+            ssValueNanos = null
+        )
+        _uiState.update {
+            it.copy(
+                manualControlsState = automatic,
+                isExposureTransitioning = false,
+                exposureTransitionMessage = "Exposure transition failed; Auto restored"
+            )
+        }
+        lastInteropSubmission = null
+        submitInteropIfChanged()
+        viewModelScope.launch {
+            delay(EXPOSURE_MESSAGE_DURATION_MS)
+            if (generation == exposureTransitionGeneration) {
+                _uiState.update { it.copy(exposureTransitionMessage = null) }
+            }
+        }
+    }
+
+    private fun exposureMode(
+        controls: ManualControlsState,
+        caps: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+    ): ExposureMode = when {
+        controls.isManualIso &&
+            controls.isManualSs &&
+            caps.supportsFullManualExposure -> ExposureMode.FULL_MANUAL
+        controls.isManualIso &&
+            caps.supportsIsoPriorityAe -> ExposureMode.SENSITIVITY_PRIORITY
+        controls.isManualSs &&
+            caps.supportsShutterPriorityAe -> ExposureMode.SHUTTER_PRIORITY
+        else -> ExposureMode.AUTO
     }
 
     /** Attaches the current lifecycle and starts the initial bind without an arbitrary delay. */
@@ -346,6 +608,9 @@ class CameraViewModel(
     private fun scheduleCameraRebind(debounce: Boolean) {
         val lifecycleOwner = cameraLifecycleOwner ?: return
         cameraRebindJob?.cancel()
+        exposureTransitionJob?.cancel()
+        exposureTransitionGeneration++
+        _uiState.update { it.copy(isExposureTransitioning = false) }
 
         val bind = {
             lowLightBoostApplyJob?.cancel()
@@ -390,6 +655,34 @@ class CameraViewModel(
         if (enabled && current.cameraCapabilities?.supportsLowLightBoost != true) return
 
         val controls = current.manualControlsState
+        val caps = current.cameraCapabilities
+        if (
+            enabled &&
+            caps != null &&
+            exposureMode(controls, caps) != ExposureMode.AUTO
+        ) {
+            updateManualControls {
+                it.copy(
+                    isManualIso = false,
+                    isoValue = null,
+                    isManualPostRawSensitivity = false,
+                    postRawSensitivityBoost = null,
+                    isManualSs = false,
+                    ssValueNanos = null
+                )
+            }
+            viewModelScope.launch {
+                exposureTransitionJob?.join()
+                if (
+                    !_uiState.value.isExposureTransitioning &&
+                    _uiState.value.manualControlsState.isLowLightBoostEnabled.not()
+                ) {
+                    setLowLightBoostRequested(true)
+                }
+            }
+            return
+        }
+
         val effectiveUpperFps = if (controls.isManualFps) {
             controls.fpsRange?.upper ?: current.selectedFps
         } else {
@@ -421,6 +714,11 @@ class CameraViewModel(
                     isLowLightBoostEnabled = enabled,
                     isManualIso = if (enabled) false else state.manualControlsState.isManualIso,
                     isoValue = if (enabled) null else state.manualControlsState.isoValue,
+                    isManualPostRawSensitivity = if (enabled) {
+                        false
+                    } else {
+                        state.manualControlsState.isManualPostRawSensitivity
+                    },
                     postRawSensitivityBoost = if (enabled) {
                         null
                     } else {
@@ -584,6 +882,7 @@ class CameraViewModel(
         cameraRebindJob?.cancel()
         interopApplyJob?.cancel()
         lowLightBoostApplyJob?.cancel()
+        exposureTransitionJob?.cancel()
         cameraManager.release()
         statsManager.cleanup()
     }
@@ -592,6 +891,8 @@ class CameraViewModel(
         const val CAMERA_REBIND_DEBOUNCE_MS = 300L
         const val INTEROP_DRAG_SAMPLE_MS = 33L
         const val LOW_LIGHT_BOOST_MAX_FPS = 30
+        const val EXPOSURE_TRANSITION_TIMEOUT_MS = 2_000L
+        const val EXPOSURE_MESSAGE_DURATION_MS = 3_000L
     }
 
     private data class InteropSubmission(
@@ -599,4 +900,11 @@ class CameraViewModel(
         val settings: InteropSettings,
         val capabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities?
     )
+
+    private enum class ExposureMode {
+        AUTO,
+        SHUTTER_PRIORITY,
+        SENSITIVITY_PRIORITY,
+        FULL_MANUAL
+    }
 }

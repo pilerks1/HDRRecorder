@@ -16,6 +16,7 @@ data class ManualControlsState(
     // ISO
     val isManualIso: Boolean = false,
     val isoValue: Int? = null,
+    val isManualPostRawSensitivity: Boolean = false,
     val postRawSensitivityBoost: Int? = null,
     
     // Shutter Speed (SS)
@@ -51,6 +52,7 @@ internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState {
     return copy(
         isManualIso = false,
         isoValue = null,
+        isManualPostRawSensitivity = false,
         postRawSensitivityBoost = null,
         isManualSs = false,
         ssValueNanos = null,
@@ -104,7 +106,9 @@ data class CameraUiState(
     val storageUri: String? = null,
 
     // UI Visibility
-    val isSettingsSheetVisible: Boolean = false
+    val isSettingsSheetVisible: Boolean = false,
+    val isExposureTransitioning: Boolean = false,
+    val exposureTransitionMessage: String? = null
 )
 
 /**

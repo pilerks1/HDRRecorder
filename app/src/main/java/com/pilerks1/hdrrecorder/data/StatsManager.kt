@@ -8,6 +8,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.CameraTelemetry
+import com.pilerks1.hdrrecorder.model.ExposureCaptureResult
 import com.pilerks1.hdrrecorder.model.formatDataSize
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,9 @@ class StatsManager(private val context: Context) {
 
     private val _cameraTelemetry = MutableStateFlow(CameraTelemetry())
     val cameraTelemetry = _cameraTelemetry.asStateFlow()
+    private val _latestExposureCaptureResult =
+        MutableStateFlow<ExposureCaptureResult?>(null)
+    val latestExposureCaptureResult = _latestExposureCaptureResult.asStateFlow()
 
     private val thermalManager = ThermalManager(context)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -237,9 +241,26 @@ class StatsManager(private val context: Context) {
             val postRawSensitivityBoost = result.get(
                 TotalCaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST
             )
-            currentIso = iso ?: 0
+            currentIso = iso?.let { sensorIso ->
+                postRawSensitivityBoost?.let { boost ->
+                    ((sensorIso.toLong() * boost.toLong() + 50L) / 100L)
+                        .coerceAtMost(Int.MAX_VALUE.toLong())
+                        .toInt()
+                } ?: sensorIso
+            } ?: 0
             val expTime = result.get(TotalCaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
+            val frameDuration = result.get(TotalCaptureResult.SENSOR_FRAME_DURATION)
             if (expTime > 0) currentShutterSpeed = 1_000_000_000.0 / expTime
+
+            _latestExposureCaptureResult.value = ExposureCaptureResult(
+                frameNumber = result.frameNumber,
+                sensorSensitivityIso = iso,
+                postRawSensitivityBoost = postRawSensitivityBoost,
+                shutterNanos = expTime.takeIf { it > 0L },
+                frameDurationNanos = frameDuration,
+                aeState = result.get(TotalCaptureResult.CONTROL_AE_STATE),
+                aeLocked = result.get(TotalCaptureResult.CONTROL_AE_LOCK)
+            )
 
             val focusDistance = result.get(TotalCaptureResult.LENS_FOCUS_DISTANCE)
             val cctTemperature = if (android.os.Build.VERSION.SDK_INT >= 36) {
@@ -259,6 +280,7 @@ class StatsManager(private val context: Context) {
                     iso = iso,
                     postRawSensitivityBoost = postRawSensitivityBoost,
                     shutterNanos = expTime.takeIf { it > 0L },
+                    frameDurationNanos = frameDuration,
                     focusDistanceDiopters = focusDistance,
                     cctTemperatureKelvin = cctTemperature,
                     cctTint = cctTint

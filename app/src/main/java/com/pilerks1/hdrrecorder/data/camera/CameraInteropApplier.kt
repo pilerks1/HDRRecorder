@@ -9,6 +9,7 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraControl
+import com.google.common.util.concurrent.ListenableFuture
 import com.pilerks1.hdrrecorder.model.TonemapCurves
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
@@ -35,19 +36,27 @@ object CameraInteropApplier {
         state: ManualControlsState,
         settings: InteropSettings,
         capabilities: CameraCapabilities?,
-        applyExposureCompensation: Boolean
-    ) {
+        applyExposureCompensation: Boolean,
+        aeLockOverride: Boolean? = null
+    ): ListenableFuture<Void?> {
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
 
         applyExposure(cameraControl, builder, state, capabilities, applyExposureCompensation)
         applyFocus(builder, state, capabilities)
         applyWhiteBalance(builder, state, capabilities)
-        applyFps(builder, state)
+        applyFps(builder, state, capabilities)
         applyNoiseReduction(builder, settings.isNoiseReductionEnabled)
         applyGamma(builder, settings.gammaCurve)
 
-        camera2Control.setCaptureRequestOptions(builder.build())
+        if (capabilities?.supportsAeLock == true) {
+            builder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_LOCK,
+                aeLockOverride ?: false
+            )
+        }
+
+        return camera2Control.setCaptureRequestOptions(builder.build())
     }
 
     fun exposureCompensationIndex(
@@ -86,7 +95,8 @@ object CameraInteropApplier {
                 builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
                 if (
                     state.postRawSensitivityBoost != null &&
-                    capabilities.postRawSensitivityBoostRange != null
+                    state.isManualPostRawSensitivity &&
+                    capabilities.supportsPostRawSensitivityBoost
                 ) {
                     builder.setCaptureRequestOption(
                         CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
@@ -172,9 +182,30 @@ object CameraInteropApplier {
 
     // --- FPS ---
 
-    private fun applyFps(builder: CaptureRequestOptions.Builder, state: ManualControlsState) {
+    private fun applyFps(
+        builder: CaptureRequestOptions.Builder,
+        state: ManualControlsState,
+        capabilities: CameraCapabilities?
+    ) {
         if (state.isManualFps && state.fpsRange != null) {
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, state.fpsRange)
+            val fullManual = state.isManualIso &&
+                state.isManualSs &&
+                capabilities?.supportsFullManualExposure == true
+            if (fullManual) {
+                val requestedDuration = NANOS_PER_SECOND / state.fpsRange.upper.coerceAtLeast(1)
+                val frameDuration = capabilities.maxFrameDurationNanos
+                    ?.let(requestedDuration::coerceAtMost)
+                    ?: requestedDuration
+                builder.setCaptureRequestOption(
+                    CaptureRequest.SENSOR_FRAME_DURATION,
+                    frameDuration
+                )
+            } else {
+                builder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    state.fpsRange
+                )
+            }
         }
     }
 
@@ -209,4 +240,6 @@ object CameraInteropApplier {
             }
         }
     }
+
+    private const val NANOS_PER_SECOND = 1_000_000_000L
 }

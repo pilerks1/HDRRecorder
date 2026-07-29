@@ -2,9 +2,44 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import android.util.Range
 import kotlin.math.abs
+import kotlin.math.floor
 
-/** Specialized two-thumb FPS snapping; standard slider math lives in [SliderScale]. */
+/** Specialized FPS range and fixed-rate snapping; standard slider math lives in [SliderScale]. */
 internal object FpsRangeMath {
+    fun fixedFrameRates(validRanges: List<Range<Int>>): List<Int> =
+        validRanges
+            .filter { it.lower == it.upper }
+            .map { it.lower }
+            .distinct()
+            .sorted()
+
+    fun nearestFixedFrameRate(
+        requestedFps: Int,
+        validRanges: List<Range<Int>>
+    ): Int? = fixedFrameRates(validRanges)
+        .minWithOrNull(
+            compareBy<Int> { fps -> abs(fps - requestedFps) }
+                .thenBy { fps -> fps }
+        )
+
+    fun nearestFixedFrameRateForShutter(
+        shutterNanos: Long,
+        validRanges: List<Range<Int>>
+    ): Int? {
+        if (shutterNanos <= 0L) return null
+        val fixedRates = fixedFrameRates(validRanges)
+        if (fixedRates.isEmpty()) return null
+
+        val shutterLimitedFps = NANOS_PER_SECOND.toDouble() / shutterNanos.toDouble()
+        val maximumWholeFps = floor(shutterLimitedFps).toInt().coerceAtLeast(1)
+        val achievableRates = fixedRates.filter { it <= maximumWholeFps }
+        val candidates = achievableRates.ifEmpty { fixedRates }
+        return candidates.minWithOrNull(
+            compareBy<Int> { fps -> abs(fps - shutterLimitedFps) }
+                .thenByDescending { fps -> fps }
+        )
+    }
+
     fun clampToSupportedRange(
         newRange: ClosedFloatingPointRange<Float>,
         oldRange: ClosedFloatingPointRange<Float>,
@@ -78,6 +113,7 @@ internal object FpsRangeMath {
     }
 
     private const val SNAP_TIE_EPSILON = 0.0001f
+    private const val NANOS_PER_SECOND = 1_000_000_000L
 }
 
 internal enum class FpsRangeBound {

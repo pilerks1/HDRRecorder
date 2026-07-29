@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ModeNight
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,6 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilerks1.hdrrecorder.ui.helpers.ActivityOrientationManagement
@@ -199,6 +201,17 @@ fun CameraUI(
                 onStorageUriSelected = { actions.onEvent(CameraUiEvent.SetStorageUri(it)) },
                 onNavigateToCompatibility = onNavigateToCompatibility,
                 onClose = { actions.onEvent(CameraUiEvent.CloseSettings) }
+            )
+        }
+
+        uiState.exposureTransitionMessage?.let { message ->
+            Text(
+                text = message,
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .background(Color.Black.copy(alpha = 0.75f))
             )
         }
     }
