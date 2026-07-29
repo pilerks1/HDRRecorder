@@ -171,6 +171,7 @@ object ManualControlStateUpdater {
             state.isManualPostRawSensitivity && state.isManualIso && state.isManualSs
         },
         ssValueNanos = state.ssValueNanos.takeIf { state.isManualSs },
+        isManualEv = state.isManualEv && state.evValueIndex != 0,
         evValueIndex = state.evValueIndex.takeIf { state.isManualEv } ?: 0,
         focusDistanceDiopters = state.focusDistanceDiopters.takeIf { state.isManualFocus },
         wbTemp = state.wbTemp.takeIf { state.isManualWb },

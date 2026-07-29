@@ -1,9 +1,11 @@
 package com.pilerks1.hdrrecorder.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -11,10 +13,13 @@ import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.AxisStack
@@ -22,6 +27,7 @@ import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
 import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
 import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveControlPanel
 import com.pilerks1.hdrrecorder.ui.manualcontrols.SecondaryControlsRail
+import com.pilerks1.hdrrecorder.ui.manualcontrols.SliderPaneStyle
 import com.pilerks1.hdrrecorder.ui.manualcontrols.availableControlPanels
 
 @Composable
@@ -163,5 +169,35 @@ fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Un
                 modifier = Modifier.fillMaxSize()
             )
         }
+    }
+}
+
+@Composable
+fun ManualResetButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                color = Color.Black.copy(alpha = if (enabled) 0.5f else 0.25f),
+                shape = RoundedCornerShape(2.dp)
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "RES",
+            color = if (enabled) Color.White else Color.Gray,
+            style = SliderPaneStyle.tickTextStyle.copy(
+                color = if (enabled) Color.White else Color.Gray,
+                fontWeight = FontWeight.Bold
+            ),
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.Center
+        )
     }
 }

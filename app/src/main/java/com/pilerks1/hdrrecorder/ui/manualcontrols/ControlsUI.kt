@@ -280,7 +280,7 @@ fun ActiveControlPanel(
                     primaryButtonEnabled = true,
                     primaryButtonColor = if (isManualEv) Color.White else Color.DarkGray,
                     primaryButtonTextColor = if (isManualEv) Color.Black else Color.LightGray,
-                    onPrimaryButtonClick = { onSetEv(true, 0) },
+                    onPrimaryButtonClick = { onSetEv(false, 0) },
                     secondaryButtonText = if (caps?.supportsLowLightBoost == true) "NHT" else null,
                     secondaryButtonEnabled = !isRecording || maxOf(
                         if (state.isManualFps) state.fpsRange?.upper ?: autoFps else autoFps,

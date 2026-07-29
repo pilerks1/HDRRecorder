@@ -75,7 +75,7 @@ object CameraCapabilitiesManager {
         val supportsAeLock = camera2Info.getCameraCharacteristic(
             CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE
         ) == true
-        val supportsPostRawSensitivityBoost = postRawSensitivityBoostRange?.let { range ->
+        val hasVariablePostRawSensitivityBoost = postRawSensitivityBoostRange?.let { range ->
             range.lower != range.upper && !(range.lower == 100 && range.upper == 100)
         } == true
 
@@ -101,6 +101,8 @@ object CameraCapabilitiesManager {
             isApi36 && DeviceCompatibilityChecker.supportsIsoPriorityAe(camera2Info)
         val supportsFullManualExposure =
             supportsManualSensor && hasValidIsoRange && hasValidShutterRange
+        val supportsPostRawSensitivityBoost =
+            supportsFullManualExposure && hasVariablePostRawSensitivityBoost
         val hasExposureCompensationControl = evRange?.let { range ->
             evStep?.let { step ->
                 val hasNonZeroRange = range.lower != 0 || range.upper != 0

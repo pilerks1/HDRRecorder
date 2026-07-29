@@ -46,9 +46,16 @@ data class ManualControlsState(
  * A preview tap is an explicit request for point-based automatic 3A. Manual sensor, focus, and
  * white-balance overrides must be cleared before CameraX can calibrate at the tapped point.
  */
-internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState {
-    if (!isManualIso && !isManualSs && !isManualEv && !isManualFocus && !isManualWb) return this
+internal val ManualControlsState.hasManualSliderOverride: Boolean
+    get() = isManualIso ||
+        isManualPostRawSensitivity ||
+        isManualSs ||
+        evValueIndex != 0 ||
+        isManualFocus ||
+        isManualWb
 
+internal fun ManualControlsState.resetManualSlidersToAuto(): ManualControlsState {
+    if (!hasManualSliderOverride) return this
     return copy(
         isManualIso = false,
         isoValue = null,
@@ -65,6 +72,9 @@ internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState {
         wbTint = null
     )
 }
+
+internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState =
+    resetManualSlidersToAuto()
 
 /**
  * Represents the current state of the Camera UI.

@@ -66,6 +66,7 @@ data class CameraLayoutSpec(
     val expandedPanel: LayoutRect,
     val maximumPanelReservation: LayoutRect,
     val primaryActions: LayoutRect,
+    val manualReset: LayoutRect,
     val lowLightBoostIndicator: LayoutRect,
     val actionRail: ActionRailSpec
 )
@@ -74,13 +75,16 @@ data class CameraLayoutSpec(
 object CameraLayoutCalculator {
     private const val PREFERRED_BUTTON_DP = 54f
     private const val MIN_BUTTON_DP = 36f
-    private const val PRIMARY_ACTION_INSET_DP = 8f
+    private const val PRIMARY_ACTION_INSET_DP = 4f
     private const val STATS_GAP_DP = 2f
     private const val RECORD_BUTTON_DP = 48f
     private const val SECONDARY_ACTION_DP = 32f
     private const val PRIMARY_ACTION_GAP_DP = 0f
     private const val LOW_LIGHT_BOOST_INDICATOR_DP = 16f
     private const val LOW_LIGHT_BOOST_INDICATOR_INSET_DP = 8f
+    private const val MANUAL_RESET_WIDTH_DP = 32f
+    private const val MANUAL_RESET_HEIGHT_DP = 24f
+    private const val MANUAL_RESET_INSET_DP = 8f
 
     fun axisFor(widthPx: Int, heightPx: Int): AxisSpec {
         val orientation = if (widthPx > heightPx) CameraOrientation.LANDSCAPE else CameraOrientation.PORTRAIT
@@ -376,6 +380,41 @@ object CameraLayoutCalculator {
         )
     }
 
+    private fun manualReset(
+        preview: LayoutRect,
+        expandedPanel: LayoutRect,
+        axis: AxisSpec,
+        density: Float
+    ): LayoutRect {
+        val width = MANUAL_RESET_WIDTH_DP * density
+        val height = MANUAL_RESET_HEIGHT_DP * density
+        val inset = MANUAL_RESET_INSET_DP * density
+        val panelLength = primaryLength(expandedPanel, axis)
+        val panelOverlapsPreview = panelLength > 0f &&
+            primaryStart(expandedPanel, axis) < primaryEnd(preview, axis) &&
+            primaryEnd(expandedPanel, axis) > primaryStart(preview, axis)
+        val trailingBoundary = if (panelOverlapsPreview) {
+            minOf(primaryEnd(preview, axis), primaryStart(expandedPanel, axis))
+        } else {
+            primaryEnd(preview, axis)
+        }
+        return if (axis.usesVerticalTrack) {
+            LayoutRect(
+                left = trailingBoundary - inset - width,
+                top = preview.top + inset,
+                right = trailingBoundary - inset,
+                bottom = preview.top + inset + height
+            )
+        } else {
+            LayoutRect(
+                left = preview.right - inset - width,
+                top = trailingBoundary - inset - height,
+                right = preview.right - inset,
+                bottom = trailingBoundary - inset
+            )
+        }
+    }
+
     private fun buildSpec(
         mode: CameraLayoutMode,
         axis: AxisSpec,
@@ -391,6 +430,7 @@ object CameraLayoutCalculator {
         expandedPanel = geometry.expandedPanel,
         maximumPanelReservation = geometry.maximumPanelReservation,
         primaryActions = primaryActions(preview, geometry.expandedPanel, axis, density),
+        manualReset = manualReset(preview, geometry.expandedPanel, axis, density),
         lowLightBoostIndicator = lowLightBoostIndicator(preview, density),
         actionRail = geometry.actionRail
     )

@@ -16,6 +16,7 @@ private enum class CameraSlot {
     SECONDARY_CONTROLS,
     EXPANDED_PANEL,
     PRIMARY_ACTIONS,
+    MANUAL_RESET,
     LOW_LIGHT_BOOST_INDICATOR
 }
 
@@ -36,6 +37,7 @@ fun CameraSlotsLayout(
     secondaryControls: @Composable (CameraLayoutSpec) -> Unit,
     expandedPanel: @Composable (CameraLayoutSpec) -> Unit,
     primaryActions: @Composable (CameraLayoutSpec) -> Unit,
+    manualReset: @Composable (CameraLayoutSpec) -> Unit,
     lowLightBoostIndicator: @Composable (CameraLayoutSpec) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -115,6 +117,11 @@ fun CameraSlotsLayout(
         }
             .single()
             .measure(spec.lowLightBoostIndicator.fixedConstraints())
+        val manualResetPlaceable = subcompose(CameraSlot.MANUAL_RESET) {
+            Box(Modifier.fillMaxSize()) { manualReset(spec) }
+        }
+            .single()
+            .measure(spec.manualReset.fixedConstraints())
 
         layout(width, height) {
             previewPlaceable.place(spec.preview.left.roundToInt(), spec.preview.top.roundToInt())
@@ -128,6 +135,10 @@ fun CameraSlotsLayout(
             lowLightBoostPlaceable.place(
                 spec.lowLightBoostIndicator.left.roundToInt(),
                 spec.lowLightBoostIndicator.top.roundToInt()
+            )
+            manualResetPlaceable.place(
+                spec.manualReset.left.roundToInt(),
+                spec.manualReset.top.roundToInt()
             )
         }
     }

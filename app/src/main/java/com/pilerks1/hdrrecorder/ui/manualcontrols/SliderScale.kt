@@ -36,6 +36,7 @@ object SliderScales {
     private const val MAX_TICK_COUNT = 15
     private const val LABEL_INTERVAL = 2
     private const val MAX_EV_MAJOR_LABEL_COUNT = 7
+    private const val MAX_ISO_LIVE_LABEL = "99999"
 
     fun iso(caps: CameraCapabilities?): SliderScale<Int> {
         val scale = isoRange(
@@ -100,7 +101,9 @@ object SliderScales {
             progressToValue = fromProgress,
             formatValue = format,
             ticks = ticks,
-            layoutLabels = layoutLabels(ticks, format(lower), format(upper))
+            layoutLabels = (
+                layoutLabels(ticks, format(lower), format(upper)) + MAX_ISO_LIVE_LABEL
+                ).distinct()
         )
     }
 

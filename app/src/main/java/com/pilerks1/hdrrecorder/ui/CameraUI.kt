@@ -152,6 +152,19 @@ fun CameraUI(
                     modifier = Modifier.fillMaxSize()
                 )
             },
+            manualReset = {
+                if (uiState.manualControlsState.hasManualSliderOverride) {
+                    ManualResetButton(
+                        enabled = !uiState.isExposureTransitioning,
+                        onClick = {
+                            actions.onManualControlsChange(
+                                ManualControlsState::resetManualSlidersToAuto
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            },
             lowLightBoostIndicator = {
                 if (uiState.isLowLightBoostActive) {
                     Box(
