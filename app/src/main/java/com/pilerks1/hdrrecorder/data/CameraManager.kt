@@ -21,6 +21,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
+import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.ColorFormat
 import java.util.concurrent.ExecutorService
@@ -33,11 +34,12 @@ import kotlinx.coroutines.flow.asStateFlow
 @SuppressLint("MissingPermission")
 class CameraManager(
     private val context: Context,
-    private val statsManager: StatsManager
+    private val telemetryCoordinator: TelemetryCoordinator
 ) {
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
+    private var activeCameraGeneration: Long? = null
 
     private var preview: Preview? = null
     var videoCapture: VideoCapture<Recorder>? = null
@@ -95,7 +97,10 @@ class CameraManager(
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindUseCases(cameraProvider: ProcessCameraProvider, request: BindRequest) {
         clearLowLightBoostObserver()
+        activeCameraGeneration?.let(telemetryCoordinator::endCameraGeneration)
         cameraProvider.unbindAll()
+        val cameraGeneration = telemetryCoordinator.beginCameraGeneration()
+        activeCameraGeneration = cameraGeneration
 
         val cameraSelector = CameraSelector.Builder()
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
@@ -143,7 +148,9 @@ class CameraManager(
             .setPreviewStabilizationEnabled(request.uiState.isStabilizationEnabled)
             .apply { requestedFrameRate?.let(::setTargetFrameRate) }
 
-        Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(statsManager.previewStatsCallback)
+        Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(
+            telemetryCoordinator.previewCaptureCallback(cameraGeneration)
+        )
 
         val newPreview = previewBuilder.build().also {
             it.setSurfaceProvider { surfaceRequest ->
@@ -170,7 +177,9 @@ class CameraManager(
             .setDynamicRange(dynamicRange)
             .apply { requestedFrameRate?.let(::setTargetFrameRate) }
 
-        Camera2Interop.Extender(videoCaptureBuilder).setSessionCaptureCallback(statsManager.videoStatsCallback)
+        Camera2Interop.Extender(videoCaptureBuilder).setSessionCaptureCallback(
+            telemetryCoordinator.videoCaptureCallback(cameraGeneration)
+        )
         val newVideoCapture = videoCaptureBuilder.build()
 
         try {
@@ -191,6 +200,8 @@ class CameraManager(
             
             Log.d("CameraManager", "Use cases bound successfully.")
         } catch (exc: Exception) {
+            telemetryCoordinator.endCameraGeneration(cameraGeneration)
+            activeCameraGeneration = null
             camera = null
             preview = null
             videoCapture = null
@@ -210,18 +221,20 @@ class CameraManager(
     fun setLowLightBoostEnabled(enabled: Boolean) =
         camera?.cameraControl?.enableLowLightBoostAsync(enabled)
 
-    fun tapToMeter(meteringPoint: MeteringPoint) {
-        val action = FocusMeteringAction.Builder(
-            meteringPoint,
-            FocusMeteringAction.FLAG_AF or
-                FocusMeteringAction.FLAG_AE or
-                FocusMeteringAction.FLAG_AWB
-        ).build()
-        camera?.cameraControl?.startFocusAndMetering(action)
-    }
+    fun tapToMeter(meteringPoint: MeteringPoint) =
+        camera?.cameraControl?.startFocusAndMetering(
+            FocusMeteringAction.Builder(
+                meteringPoint,
+                FocusMeteringAction.FLAG_AF or
+                    FocusMeteringAction.FLAG_AE or
+                    FocusMeteringAction.FLAG_AWB
+            ).build()
+        )
 
     fun release() {
         clearLowLightBoostObserver()
+        activeCameraGeneration?.let(telemetryCoordinator::endCameraGeneration)
+        activeCameraGeneration = null
         cameraExecutor.shutdown()
         pendingBind = null
         camera = null

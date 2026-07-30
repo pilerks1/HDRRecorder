@@ -15,7 +15,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -28,6 +27,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 import com.pilerks1.hdrrecorder.ui.helpers.ActivityOrientationManagement
@@ -60,14 +60,16 @@ internal fun CameraUI(
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val view = LocalView.current
-    val uiState by viewModel.uiState.collectAsState()
-    val surfaceRequest by viewModel.surfaceRequest.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val surfaceRequest by viewModel.surfaceRequest.collectAsStateWithLifecycle()
     val actions = remember(viewModel) {
         CameraActions(
             onEvent = viewModel::onEvent,
             onManualControlsChange = viewModel::updateManualControls,
+            onManualControlInteractionFinished = viewModel::finishManualControlInteraction,
             stats = viewModel.stats,
-            cameraTelemetry = viewModel.cameraTelemetry
+            recordingDurationNanos = viewModel.recordingDurationNanos,
+            sliderTelemetry = viewModel.sliderTelemetry
         )
     }
 
@@ -125,7 +127,7 @@ internal fun CameraUI(
                 PreviewUI(
                     surfaceRequest = surfaceRequest,
                     placeholderLabel = uiState.previewPlaceholderLabel,
-                    stats = actions.stats,
+                    recordingDurationNanos = actions.recordingDurationNanos,
                     isRecording = uiState.isRecording,
                     expandedPanelBounds = expandedBounds,
                     onEvent = actions.onEvent,
@@ -166,6 +168,7 @@ internal fun CameraUI(
                             actions.onManualControlsChange(
                                 ManualControlsState::resetManualSlidersToAuto
                             )
+                            actions.onManualControlInteractionFinished()
                         },
                         modifier = Modifier.fillMaxSize()
                     )

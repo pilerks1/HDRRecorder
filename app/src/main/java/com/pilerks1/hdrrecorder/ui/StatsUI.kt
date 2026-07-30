@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
@@ -41,7 +41,7 @@ fun StatsUI(
     axis: AxisSpec,
     modifier: Modifier = Modifier
 ) {
-    val snapshot by stats.collectAsState()
+    val snapshot by stats.collectAsStateWithLifecycle()
     StatsRail(
         blocks = statsBlocks(snapshot, isRecording),
         axis = axis,

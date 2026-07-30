@@ -41,7 +41,7 @@ fun ExpandedControlPanelUI(
     ActiveControlPanel(
         state = uiState.manualControlsState,
         caps = uiState.cameraCapabilities,
-        cameraTelemetry = actions.cameraTelemetry,
+        cameraTelemetry = actions.sliderTelemetry,
         isRecording = uiState.isRecording,
         selectedResolution = uiState.selectedResolution,
         selectedAspectRatio = uiState.selectedAspectRatio,
@@ -63,7 +63,12 @@ fun ExpandedControlPanelUI(
         onSetLowLightBoost = { enabled -> actions.onEvent(CameraUiEvent.SetLowLightBoost(enabled)) },
         onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value) } },
         onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp, wbTint = tint) } },
-        onSetFps = { isManual, range -> actions.onManualControlsChange { it.copy(isManualFps = isManual, fpsRange = range) } },
+        onSetFps = { isManual, range ->
+            actions.onManualControlsChange {
+                it.copy(isManualFps = isManual, fpsRange = range)
+            }
+            actions.onManualControlInteractionFinished()
+        },
         autoFps = uiState.selectedFps,
         onCycleFps = {
             if (uiState.manualControlsState.isManualFps) {
@@ -73,6 +78,7 @@ fun ExpandedControlPanelUI(
             }
         },
         controlsEnabled = !uiState.isExposureTransitioning,
+        onManualControlInteractionFinished = actions.onManualControlInteractionFinished,
         modifier = modifier
     )
 }

@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 data class CameraActions(
     val onEvent: (CameraUiEvent) -> Unit,
     val onManualControlsChange: ((ManualControlsState) -> ManualControlsState) -> Unit,
+    val onManualControlInteractionFinished: () -> Unit,
     val stats: StateFlow<StatsSnapshot>,
-    val cameraTelemetry: StateFlow<CameraTelemetry>
+    val recordingDurationNanos: StateFlow<Long>,
+    val sliderTelemetry: StateFlow<CameraTelemetry>
 )

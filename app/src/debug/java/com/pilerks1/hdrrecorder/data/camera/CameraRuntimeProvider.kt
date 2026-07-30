@@ -102,7 +102,6 @@ private class UiTestbedCameraRuntime : CameraRuntime {
     companion object {
         private val allControlsCapabilities = CameraCapabilities(
             isoRange = Range(50, 12_800),
-            maxAnalogSensitivityIso = 3_200,
             postRawSensitivityBoostRange = Range(100, 400),
             ssRangeNanos = Range(100_000L, 30_000_000_000L),
             evRange = Range(-12, 12),

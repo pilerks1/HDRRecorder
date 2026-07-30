@@ -1,345 +1,309 @@
 package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.TotalCaptureResult
 import android.os.StatFs
 import android.os.SystemClock
-import com.pilerks1.hdrrecorder.model.StatsSnapshot
-import com.pilerks1.hdrrecorder.model.CameraTelemetry
-import com.pilerks1.hdrrecorder.model.ExposureCaptureResult
-import com.pilerks1.hdrrecorder.model.formatDataSize
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import java.util.concurrent.atomic.AtomicInteger
+import android.provider.DocumentsContract
 import androidx.core.net.toUri
+import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import com.pilerks1.hdrrecorder.model.StorageSample
+import com.pilerks1.hdrrecorder.model.TelemetrySnapshot
+import com.pilerks1.hdrrecorder.model.ThermalPowerSample
+import com.pilerks1.hdrrecorder.model.formatDataSize
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.round
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
- * Manages real-time camera statistics using a unified 500ms polling mechanism.
- * Uses @Volatile middle-men for non-blocking communication between hardware callbacks and UI.
+ * Acquires slow non-camera telemetry and projects cached values into StatsUI snapshots.
+ *
+ * The presentation coordinator calls [buildSnapshot] from its 2 Hz cadence. This class never
+ * performs storage, thermal-headroom, or battery acquisition on that presentation path.
  */
-class StatsManager(private val context: Context) {
-
-    private val _statsState = MutableStateFlow(StatsSnapshot())
-    val statsState = _statsState.asStateFlow()
-
-    private val _cameraTelemetry = MutableStateFlow(CameraTelemetry())
-    val cameraTelemetry = _cameraTelemetry.asStateFlow()
-    private val _latestExposureCaptureResult =
-        MutableStateFlow<ExposureCaptureResult?>(null)
-    val latestExposureCaptureResult = _latestExposureCaptureResult.asStateFlow()
-
+class StatsManager(
+    private val context: Context,
+    private val telemetryStore: TelemetryStore
+) {
     private val thermalManager = ThermalManager(context)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-
-    // --- Middle-man State (@Volatile for visibility, Atomic for counters) ---
-    @Volatile private var currentIso: Int = 0
-    @Volatile private var currentShutterSpeed: Double = 0.0
-    @Volatile private var currentFps: Int = 0
-    @Volatile private var lastTelemetryEmissionElapsedNanos = 0L
-    private val totalDropped = AtomicInteger(0)
-
-    // Hardware Recording Stats
-    @Volatile private var recordedBytes: Long = 0L
-    @Volatile private var hardwareDurationNanos: Long = 0L
-    @Volatile private var actualBitrateMbps: Double = 0.0
-
-    // Storage State
-    @Volatile private var baselineAvailableBytes: Long = 0L
-    @Volatile private var currentStorageUri: String? = null
-    
-    // Recording configuration
-    @Volatile private var isRecording = false
-    @Volatile private var targetFps: Int? = null
-    @Volatile private var targetBitrateMbps = 30
-
-    // Internal Pacing
-    private var tickCount = 0
-    private var pollingJob: Job? = null
-    private val POLL_INTERVAL_MS = 500L
+    private val storageGeneration = AtomicLong(0L)
+    private val telemetryActive = AtomicBoolean(false)
+    private var powerPollingJob: Job? = null
+    private var headroomPollingJob: Job? = null
+    private var idleStoragePollingJob: Job? = null
+    private var storageRefreshJob: Job? = null
 
     init {
-        // Initial baseline storage query
-        updateBaselineStorage()
-        startPolling()
+        startPowerPolling()
+        startHeadroomPolling()
+        startIdleStoragePolling()
+        requestStorageRefresh()
     }
 
     fun updateStorageUri(uri: String?) {
-        this.currentStorageUri = uri
-        updateBaselineStorage()
-    }
-
-    fun setRecordingState(recording: Boolean, targetFps: Int?, targetBitrate: Int, storageUri: String? = null) {
-        this.isRecording = recording
-        this.targetFps = targetFps
-        this.targetBitrateMbps = targetBitrate
-        this.currentStorageUri = storageUri
-
-        if (recording) {
-            // Reset for new session
-            recordedBytes = 0L
-            hardwareDurationNanos = 0L
-            currentFps = 0
-            actualBitrateMbps = 0.0
-            totalDropped.set(0)
-            tickCount = 0
-            // Get a fresh baseline exactly when recording starts
-            updateBaselineStorage()
-        } else {
-            currentFps = 0
-            actualBitrateMbps = 0.0
-            // Refresh baseline when recording stops to account for the new file
-            updateBaselineStorage()
+        val generation = storageGeneration.incrementAndGet()
+        telemetryStore.updateStorage {
+            it.copy(storageGeneration = generation, uri = uri)
         }
+        requestStorageRefresh(generation, uri)
     }
 
-    /**
-     * Called by RecordingManager with hardware-accurate deltas.
-     */
-    fun updateHardwareStats(bytes: Long, durationNanos: Long, bitrate: Double) {
-        this.recordedBytes = bytes
-        this.hardwareDurationNanos = durationNanos
-        this.actualBitrateMbps = bitrate
+    fun setTelemetryActive(active: Boolean) {
+        telemetryActive.set(active)
     }
 
-    private fun startPolling() {
-        pollingJob = scope.launch {
-            while (isActive) {
-                val snapshot = gatherSnapshot()
-                _statsState.emit(snapshot)
-                
-                delay(POLL_INTERVAL_MS)
-                tickCount++
-
-                // Modulo Triggers for heavier tasks
-                if (tickCount % 20 == 0) { // Every 10 seconds
-                    launch { thermalManager.updateHeadroom() }
-                }
-                
-                if (tickCount % 240 == 0 && !isRecording) { // Every 2 min, only if NOT recording
-                    updateBaselineStorage()
-                }
-            }
-        }
-    }
-
-    private fun gatherSnapshot(): StatsSnapshot {
-        // 1. Get Instant Thermals (Fast)
-        val thermalPower = thermalManager.getInstantThermalState()
-
-        // 2. Intelligent Storage Calculation (Non-blocking)
-        // Only recalculate storage formatted info every 20 seconds (40 ticks) or on state change to prevent flickering.
-        val storageData = if (tickCount % 40 == 0 || !isRecording || _statsState.value.storageRemainingFormatted == "N/A") {
-            val availableBytes = if (isRecording) {
-                (baselineAvailableBytes - recordedBytes).coerceAtLeast(0L)
-            } else {
-                baselineAvailableBytes
-            }
-            formatStorageInfo(availableBytes, actualBitrateMbps)
-        } else {
-            Pair(
-                _statsState.value.storageRemainingTime,
-                _statsState.value.storageRemainingFormatted
+    fun setRecordingState(
+        recording: Boolean,
+        targetFps: Int?,
+        targetBitrate: Int,
+        storageUri: String? = null
+    ) {
+        telemetryStore.updateRecording { current ->
+            current.copy(
+                capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
+                isRecording = recording,
+                targetFps = targetFps,
+                targetBitrateMbps = targetBitrate,
+                recordedBytes = if (recording) 0L else current.recordedBytes,
+                hardwareDurationNanos = if (recording) 0L else current.hardwareDurationNanos,
+                actualBitrateMbps = 0.0,
+                effectiveFps = 0,
+                droppedFrames = if (recording) 0 else current.droppedFrames
             )
         }
 
-        // 3. Paced File Size Display
-        // Only update the "SIZE" stat on the UI every 20 seconds (40 ticks) to prevent flickering.
-        val displayedSize = if (tickCount % 40 == 0 || !isRecording) recordedBytes else _statsState.value.displayedFileSizeWrittenBytes
-
-        return StatsSnapshot(
-            iso = currentIso,
-            shutterSpeed = currentShutterSpeed,
-            effectiveFps = currentFps,
-            droppedFrames = totalDropped.get(),
-            canMeasureDroppedFrames = targetFps != null,
-            thermalStatus = thermalPower.thermalStatus,
-            thermalForecast = thermalPower.thermalForecast,
-            netPowerWatts = thermalPower.netPowerWatts,
-            storageRemainingFormatted = storageData.second,
-            storageRemainingTime = storageData.first,
-            actualBitrateMbps = actualBitrateMbps,
-            displayedFileSizeWrittenBytes = displayedSize,
-            hardwareDurationNanos = hardwareDurationNanos
-        )
-    }
-
-    private fun updateBaselineStorage() {
-        scope.launch(Dispatchers.IO) {
-            baselineAvailableBytes = getPhysicalAvailableBytes()
+        val currentStorage = telemetryStore.snapshot().storage
+        if (storageUri != currentStorage.uri) {
+            updateStorageUri(storageUri)
+        } else {
+            requestStorageRefresh()
         }
     }
 
-    private fun getPhysicalAvailableBytes(): Long {
-        val uriStr = currentStorageUri ?: return getInternalAvailableBytes()
+    /** Called directly from CameraX's recording-status callback. */
+    fun updateHardwareStats(bytes: Long, durationNanos: Long, bitrate: Double) {
+        telemetryStore.updateRecording {
+            it.copy(
+                capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
+                recordedBytes = bytes,
+                hardwareDurationNanos = durationNanos,
+                actualBitrateMbps = bitrate
+            )
+        }
+    }
+
+    fun buildSnapshot(
+        telemetry: TelemetrySnapshot,
+        previous: StatsSnapshot,
+        statsTick: Long
+    ): StatsSnapshot {
+        val camera = telemetry.camera
+        val recording = telemetry.recording
+        val thermalPower = telemetry.thermalPower
+        val effectiveIso = camera.sensorSensitivityIso?.let { sensorIso ->
+            camera.postRawSensitivityBoost?.let { boost ->
+                ((sensorIso.toLong() * boost.toLong() + 50L) / 100L)
+                    .coerceAtMost(Int.MAX_VALUE.toLong())
+                    .toInt()
+            } ?: sensorIso
+        } ?: 0
+        val shutterSpeed = camera.shutterNanos
+            ?.takeIf { it > 0L }
+            ?.let { NANOS_PER_SECOND.toDouble() / it }
+            ?: 0.0
+
+        val refreshSlowDisplay = !recording.isRecording ||
+            statsTick % SLOW_DISPLAY_TICKS == 0L ||
+            previous.storageRemainingFormatted == "N/A"
+        val availableBytes = if (recording.isRecording) {
+            (telemetry.storage.baselineAvailableBytes - recording.recordedBytes)
+                .coerceAtLeast(0L)
+        } else {
+            telemetry.storage.baselineAvailableBytes
+        }
+        val storageData = if (refreshSlowDisplay) {
+            formatStorageInfo(
+                availableBytes = availableBytes,
+                currentBitrate = recording.actualBitrateMbps,
+                targetBitrate = recording.targetBitrateMbps,
+                isRecording = recording.isRecording
+            )
+        } else {
+            previous.storageRemainingTime to previous.storageRemainingFormatted
+        }
+        val displayedSize = if (refreshSlowDisplay) {
+            recording.recordedBytes
+        } else {
+            previous.displayedFileSizeWrittenBytes
+        }
+
+        return StatsSnapshot(
+            iso = effectiveIso,
+            shutterSpeed = shutterSpeed,
+            effectiveFps = recording.effectiveFps,
+            droppedFrames = recording.droppedFrames,
+            canMeasureDroppedFrames = recording.targetFps != null,
+            thermalStatus = thermalPower.thermalStatus,
+            thermalForecast = thermalPower.thermalForecast,
+            netPowerWatts = normalizePower(thermalPower.netPowerWatts),
+            storageRemainingFormatted = storageData.second,
+            storageRemainingTime = storageData.first,
+            actualBitrateMbps = recording.actualBitrateMbps,
+            displayedFileSizeWrittenBytes = displayedSize
+        )
+    }
+
+    private fun startPowerPolling() {
+        powerPollingJob = scope.launch {
+            while (isActive) {
+                if (telemetryActive.get()) {
+                    val state = thermalManager.getInstantThermalState()
+                    telemetryStore.updateThermalPower(
+                        ThermalPowerSample(
+                            capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
+                            thermalStatus = state.thermalStatus,
+                            thermalForecast = state.thermalForecast,
+                            netPowerWatts = state.netPowerWatts
+                        )
+                    )
+                }
+                delay(POWER_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun startHeadroomPolling() {
+        headroomPollingJob = scope.launch {
+            while (isActive) {
+                if (telemetryActive.get()) {
+                    thermalManager.updateHeadroom()
+                }
+                delay(HEADROOM_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun startIdleStoragePolling() {
+        idleStoragePollingJob = scope.launch {
+            while (isActive) {
+                delay(IDLE_STORAGE_INTERVAL_MS)
+                if (!telemetryStore.snapshot().recording.isRecording) {
+                    requestStorageRefresh()
+                }
+            }
+        }
+    }
+
+    private fun requestStorageRefresh() {
+        val current = telemetryStore.snapshot().storage
+        val generation = storageGeneration.incrementAndGet()
+        telemetryStore.updateStorage {
+            it.copy(storageGeneration = generation, uri = current.uri)
+        }
+        requestStorageRefresh(generation, current.uri)
+    }
+
+    private fun requestStorageRefresh(generation: Long, uri: String?) {
+        storageRefreshJob?.cancel()
+        storageRefreshJob = scope.launch(Dispatchers.IO) {
+            val availableBytes = getPhysicalAvailableBytes(uri)
+            if (storageGeneration.get() != generation) return@launch
+            telemetryStore.updateStorage { current ->
+                if (current.storageGeneration != generation || current.uri != uri) {
+                    current
+                } else {
+                    StorageSample(
+                        capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
+                        storageGeneration = generation,
+                        uri = uri,
+                        baselineAvailableBytes = availableBytes
+                    )
+                }
+            }
+        }
+    }
+
+    private fun getPhysicalAvailableBytes(uriString: String?): Long {
+        if (uriString == null) return getInternalAvailableBytes()
         return try {
-            val uri = uriStr.toUri()
+            val uri = uriString.toUri()
             when (uri.scheme) {
                 "file" -> {
                     val stat = StatFs(uri.path)
                     stat.availableBlocksLong * stat.blockSizeLong
                 }
                 "content" -> {
-                    val rootId = android.provider.DocumentsContract.getTreeDocumentId(uri).split(":")[0]
-                    val rootUri = android.provider.DocumentsContract.buildRootUri(uri.authority, rootId)
-
+                    val rootId = DocumentsContract.getTreeDocumentId(uri).split(":")[0]
+                    val rootUri = DocumentsContract.buildRootUri(uri.authority, rootId)
                     context.contentResolver.query(
                         rootUri,
-                        arrayOf(android.provider.DocumentsContract.Root.COLUMN_AVAILABLE_BYTES),
-                        null, null, null
+                        arrayOf(DocumentsContract.Root.COLUMN_AVAILABLE_BYTES),
+                        null,
+                        null,
+                        null
                     )?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            cursor.getLong(0)
-                        } else getInternalAvailableBytes()
+                        if (cursor.moveToFirst()) cursor.getLong(0)
+                        else getInternalAvailableBytes()
                     } ?: getInternalAvailableBytes()
                 }
-                else -> {
-                    getInternalAvailableBytes()
-                }
+                else -> getInternalAvailableBytes()
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             getInternalAvailableBytes()
         }
     }
 
-    private fun getInternalAvailableBytes(): Long {
-        return try {
-            val stat = StatFs(context.filesDir.absolutePath)
-            stat.availableBlocksLong * stat.blockSizeLong
-        } catch (e: Exception) { 0L }
+    private fun getInternalAvailableBytes(): Long = try {
+        val stat = StatFs(context.filesDir.absolutePath)
+        stat.availableBlocksLong * stat.blockSizeLong
+    } catch (_: Exception) {
+        0L
     }
 
-    private fun formatStorageInfo(availableBytes: Long, currentBitrate: Double): Pair<String, String> {
-        val formattedStorage = formatDataSize(availableBytes)
-
-        val bitrateToUse = if (isRecording && currentBitrate > 0) currentBitrate else targetBitrateMbps.toDouble()
-        val bytesPerSec = (bitrateToUse * 1_000_000.0) / 8.0
-        val secondsRemaining = if (bytesPerSec > 0) (availableBytes / bytesPerSec).toLong() else 0L
-
-        val timeStr = when {
-            secondsRemaining <= 0 -> "0 Min"
-            secondsRemaining < 3600 -> {
-                val m = kotlin.math.round(secondsRemaining / 60.0).toInt()
-                "${m} Min"
-            }
-            else -> {
-                val h = kotlin.math.round(secondsRemaining / 3600.0).toInt()
-                "${h} Hr"
-            }
+    private fun formatStorageInfo(
+        availableBytes: Long,
+        currentBitrate: Double,
+        targetBitrate: Int,
+        isRecording: Boolean
+    ): Pair<String, String> {
+        val bitrateToUse =
+            if (isRecording && currentBitrate > 0.0) currentBitrate else targetBitrate.toDouble()
+        val bytesPerSecond = bitrateToUse * 1_000_000.0 / 8.0
+        val secondsRemaining =
+            if (bytesPerSecond > 0.0) (availableBytes / bytesPerSecond).toLong() else 0L
+        val time = when {
+            secondsRemaining <= 0L -> "0 Min"
+            secondsRemaining < 3_600L ->
+                "${round(secondsRemaining / 60.0).toInt()} Min"
+            else -> "${round(secondsRemaining / 3_600.0).toInt()} Hr"
         }
-
-        return Pair(timeStr, formattedStorage)
-    }
-
-    // --- Camera Callbacks ---
-
-    val previewStatsCallback = object : CameraCaptureSession.CaptureCallback() {
-        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-            val iso = result.get(TotalCaptureResult.SENSOR_SENSITIVITY)
-            val postRawSensitivityBoost = result.get(
-                TotalCaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST
-            )
-            currentIso = iso?.let { sensorIso ->
-                postRawSensitivityBoost?.let { boost ->
-                    ((sensorIso.toLong() * boost.toLong() + 50L) / 100L)
-                        .coerceAtMost(Int.MAX_VALUE.toLong())
-                        .toInt()
-                } ?: sensorIso
-            } ?: 0
-            val expTime = result.get(TotalCaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
-            val frameDuration = result.get(TotalCaptureResult.SENSOR_FRAME_DURATION)
-            if (expTime > 0) currentShutterSpeed = 1_000_000_000.0 / expTime
-
-            _latestExposureCaptureResult.value = ExposureCaptureResult(
-                frameNumber = result.frameNumber,
-                sensorSensitivityIso = iso,
-                postRawSensitivityBoost = postRawSensitivityBoost,
-                shutterNanos = expTime.takeIf { it > 0L },
-                frameDurationNanos = frameDuration,
-                aeState = result.get(TotalCaptureResult.CONTROL_AE_STATE),
-                aeLocked = result.get(TotalCaptureResult.CONTROL_AE_LOCK)
-            )
-
-            val focusDistance = result.get(TotalCaptureResult.LENS_FOCUS_DISTANCE)
-            val cctTemperature = if (android.os.Build.VERSION.SDK_INT >= 36) {
-                result.get(TotalCaptureResult.COLOR_CORRECTION_COLOR_TEMPERATURE)
-            } else {
-                null
-            }
-            val cctTint = if (android.os.Build.VERSION.SDK_INT >= 36) {
-                result.get(TotalCaptureResult.COLOR_CORRECTION_COLOR_TINT)
-            } else {
-                null
-            }
-
-            val nowElapsedNanos = SystemClock.elapsedRealtimeNanos()
-            if (nowElapsedNanos - lastTelemetryEmissionElapsedNanos >= TELEMETRY_INTERVAL_NANOS) {
-                val telemetry = CameraTelemetry(
-                    iso = iso,
-                    postRawSensitivityBoost = postRawSensitivityBoost,
-                    shutterNanos = expTime.takeIf { it > 0L },
-                    frameDurationNanos = frameDuration,
-                    focusDistanceDiopters = focusDistance,
-                    cctTemperatureKelvin = cctTemperature,
-                    cctTint = cctTint
-                )
-                if (_cameraTelemetry.value != telemetry) {
-                    _cameraTelemetry.value = telemetry
-                }
-                lastTelemetryEmissionElapsedNanos = nowElapsedNanos
-            }
-        }
-    }
-
-    @Volatile private var videoFrameCount = 0
-    @Volatile private var lastVideoTimestampNanos = -1L
-
-    val videoStatsCallback = object : CameraCaptureSession.CaptureCallback() {
-        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-            if (lastVideoTimestampNanos < 0L) return
-            val frameTimestamp = result.get(TotalCaptureResult.SENSOR_TIMESTAMP) ?: return
-            
-            if (lastVideoTimestampNanos == 0L) {
-                lastVideoTimestampNanos = frameTimestamp
-                return
-            }
-
-            videoFrameCount++
-            val duration = frameTimestamp - lastVideoTimestampNanos
-            
-            if (duration >= 1_000_000_000L) {
-                val sample = FrameRateEstimator.sample(videoFrameCount, duration, targetFps)
-                currentFps = sample.effectiveFps
-                sample.droppedFrames?.let(totalDropped::addAndGet)
-
-                videoFrameCount = 0
-                lastVideoTimestampNanos = frameTimestamp
-            }
-        }
-    }
-
-    fun startFpsCalculation(targetFps: Int?) {
-        this.targetFps = targetFps
-        videoFrameCount = 0
-        totalDropped.set(0)
-        currentFps = 0
-        lastVideoTimestampNanos = 0L
-    }
-
-    fun stopFpsCalculation() {
-        lastVideoTimestampNanos = -1L
-        currentFps = 0
+        return time to formatDataSize(availableBytes)
     }
 
     fun cleanup() {
+        powerPollingJob?.cancel()
+        headroomPollingJob?.cancel()
+        idleStoragePollingJob?.cancel()
+        storageRefreshJob?.cancel()
         thermalManager.cleanup()
-        pollingJob?.cancel()
         scope.cancel()
     }
 
+    private fun normalizePower(value: Double): Double = round(value * 100.0) / 100.0
+
     private companion object {
-        const val TELEMETRY_INTERVAL_NANOS = 50_000_000L
+        const val POWER_INTERVAL_MS = 500L
+        const val HEADROOM_INTERVAL_MS = 10_000L
+        const val IDLE_STORAGE_INTERVAL_MS = 120_000L
+        const val SLOW_DISPLAY_TICKS = 40L
+        const val NANOS_PER_SECOND = 1_000_000_000L
     }
 }

@@ -9,10 +9,10 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraControl
-import com.google.common.util.concurrent.ListenableFuture
 import com.pilerks1.hdrrecorder.model.TonemapCurves
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
+import kotlinx.coroutines.guava.await
 
 /**
  * Non-manual interop settings that come from CameraUiState rather than the manual sliders.
@@ -31,14 +31,14 @@ data class InteropSettings(
 @OptIn(ExperimentalCamera2Interop::class)
 object CameraInteropApplier {
 
-    fun apply(
+    suspend fun apply(
         cameraControl: CameraControl,
         state: ManualControlsState,
         settings: InteropSettings,
         capabilities: CameraCapabilities?,
         applyExposureCompensation: Boolean,
         aeLockOverride: Boolean? = null
-    ): ListenableFuture<Void?> {
+    ) {
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
 
@@ -56,7 +56,7 @@ object CameraInteropApplier {
             )
         }
 
-        return camera2Control.setCaptureRequestOptions(builder.build())
+        camera2Control.setCaptureRequestOptions(builder.build()).await()
     }
 
     fun exposureCompensationIndex(
@@ -68,7 +68,7 @@ object CameraInteropApplier {
 
     // --- Exposure (ISO / SS / EV / AE mode) ---
 
-    private fun applyExposure(
+    private suspend fun applyExposure(
         cameraControl: CameraControl,
         builder: CaptureRequestOptions.Builder,
         state: ManualControlsState,
@@ -79,7 +79,7 @@ object CameraInteropApplier {
         if (applyExposureCompensation && capabilities?.hasExposureCompensationControl == true) {
             cameraControl.setExposureCompensationIndex(
                 exposureCompensationIndex(state, capabilities)
-            )
+            ).await()
         }
 
         val manualShutter = state.isManualSs &&

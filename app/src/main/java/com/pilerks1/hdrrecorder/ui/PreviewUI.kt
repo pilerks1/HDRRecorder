@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.camera.viewfinder.compose.MutableCoordinateTransformer
-import com.pilerks1.hdrrecorder.model.StatsSnapshot
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.delay
 import com.pilerks1.hdrrecorder.ui.layout.LayoutRect
@@ -33,14 +33,14 @@ import com.pilerks1.hdrrecorder.ui.layout.LayoutRect
 @Composable
 fun PreviewUI(
     surfaceRequest: SurfaceRequest?,
-    stats: StateFlow<StatsSnapshot>,
+    recordingDurationNanos: StateFlow<Long>,
     isRecording: Boolean,
     expandedPanelBounds: LayoutRect?,
     onEvent: (CameraUiEvent) -> Unit,
     modifier: Modifier = Modifier,
     placeholderLabel: String? = null
 ) {
-    val statsSnapshot by stats.collectAsState()
+    val recordedDurationNanos by recordingDurationNanos.collectAsStateWithLifecycle()
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
     val coordinateTransformer = remember { MutableCoordinateTransformer() }
 
@@ -117,8 +117,8 @@ fun PreviewUI(
             }
 
             // Recording timer display (hardware duration is the single time source)
-            if (isRecording || statsSnapshot.hardwareDurationNanos > 0L) {
-                val seconds = statsSnapshot.hardwareDurationNanos / 1_000_000_000L
+            if (isRecording || recordedDurationNanos > 0L) {
+                val seconds = recordedDurationNanos / 1_000_000_000L
                 val h = seconds / 3600
                 val m = (seconds % 3600) / 60
                 val s = seconds % 60

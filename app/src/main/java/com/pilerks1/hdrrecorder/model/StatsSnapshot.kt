@@ -22,6 +22,5 @@ data class StatsSnapshot(
     val storageRemainingFormatted: String = "N/A",
     val storageRemainingTime: String = "N/A",
     val actualBitrateMbps: Double = 0.0,
-    val displayedFileSizeWrittenBytes: Long = 0L,
-    val hardwareDurationNanos: Long = 0L
+    val displayedFileSizeWrittenBytes: Long = 0L
 )

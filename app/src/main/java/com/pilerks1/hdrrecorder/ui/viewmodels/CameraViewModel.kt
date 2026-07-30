@@ -22,26 +22,36 @@ import com.pilerks1.hdrrecorder.data.camera.CameraInteropApplier
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntimeEventResult
 import com.pilerks1.hdrrecorder.data.camera.InteropSettings
+import com.pilerks1.hdrrecorder.data.camera.SliderTelemetryField
+import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
+import com.pilerks1.hdrrecorder.data.camera.TelemetryDemand
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.ExposureCaptureResult
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
+import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeBound
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeMath
 import com.pilerks1.hdrrecorder.ui.resetForTapToMeter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 /**
@@ -53,6 +63,7 @@ import kotlin.math.roundToInt
 internal class CameraViewModel(
     application: Application,
     private val statsManager: StatsManager,
+    private val telemetryCoordinator: TelemetryCoordinator,
     private val preferencesManager: PreferencesManager,
     private val cameraManager: CameraManager,
     private val recordingManager: RecordingManager,
@@ -65,13 +76,17 @@ internal class CameraViewModel(
     private var cameraLifecycleOwner: LifecycleOwner? = null
     private var lastDisplayRotation = 0
     private var cameraRebindJob: kotlinx.coroutines.Job? = null
-    private var interopApplyJob: kotlinx.coroutines.Job? = null
     private var lowLightBoostApplyJob: Job? = null
     private var exposureTransitionJob: Job? = null
     private var exposureTransitionGeneration = 0L
-    private var lastInteropControl: CameraControl? = null
-    private var lastInteropSubmission: InteropSubmission? = null
-    private var lastExposureCompensationIndex: Int? = null
+    private val desiredCameraState = MutableStateFlow<DesiredCameraState?>(null)
+    private val pendingImmediateInteropWrite = AtomicBoolean(false)
+    private val interopWriteSignal = Channel<Unit>(Channel.CONFLATED)
+    private val interopWriteMutex = Mutex()
+    private var interopWriterJob: Job? = null
+    private var appliedInteropControl: CameraControl? = null
+    private var appliedCameraState: DesiredCameraState? = null
+    private var appliedExposureCompensationIndex: Int? = null
     private var lastInteropSubmissionElapsedMs = 0L
 
     // --- UI State ---
@@ -80,8 +95,9 @@ internal class CameraViewModel(
 
     private val _surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
     val surfaceRequest: StateFlow<SurfaceRequest?> = _surfaceRequest.asStateFlow()
-    val stats = statsManager.statsState
-    val cameraTelemetry = statsManager.cameraTelemetry
+    val stats = telemetryCoordinator.statsState
+    val recordingDurationNanos = telemetryCoordinator.recordingDurationNanos
+    val sliderTelemetry = telemetryCoordinator.sliderTelemetry
 
     init {
         val initialState = cameraRuntime.initialUiState()
@@ -108,6 +124,8 @@ internal class CameraViewModel(
 
         collectRecordingState()
         collectLowLightBoostState()
+        collectTelemetryDemand()
+        startInteropWriter()
         statsManager.setRecordingState(false, requestedFpsForStats(), Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
     }
 
@@ -260,7 +278,9 @@ internal class CameraViewModel(
                 updateManualControls { it.resetForTapToMeter() }
                 viewModelScope.launch {
                     exposureTransitionJob?.join()
-                    cameraManager.tapToMeter(event.meteringPoint)
+                    interopWriteMutex.withLock {
+                        cameraManager.tapToMeter(event.meteringPoint)?.await()
+                    }
                 }
             }
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
@@ -306,7 +326,7 @@ internal class CameraViewModel(
             val targetBitrate = Bitrate.parseOrDefault(_uiState.value.bitrate)
             if (!recordingManager.startRecording(videoCapture, _uiState.value.storageUri)) return
             val requestedFps = requestedFpsForStats()
-            statsManager.startFpsCalculation(requestedFps)
+            telemetryCoordinator.startFpsCalculation()
             statsManager.setRecordingState(true, requestedFps, targetBitrate, _uiState.value.storageUri)
         }
     }
@@ -325,7 +345,7 @@ internal class CameraViewModel(
         val currentUi = _uiState.value
         if (currentUi.isExposureTransitioning) return
         val caps = currentUi.cameraCapabilities
-        val telemetry = cameraTelemetry.value
+        val telemetry = telemetryCoordinator.currentCameraTelemetry()
         val oldControls = currentUi.manualControlsState
         val exposureDefaults = ManualControlStateUpdater.ExposureDefaults(
             isoValue = telemetry.iso,
@@ -491,7 +511,7 @@ internal class CameraViewModel(
                         isExposureTransitioning = false
                     )
                 }
-                lastInteropSubmission = null
+                appliedCameraState = null
 
                 if (triggersRebind && _uiState.value.isSettingsSheetVisible) {
                     pendingHardRebind = true
@@ -502,8 +522,8 @@ internal class CameraViewModel(
             } catch (cancelled: CancellationException) {
                 if (generation == exposureTransitionGeneration) {
                     _uiState.update { it.copy(isExposureTransitioning = false) }
-                    lastInteropSubmission = null
-                    submitInteropIfChanged()
+                    appliedCameraState = null
+                    applyInterop()
                 }
                 throw cancelled
             } catch (error: Exception) {
@@ -518,21 +538,26 @@ internal class CameraViewModel(
     ): ExposureCaptureResult {
         val caps = _uiState.value.cameraCapabilities
         if (caps?.supportsAeLock != true) {
-            return statsManager.latestExposureCaptureResult.value
+            return telemetryCoordinator.currentExposureResult()
                 ?: throw IllegalStateException("No exposure result available")
         }
 
-        return withTimeout(EXPOSURE_TRANSITION_TIMEOUT_MS) {
-            val startingFrame =
-                statsManager.latestExposureCaptureResult.value?.frameNumber ?: -1L
-            submitTransitionRequest(controls, aeLocked = true)
-            statsManager.latestExposureCaptureResult
-                .filterNotNull()
-                .first { result ->
-                    result.frameNumber > startingFrame &&
-                        result.aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED &&
-                        result.aeLocked != false
-                }
+        telemetryCoordinator.setExposureAcknowledgementDemand(true)
+        return try {
+            withTimeout(EXPOSURE_TRANSITION_TIMEOUT_MS) {
+                val startingFrame =
+                    telemetryCoordinator.currentExposureResult()?.frameNumber ?: -1L
+                submitTransitionRequest(controls, aeLocked = true)
+                telemetryCoordinator.exposureAcknowledgements
+                    .filterNotNull()
+                    .first { result ->
+                        result.frameNumber > startingFrame &&
+                            result.aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED &&
+                            result.aeLocked != false
+                    }
+            }
+        } finally {
+            telemetryCoordinator.setExposureAcknowledgementDemand(false)
         }
     }
 
@@ -542,19 +567,34 @@ internal class CameraViewModel(
     ) {
         val cameraControl = cameraManager.getCameraControl()
             ?: throw IllegalStateException("Camera control unavailable")
-        withTimeout(EXPOSURE_TRANSITION_TIMEOUT_MS) {
-            CameraInteropApplier.apply(
-                cameraControl = cameraControl,
-                state = controls,
-                settings = currentInteropSettings(),
-                capabilities = _uiState.value.cameraCapabilities,
-                applyExposureCompensation = false,
-                aeLockOverride = aeLocked
-            ).await()
+        val state = DesiredCameraState(
+            controls = controls,
+            settings = currentInteropSettings(),
+            capabilities = _uiState.value.cameraCapabilities
+        )
+        interopWriteMutex.withLock {
+            withTimeout(EXPOSURE_TRANSITION_TIMEOUT_MS) {
+                CameraInteropApplier.apply(
+                    cameraControl = cameraControl,
+                    state = controls,
+                    settings = state.settings,
+                    capabilities = state.capabilities,
+                    applyExposureCompensation = !aeLocked,
+                    aeLockOverride = aeLocked
+                )
+            }
+            lastInteropSubmissionElapsedMs = SystemClock.elapsedRealtime()
+            if (!aeLocked && cameraManager.getCameraControl() === cameraControl) {
+                desiredCameraState.value = state
+                appliedInteropControl = cameraControl
+                appliedCameraState = state
+                appliedExposureCompensationIndex =
+                    CameraInteropApplier.exposureCompensationIndex(
+                        state.controls,
+                        state.capabilities
+                    )
+            }
         }
-        lastInteropControl = cameraControl
-        lastInteropSubmission = null
-        lastInteropSubmissionElapsedMs = SystemClock.elapsedRealtime()
     }
 
     private fun manualFpsRangeForShutter(
@@ -603,8 +643,8 @@ internal class CameraViewModel(
                 exposureTransitionMessage = "Exposure transition failed; Auto restored"
             )
         }
-        lastInteropSubmission = null
-        submitInteropIfChanged()
+        appliedCameraState = null
+        applyInterop()
         viewModelScope.launch {
             delay(EXPOSURE_MESSAGE_DURATION_MS)
             if (generation == exposureTransitionGeneration) {
@@ -804,15 +844,20 @@ internal class CameraViewModel(
         if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.cameraCapabilities?.supportsLowLightBoost != true) return
         val desired = _uiState.value.manualControlsState.isLowLightBoostEnabled
-        val future = cameraManager.setLowLightBoostEnabled(desired) ?: return
         lowLightBoostApplyJob?.cancel()
         lowLightBoostApplyJob = viewModelScope.launch {
             try {
-                future.await()
+                val wasApplied = interopWriteMutex.withLock {
+                    val future = cameraManager.setLowLightBoostEnabled(desired)
+                        ?: return@withLock false
+                    future.await()
+                    true
+                }
+                if (!wasApplied) return@launch
                 // Re-submit interop after CameraX changes AE so manual controls retain priority
                 // when they were the action that disabled low-light boost.
-                lastInteropSubmission = null
-                submitInteropIfChanged()
+                appliedCameraState = null
+                applyInterop()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -832,54 +877,84 @@ internal class CameraViewModel(
 
     /**
      * Single entry point for all Camera2 interop writes. Builds one request from the current
-     * manual control state + non-manual interop settings via the unified applier.
+     * manual control state + non-manual interop settings and queues the newest complete state.
      */
     private fun applyInterop(coalesce: Boolean = false) {
         if (!cameraRuntime.usesCameraHardware) return
-        if (!coalesce) {
-            interopApplyJob?.cancel()
-            submitInteropIfChanged()
-            return
-        }
-
-        if (interopApplyJob?.isActive == true) return
-
-        val remainingDelayMs = (lastInteropSubmissionElapsedMs + INTEROP_DRAG_SAMPLE_MS -
-            SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-        interopApplyJob = viewModelScope.launch {
-            delay(remainingDelayMs)
-            submitInteropIfChanged()
-        }
-    }
-
-    private fun submitInteropIfChanged() {
-        if (!cameraRuntime.usesCameraHardware) return
-        val cameraControl = cameraManager.getCameraControl() ?: return
         val state = _uiState.value
-        val submission = InteropSubmission(
+        val desired = DesiredCameraState(
             controls = state.manualControlsState,
             settings = currentInteropSettings(),
             capabilities = state.cameraCapabilities
         )
-        if (lastInteropControl === cameraControl && lastInteropSubmission == submission) return
+        desiredCameraState.value = desired
+        if (!coalesce) {
+            pendingImmediateInteropWrite.set(true)
+        }
+        interopWriteSignal.trySend(Unit)
+    }
 
-        val exposureCompensationIndex = CameraInteropApplier.exposureCompensationIndex(
-            submission.controls,
-            submission.capabilities
-        )
-        val shouldApplyExposureCompensation = lastInteropControl !== cameraControl ||
-            lastExposureCompensationIndex != exposureCompensationIndex
-        CameraInteropApplier.apply(
-            cameraControl = cameraControl,
-            state = submission.controls,
-            settings = submission.settings,
-            capabilities = submission.capabilities,
-            applyExposureCompensation = shouldApplyExposureCompensation
-        )
-        lastInteropControl = cameraControl
-        lastInteropSubmission = submission
-        lastExposureCompensationIndex = exposureCompensationIndex
-        lastInteropSubmissionElapsedMs = SystemClock.elapsedRealtime()
+    fun finishManualControlInteraction() {
+        applyInterop(coalesce = false)
+    }
+
+    private fun startInteropWriter() {
+        interopWriterJob = viewModelScope.launch {
+            for (ignored in interopWriteSignal) {
+                val immediate = pendingImmediateInteropWrite.getAndSet(false)
+                if (!immediate) {
+                    val remainingDelay = (
+                        lastInteropSubmissionElapsedMs +
+                            INTEROP_DRAG_SAMPLE_MS -
+                            SystemClock.elapsedRealtime()
+                        ).coerceAtLeast(0L)
+                    delay(remainingDelay)
+                }
+
+                val desired = desiredCameraState.value ?: continue
+                try {
+                    submitInteropState(desired)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w("CameraViewModel", "Unable to apply Camera2 state", error)
+                }
+            }
+        }
+    }
+
+    private suspend fun submitInteropState(desired: DesiredCameraState) {
+        if (_uiState.value.isExposureTransitioning) return
+        val cameraControl = cameraManager.getCameraControl() ?: return
+        interopWriteMutex.withLock {
+            if (_uiState.value.isExposureTransitioning) return
+            if (
+                appliedInteropControl === cameraControl &&
+                appliedCameraState == desired
+            ) return
+
+            val exposureCompensationIndex =
+                CameraInteropApplier.exposureCompensationIndex(
+                    desired.controls,
+                    desired.capabilities
+                )
+            val shouldApplyExposureCompensation =
+                appliedInteropControl !== cameraControl ||
+                    appliedExposureCompensationIndex != exposureCompensationIndex
+            lastInteropSubmissionElapsedMs = SystemClock.elapsedRealtime()
+            CameraInteropApplier.apply(
+                cameraControl = cameraControl,
+                state = desired.controls,
+                settings = desired.settings,
+                capabilities = desired.capabilities,
+                applyExposureCompensation = shouldApplyExposureCompensation
+            )
+
+            if (cameraManager.getCameraControl() !== cameraControl) return
+            appliedInteropControl = cameraControl
+            appliedCameraState = desired
+            appliedExposureCompensationIndex = exposureCompensationIndex
+        }
     }
 
     private fun currentInteropSettings(): InteropSettings {
@@ -896,7 +971,7 @@ internal class CameraViewModel(
             recordingManager.isRecording.collect { isRecording ->
                 _uiState.update { it.copy(isRecording = isRecording, isPaused = if (!isRecording) false else it.isPaused) }
                 if (!isRecording) {
-                    statsManager.stopFpsCalculation()
+                    telemetryCoordinator.stopFpsCalculation()
                     val state = _uiState.value
                     statsManager.setRecordingState(
                         recording = false,
@@ -917,12 +992,49 @@ internal class CameraViewModel(
         }
     }
 
+    private fun collectTelemetryDemand() {
+        viewModelScope.launch {
+            uiState
+                .map(::telemetryDemandFor)
+                .distinctUntilChanged()
+                .collect(telemetryCoordinator::updateDemand)
+        }
+    }
+
+    private fun telemetryDemandFor(state: CameraUiState): TelemetryDemand {
+        val controls = state.manualControlsState
+        val field = when (controls.activePanel?.manualControl) {
+            ManualControl.ISO -> if (
+                !controls.isManualIso ||
+                (
+                    state.cameraCapabilities?.supportsPostRawSensitivityBoost == true &&
+                        !controls.isManualPostRawSensitivity
+                    )
+            ) SliderTelemetryField.ISO else null
+            ManualControl.SHUTTER ->
+                if (!controls.isManualSs) SliderTelemetryField.SHUTTER else null
+            ManualControl.FOCUS ->
+                if (!controls.isManualFocus) SliderTelemetryField.FOCUS else null
+            ManualControl.WHITE_BALANCE,
+            ManualControl.TINT ->
+                if (!controls.isManualWb) SliderTelemetryField.WHITE_BALANCE else null
+            ManualControl.EXPOSURE_COMPENSATION -> null
+            null -> null
+        }
+        return TelemetryDemand(
+            statsVisible = true,
+            automaticSliderField = field
+        )
+    }
+
     override fun onCleared() {
         cameraRebindJob?.cancel()
-        interopApplyJob?.cancel()
+        interopWriterJob?.cancel()
+        interopWriteSignal.close()
         lowLightBoostApplyJob?.cancel()
         exposureTransitionJob?.cancel()
         cameraManager.release()
+        telemetryCoordinator.cleanup()
         statsManager.cleanup()
     }
 
@@ -934,7 +1046,7 @@ internal class CameraViewModel(
         const val EXPOSURE_MESSAGE_DURATION_MS = 3_000L
     }
 
-    private data class InteropSubmission(
+    private data class DesiredCameraState(
         val controls: ManualControlsState,
         val settings: InteropSettings,
         val capabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities?

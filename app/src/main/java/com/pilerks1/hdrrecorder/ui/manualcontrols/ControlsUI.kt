@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -182,10 +182,11 @@ fun ActiveControlPanel(
     autoFps: Int,
     onCycleFps: () -> Unit,
     controlsEnabled: Boolean = true,
+    onManualControlInteractionFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val activePanel = state.activePanel ?: return
-    val telemetry = cameraTelemetry.collectAsState().value
+    val telemetry = cameraTelemetry.collectAsStateWithLifecycle().value
     val density = LocalDensity.current
     val safeContentPadding = with(density) {
         if (axis.usesVerticalTrack) {
@@ -239,7 +240,8 @@ fun ActiveControlPanel(
                     axis = axis,
                     enabled = controlsEnabled,
                     onSetIso = onSetIso,
-                    onSetPostRawSensitivity = onSetPostRawSensitivity
+                    onSetPostRawSensitivity = onSetPostRawSensitivity,
+                    onInteractionFinished = onManualControlInteractionFinished
                 )
             }
             ManualControl.SHUTTER -> {
@@ -256,7 +258,8 @@ fun ActiveControlPanel(
                         onManualValue = { onSetSs(true, it) }
                     ),
                     axis = axis,
-                    enabled = controlsEnabled
+                    enabled = controlsEnabled,
+                    onInteractionFinished = onManualControlInteractionFinished
                 )
             }
             ManualControl.EXPOSURE_COMPENSATION -> {
@@ -275,12 +278,16 @@ fun ActiveControlPanel(
                     ticks = scale.ticks,
                     layoutLabels = scale.layoutLabels,
                     onValueChange = { onSetEv(true, scale.value(it)) },
+                    onValueChangeFinished = onManualControlInteractionFinished,
                     primaryButtonText = "RES",
                     sliderEnabled = !aeIsOff,
                     primaryButtonEnabled = true,
                     primaryButtonColor = if (isManualEv) Color.White else Color.DarkGray,
                     primaryButtonTextColor = if (isManualEv) Color.Black else Color.LightGray,
-                    onPrimaryButtonClick = { onSetEv(false, 0) },
+                    onPrimaryButtonClick = {
+                        onSetEv(false, 0)
+                        onManualControlInteractionFinished()
+                    },
                     secondaryButtonText = if (caps?.supportsLowLightBoost == true) "NHT" else null,
                     secondaryButtonEnabled = !isRecording || maxOf(
                         if (state.isManualFps) state.fpsRange?.upper ?: autoFps else autoFps,
@@ -289,7 +296,10 @@ fun ActiveControlPanel(
                     secondaryButtonColor = if (state.isLowLightBoostEnabled) Color.Yellow else Color.DarkGray,
                     secondaryButtonTextColor = if (state.isLowLightBoostEnabled) Color.Black else Color.LightGray,
                     onSecondaryButtonClick = if (caps?.supportsLowLightBoost == true) {
-                        { onSetLowLightBoost(!state.isLowLightBoostEnabled) }
+                        {
+                            onSetLowLightBoost(!state.isLowLightBoostEnabled)
+                            onManualControlInteractionFinished()
+                        }
                     } else null
                 )
             }
@@ -306,7 +316,8 @@ fun ActiveControlPanel(
                         },
                         onManualValue = { onSetFocus(true, it) }
                     ),
-                    axis = axis
+                    axis = axis,
+                    onInteractionFinished = onManualControlInteractionFinished
                 )
             }
             ManualControl.WHITE_BALANCE -> {
@@ -323,7 +334,8 @@ fun ActiveControlPanel(
                         },
                         onManualValue = { onSetWb(true, it, effective.tint) }
                     ),
-                    axis = axis
+                    axis = axis,
+                    onInteractionFinished = onManualControlInteractionFinished
                 )
             }
             ManualControl.TINT -> {
@@ -342,7 +354,8 @@ fun ActiveControlPanel(
                             onSetWb(true, state.wbTemp ?: effective.temperatureKelvin, it)
                         }
                     ),
-                    axis = axis
+                    axis = axis,
+                    onInteractionFinished = onManualControlInteractionFinished
                 )
             }
                 null -> Unit
@@ -423,7 +436,8 @@ private fun <T : Any> StandardSlider(
     binding: StandardSliderBinding<T>,
     axis: AxisSpec,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    onInteractionFinished: () -> Unit
 ) {
     BaseSlider(
         value = scale.progress(binding.effectiveValue),
@@ -432,13 +446,17 @@ private fun <T : Any> StandardSlider(
         ticks = scale.ticks,
         layoutLabels = scale.layoutLabels,
         onValueChange = { binding.onManualValue(scale.value(it)) },
+        onValueChangeFinished = onInteractionFinished,
         modifier = modifier,
         sliderEnabled = enabled,
         primaryButtonEnabled = enabled,
         primaryButtonText = if (binding.isManual) "MAN" else "AUTO",
         primaryButtonColor = if (binding.isManual) Color.DarkGray else Color.White,
         primaryButtonTextColor = if (binding.isManual) Color.White else Color.Black,
-        onPrimaryButtonClick = binding.onToggleAuto
+        onPrimaryButtonClick = {
+            binding.onToggleAuto()
+            onInteractionFinished()
+        }
     )
 }
 
@@ -450,7 +468,8 @@ private fun IsoPanel(
     axis: AxisSpec,
     enabled: Boolean,
     onSetIso: (Boolean, Int?) -> Unit,
-    onSetPostRawSensitivity: (Boolean, Int?) -> Unit
+    onSetPostRawSensitivity: (Boolean, Int?) -> Unit,
+    onInteractionFinished: () -> Unit
 ) {
     val isoScale = remember(caps?.isoRange) { SliderScales.iso(caps) }
     val effectiveIso = telemetry.iso ?: state.isoValue ?: isoScale.fallbackValue
@@ -472,7 +491,8 @@ private fun IsoPanel(
             ),
             axis = axis,
             modifier = modifier,
-            enabled = enabled
+            enabled = enabled,
+            onInteractionFinished = onInteractionFinished
         )
     }
 
@@ -508,7 +528,8 @@ private fun IsoPanel(
             ),
             axis = axis,
             modifier = modifier,
-            enabled = enabled
+            enabled = enabled,
+            onInteractionFinished = onInteractionFinished
         )
     }
 

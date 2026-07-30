@@ -15,7 +15,6 @@ import androidx.camera.core.CameraInfo
  */
 data class CameraCapabilities(
     val isoRange: Range<Int>? = null,
-    val maxAnalogSensitivityIso: Int? = null,
     val postRawSensitivityBoostRange: Range<Int>? = null,
     val ssRangeNanos: Range<Long>? = null,
     val evRange: Range<Int>? = null,
@@ -49,9 +48,6 @@ object CameraCapabilitiesManager {
         
         // 1. ISO (Sensitivity)
         val isoRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-        val maxAnalogSensitivityIso = camera2Info.getCameraCharacteristic(
-            CameraCharacteristics.SENSOR_MAX_ANALOG_SENSITIVITY
-        )
         val postRawSensitivityBoostRange = camera2Info.getCameraCharacteristic(
             CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE
         )
@@ -115,7 +111,6 @@ object CameraCapabilitiesManager {
 
         return CameraCapabilities(
             isoRange = isoRange,
-            maxAnalogSensitivityIso = maxAnalogSensitivityIso,
             postRawSensitivityBoostRange = postRawSensitivityBoostRange,
             ssRangeNanos = ssRange,
             evRange = evRange,

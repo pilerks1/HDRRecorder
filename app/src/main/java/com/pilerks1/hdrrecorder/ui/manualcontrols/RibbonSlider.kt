@@ -87,6 +87,7 @@ internal fun ribbonTickLabelTop(
 fun RibbonSlider(
     value: Float, // 0f..1f
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit = {},
     axis: AxisSpec,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -153,6 +154,7 @@ fun RibbonSlider(
     val maximumLiveLabelWidth = with(density) { maximumLiveLabelSize.width.toDp() }
     
     val currentVal by rememberUpdatedState(value)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     
     val scope = rememberCoroutineScope()
     val animatable = remember { Animatable(value) }
@@ -246,8 +248,10 @@ fun RibbonSlider(
                                         }
                                     }
                                 }
+                                currentOnValueChangeFinished()
                             }
-                        }
+                        },
+                        onDragCancel = currentOnValueChangeFinished
                     )
                 },
             contentAlignment = Alignment.Center

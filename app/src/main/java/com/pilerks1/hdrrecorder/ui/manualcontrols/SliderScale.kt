@@ -38,27 +38,11 @@ object SliderScales {
     private const val MAX_EV_MAJOR_LABEL_COUNT = 7
     private const val MAX_ISO_LIVE_LABEL = "99999"
 
-    fun iso(caps: CameraCapabilities?): SliderScale<Int> {
-        val scale = isoRange(
+    fun iso(caps: CameraCapabilities?): SliderScale<Int> =
+        isoRange(
             caps?.isoRange?.lower ?: 100,
             caps?.isoRange?.upper ?: 3200
         )
-        val analogBoundary = caps?.maxAnalogSensitivityIso
-            ?.takeIf { boundary -> caps.isoRange?.contains(boundary) == true }
-            ?: return scale
-        val boundaryLabel = analogBoundary.toString()
-        val ticks = (scale.ticks + SliderTick(scale.progress(analogBoundary), boundaryLabel))
-            .distinctBy { it.position }
-            .sortedBy { it.position }
-        return SliderScale(
-            fallbackValue = scale.fallbackValue,
-            valueToProgress = scale.valueToProgress,
-            progressToValue = scale.progressToValue,
-            formatValue = scale.formatValue,
-            ticks = ticks,
-            layoutLabels = (scale.layoutLabels + boundaryLabel).distinct()
-        )
-    }
 
     fun postRawSensitivity(caps: CameraCapabilities?): SliderScale<Int> {
         val range = caps?.postRawSensitivityBoostRange

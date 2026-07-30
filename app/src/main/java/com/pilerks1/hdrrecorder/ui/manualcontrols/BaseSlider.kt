@@ -49,6 +49,7 @@ fun BaseSlider(
     ticks: List<SliderTick>,
     layoutLabels: List<String>,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit = {},
     primaryButtonText: String,
     modifier: Modifier = Modifier,
     sliderEnabled: Boolean = true,
@@ -89,6 +90,7 @@ fun BaseSlider(
             RibbonSlider(
                 value = value,
                 onValueChange = onValueChange,
+                onValueChangeFinished = onValueChangeFinished,
                 axis = axis,
                 labelString = labelString,
                 ticks = ticks,
