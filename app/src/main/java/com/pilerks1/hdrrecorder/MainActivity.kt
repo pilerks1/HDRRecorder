@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.pilerks1.hdrrecorder.compatibility.CompatibilityScreen
 import com.pilerks1.hdrrecorder.compatibility.Screen
+import com.pilerks1.hdrrecorder.data.camera.CameraRuntimeProvider
 import com.pilerks1.hdrrecorder.ui.CameraUI
 
 /**
@@ -28,10 +29,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val cameraRuntime = CameraRuntimeProvider.fromIntent(intent)
 
         setContent {
             MaterialTheme {
-                var hasPermissions by remember { mutableStateOf(false) }
+                var hasPermissions by remember {
+                    mutableStateOf(!cameraRuntime.usesCameraHardware)
+                }
                 var currentScreen by rememberSaveable { mutableStateOf<Screen>(Screen.Camera) }
 
                 val permissionLauncher = rememberLauncherForActivityResult(
@@ -43,13 +47,16 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Request permissions only once when the app starts
-                LaunchedEffect(Unit) {
-                    permissionLauncher.launch(REQUIRED_PERMISSIONS)
+                LaunchedEffect(cameraRuntime) {
+                    if (cameraRuntime.usesCameraHardware) {
+                        permissionLauncher.launch(REQUIRED_PERMISSIONS)
+                    }
                 }
 
                 if (hasPermissions) {
                     when (currentScreen) {
                         is Screen.Camera -> CameraUI(
+                            cameraRuntime = cameraRuntime,
                             onNavigateToCompatibility = { currentScreen = Screen.Compatibility }
                         )
                         is Screen.Compatibility -> CompatibilityScreen(
@@ -78,4 +85,3 @@ class MainActivity : ComponentActivity() {
         )
     }
 }
-

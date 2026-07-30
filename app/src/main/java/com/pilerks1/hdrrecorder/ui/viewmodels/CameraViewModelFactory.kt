@@ -8,6 +8,7 @@ import com.pilerks1.hdrrecorder.data.CameraManager
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
+import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 
 /**
  * Constructs CameraViewModel with its managers injected. A plain ViewModelProvider.Factory
@@ -16,7 +17,10 @@ import com.pilerks1.hdrrecorder.data.StatsManager
  * on rotation.
  */
 @ExperimentalCamera2Interop
-class CameraViewModelFactory(private val application: Application) : ViewModelProvider.Factory {
+internal class CameraViewModelFactory(
+    private val application: Application,
+    private val cameraRuntime: CameraRuntime
+) : ViewModelProvider.Factory {
 
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(CameraViewModel::class.java)) {
@@ -33,7 +37,8 @@ class CameraViewModelFactory(private val application: Application) : ViewModelPr
             statsManager = statsManager,
             preferencesManager = preferencesManager,
             cameraManager = cameraManager,
-            recordingManager = recordingManager
+            recordingManager = recordingManager,
+            cameraRuntime = cameraRuntime
         ) as T
     }
 }

@@ -37,7 +37,8 @@ fun PreviewUI(
     isRecording: Boolean,
     expandedPanelBounds: LayoutRect?,
     onEvent: (CameraUiEvent) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    placeholderLabel: String? = null
 ) {
     val statsSnapshot by stats.collectAsState()
     var meterCirclePosition by remember { mutableStateOf<DpOffset?>(null) }
@@ -78,7 +79,24 @@ fun PreviewUI(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    placeholderLabel?.let { label ->
+                        Text(
+                            text = label,
+                            color = Color.Yellow,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.75f))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
             }
 
             // Metering circle (Visual only)

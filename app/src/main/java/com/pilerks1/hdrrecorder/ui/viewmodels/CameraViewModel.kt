@@ -19,6 +19,8 @@ import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.camera.CameraInteropApplier
+import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
+import com.pilerks1.hdrrecorder.data.camera.CameraRuntimeEventResult
 import com.pilerks1.hdrrecorder.data.camera.InteropSettings
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.ExposureCaptureResult
@@ -48,12 +50,13 @@ import kotlin.math.roundToInt
  * for the content resolver used when persisting a storage URI permission.
  */
 @ExperimentalCamera2Interop
-class CameraViewModel(
+internal class CameraViewModel(
     application: Application,
     private val statsManager: StatsManager,
     private val preferencesManager: PreferencesManager,
     private val cameraManager: CameraManager,
-    private val recordingManager: RecordingManager
+    private val recordingManager: RecordingManager,
+    private val cameraRuntime: CameraRuntime
 ) : AndroidViewModel(application) {
 
     // --- Deferred settings and camera binding state ---
@@ -81,14 +84,27 @@ class CameraViewModel(
     val cameraTelemetry = statsManager.cameraTelemetry
 
     init {
-        val globalStorageUri = preferencesManager.storageUri
-        if (!preferencesManager.hasPreset("Default")) preferencesManager.savePreset("Default", _uiState.value)
+        val initialState = cameraRuntime.initialUiState()
+        if (initialState != null) {
+            _uiState.value = initialState
+        } else {
+            val globalStorageUri = preferencesManager.storageUri
+            if (!preferencesManager.hasPreset("Default")) {
+                preferencesManager.savePreset("Default", _uiState.value)
+            }
 
-        val names = preferencesManager.getPresetNames().toList()
-        val currentPreset = if (names.contains(preferencesManager.currentPresetName)) preferencesManager.currentPresetName else "Default"
-        val loadedState = preferencesManager.loadPreset(currentPreset, _uiState.value)
+            val names = preferencesManager.getPresetNames().toList()
+            val currentPreset = if (names.contains(preferencesManager.currentPresetName)) {
+                preferencesManager.currentPresetName
+            } else {
+                "Default"
+            }
+            val loadedState = preferencesManager.loadPreset(currentPreset, _uiState.value)
 
-        _uiState.update { loadedState.copy(presetsList = names, storageUri = globalStorageUri) }
+            _uiState.update {
+                loadedState.copy(presetsList = names, storageUri = globalStorageUri)
+            }
+        }
 
         collectRecordingState()
         collectLowLightBoostState()
@@ -101,6 +117,7 @@ class CameraViewModel(
      */
     private fun updateSettingsAndSave(requiresHardRebind: Boolean = false, update: (CameraUiState) -> CameraUiState) {
         _uiState.update { oldState -> update(oldState) }
+        if (!cameraRuntime.usesCameraHardware) return
 
         if (_uiState.value.isSettingsSheetVisible) {
             // Defer changes while in settings UI
@@ -115,6 +132,14 @@ class CameraViewModel(
     }
 
     fun onEvent(event: CameraUiEvent) {
+        when (val runtimeResult = cameraRuntime.handleEvent(event, _uiState.value)) {
+            CameraRuntimeEventResult.NotHandled -> Unit
+            is CameraRuntimeEventResult.Handled -> {
+                runtimeResult.uiState?.let { _uiState.value = it }
+                return
+            }
+        }
+
         when (event) {
             // Preset Management
             is CameraUiEvent.SavePreset -> {
@@ -255,6 +280,7 @@ class CameraViewModel(
     }
 
     private fun triggerRebindForPresets() {
+        if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
         else scheduleCameraRebind(debounce = true)
     }
@@ -266,11 +292,13 @@ class CameraViewModel(
      */
     fun onDisplayRotationChanged(rotation: Int) {
         lastDisplayRotation = rotation
+        if (!cameraRuntime.usesCameraHardware) return
         CameraRotationPolicy.targetRotation(rotation, _uiState.value.isRecording)
             ?.let(cameraManager::updateRotation)
     }
 
     private fun toggleRecording() {
+        if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.isRecording) {
             recordingManager.stopRecording()
         } else {
@@ -284,6 +312,7 @@ class CameraViewModel(
     }
 
     private fun togglePause() {
+        if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.isPaused) {
             recordingManager.resumeRecording()
         } else {
@@ -322,6 +351,11 @@ class CameraViewModel(
         }
         val lowLightBoostChanged =
             oldControls.isLowLightBoostEnabled != newState.isLowLightBoostEnabled
+
+        if (!cameraRuntime.usesCameraHardware) {
+            _uiState.update { it.copy(manualControlsState = newState) }
+            return
+        }
 
         if (
             caps != null &&
@@ -595,6 +629,7 @@ class CameraViewModel(
 
     /** Attaches the current lifecycle and starts the initial bind without an arbitrary delay. */
     fun attachCamera(lifecycleOwner: LifecycleOwner, displayRotation: Int) {
+        if (!cameraRuntime.usesCameraHardware) return
         val lifecycleChanged = cameraLifecycleOwner !== lifecycleOwner
         cameraLifecycleOwner = lifecycleOwner
         lastDisplayRotation = displayRotation
@@ -606,6 +641,7 @@ class CameraViewModel(
      * startup time. CameraManager binds only after the ProcessCameraProvider is actually ready.
      */
     private fun scheduleCameraRebind(debounce: Boolean) {
+        if (!cameraRuntime.usesCameraHardware) return
         val lifecycleOwner = cameraLifecycleOwner ?: return
         cameraRebindJob?.cancel()
         exposureTransitionJob?.cancel()
@@ -765,6 +801,7 @@ class CameraViewModel(
     }
 
     private fun applyLowLightBoostPreference() {
+        if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.cameraCapabilities?.supportsLowLightBoost != true) return
         val desired = _uiState.value.manualControlsState.isLowLightBoostEnabled
         val future = cameraManager.setLowLightBoostEnabled(desired) ?: return
@@ -798,6 +835,7 @@ class CameraViewModel(
      * manual control state + non-manual interop settings via the unified applier.
      */
     private fun applyInterop(coalesce: Boolean = false) {
+        if (!cameraRuntime.usesCameraHardware) return
         if (!coalesce) {
             interopApplyJob?.cancel()
             submitInteropIfChanged()
@@ -815,6 +853,7 @@ class CameraViewModel(
     }
 
     private fun submitInteropIfChanged() {
+        if (!cameraRuntime.usesCameraHardware) return
         val cameraControl = cameraManager.getCameraControl() ?: return
         val state = _uiState.value
         val submission = InteropSubmission(

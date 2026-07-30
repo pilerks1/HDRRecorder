@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 import com.pilerks1.hdrrecorder.ui.helpers.ActivityOrientationManagement
 import com.pilerks1.hdrrecorder.ui.helpers.DisplayRotationListener
 import com.pilerks1.hdrrecorder.ui.helpers.HdrBrightnessManagement
@@ -47,10 +48,14 @@ import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModelFactory
 /** Main camera surface. UI geometry and CameraX output rotation intentionally stay separate. */
 @OptIn(ExperimentalCamera2Interop::class)
 @Composable
-fun CameraUI(
+internal fun CameraUI(
+    cameraRuntime: CameraRuntime,
     onNavigateToCompatibility: () -> Unit,
     viewModel: CameraViewModel = viewModel(
-        factory = CameraViewModelFactory(LocalContext.current.applicationContext as Application)
+        factory = CameraViewModelFactory(
+            application = LocalContext.current.applicationContext as Application,
+            cameraRuntime = cameraRuntime
+        )
     )
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -119,6 +124,7 @@ fun CameraUI(
                 } else null
                 PreviewUI(
                     surfaceRequest = surfaceRequest,
+                    placeholderLabel = uiState.previewPlaceholderLabel,
                     stats = actions.stats,
                     isRecording = uiState.isRecording,
                     expandedPanelBounds = expandedBounds,
@@ -212,7 +218,9 @@ fun CameraUI(
                 onForceDisplaySdrChange = { actions.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
                 storageUri = uiState.storageUri,
                 onStorageUriSelected = { actions.onEvent(CameraUiEvent.SetStorageUri(it)) },
-                onNavigateToCompatibility = onNavigateToCompatibility,
+                onNavigateToCompatibility = {
+                    if (uiState.isCameraHardwareEnabled) onNavigateToCompatibility()
+                },
                 onClose = { actions.onEvent(CameraUiEvent.CloseSettings) }
             )
         }

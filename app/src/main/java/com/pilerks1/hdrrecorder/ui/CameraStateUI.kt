@@ -89,6 +89,8 @@ data class CameraUiState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
     val isLowLightBoostActive: Boolean = false,
+    val isCameraHardwareEnabled: Boolean = true,
+    val previewPlaceholderLabel: String? = null,
 
     // Settings / Configuration
     val selectedFps: Int = 30,
