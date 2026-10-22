@@ -1,8 +1,6 @@
 package com.pilerks1.hdrrecorder.ui
 
 import android.app.Application
-import androidx.annotation.OptIn
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -46,7 +44,6 @@ import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModel
 import com.pilerks1.hdrrecorder.ui.viewmodels.CameraViewModelFactory
 
 /** Main camera surface. UI geometry and CameraX output rotation intentionally stay separate. */
-@OptIn(ExperimentalCamera2Interop::class)
 @Composable
 internal fun CameraUI(
     cameraRuntime: CameraRuntime,

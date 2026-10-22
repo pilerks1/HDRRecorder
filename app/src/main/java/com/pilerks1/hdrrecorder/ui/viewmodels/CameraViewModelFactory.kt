@@ -1,7 +1,8 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
 import android.app.Application
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
+import com.pilerks1.hdrrecorder.data.camera.core.CameraResultReader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.pilerks1.hdrrecorder.data.CameraManager
@@ -18,7 +19,6 @@ import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
  * Because the ViewModel survives configuration changes, the camera/preview is not rebuilt
  * on rotation.
  */
-@ExperimentalCamera2Interop
 internal class CameraViewModelFactory(
     private val application: Application,
     private val cameraRuntime: CameraRuntime
@@ -30,9 +30,11 @@ internal class CameraViewModelFactory(
         }
         val telemetryStore = TelemetryStore()
         val statsManager = StatsManager(application, telemetryStore)
-        val telemetryCoordinator = TelemetryCoordinator(telemetryStore, statsManager)
+        val resultReader = CameraResultReader()
+        val telemetryCoordinator = TelemetryCoordinator(telemetryStore, statsManager, resultReader)
+        val controlCoordinator = CameraControlCoordinator(resultReader)
         val preferencesManager = PreferencesManager(application)
-        val cameraManager = CameraManager(application, telemetryCoordinator)
+        val cameraManager = CameraManager(application, telemetryCoordinator, controlCoordinator)
         val recordingManager = RecordingManager(application, statsManager)
 
         @Suppress("UNCHECKED_CAST")
@@ -43,6 +45,7 @@ internal class CameraViewModelFactory(
             preferencesManager = preferencesManager,
             cameraManager = cameraManager,
             recordingManager = recordingManager,
+            controlCoordinator = controlCoordinator,
             cameraRuntime = cameraRuntime
         ) as T
     }

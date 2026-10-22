@@ -72,13 +72,17 @@ data class CameraLayoutSpec(
 )
 
 /** Pure responsive geometry used by the Compose camera layout and JVM tests. */
+/** Shared by button rendering and the layout space reserved for those buttons. */
+object PrimaryActionSizes {
+    const val RECORD_BUTTON_DP = 56f
+    const val SECONDARY_ACTION_DP = 36f
+}
+
 object CameraLayoutCalculator {
     private const val PREFERRED_BUTTON_DP = 54f
     private const val MIN_BUTTON_DP = 36f
     private const val PRIMARY_ACTION_INSET_DP = 4f
     private const val STATS_GAP_DP = 2f
-    private const val RECORD_BUTTON_DP = 48f
-    private const val SECONDARY_ACTION_DP = 32f
     private const val PRIMARY_ACTION_GAP_DP = 0f
     private const val LOW_LIGHT_BOOST_INDICATOR_DP = 16f
     private const val LOW_LIGHT_BOOST_INDICATOR_INSET_DP = 8f
@@ -334,8 +338,9 @@ object CameraLayoutCalculator {
         density: Float
     ): LayoutRect {
         val inset = PRIMARY_ACTION_INSET_DP * density
-        val recordSize = RECORD_BUTTON_DP * density
-        val secondarySize = SECONDARY_ACTION_DP * density
+        val recordSize = PrimaryActionSizes.RECORD_BUTTON_DP * density
+        val secondarySize = PrimaryActionSizes.SECONDARY_ACTION_DP * density
+        val crossSize = maxOf(recordSize, secondarySize)
         val gap = PRIMARY_ACTION_GAP_DP * density
         val groupLength = recordSize + gap + secondarySize
         val panelLength = primaryLength(expandedPanel, axis)
@@ -350,7 +355,7 @@ object CameraLayoutCalculator {
         return if (axis.usesVerticalTrack) {
             val top = preview.top + (preview.height - groupLength) / 2f
             LayoutRect(
-                trailingBoundary - inset - recordSize,
+                trailingBoundary - inset - crossSize,
                 top,
                 trailingBoundary - inset,
                 top + groupLength
@@ -359,7 +364,7 @@ object CameraLayoutCalculator {
             val left = preview.left + (preview.width - groupLength) / 2f
             LayoutRect(
                 left,
-                trailingBoundary - inset - recordSize,
+                trailingBoundary - inset - crossSize,
                 left + groupLength,
                 trailingBoundary - inset
             )

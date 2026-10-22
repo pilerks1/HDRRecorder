@@ -34,7 +34,10 @@ import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
-private data class EffectiveWhiteBalance(val temperatureKelvin: Int, val tint: Int)
+private data class EffectiveWhiteBalance(
+    val temperatureKelvin: Int?,
+    val tint: Int?
+)
 
 fun availableControlPanels(
     caps: CameraCapabilities?
@@ -246,14 +249,18 @@ fun ActiveControlPanel(
             }
             ManualControl.SHUTTER -> {
                 val scale = remember(caps?.ssRangeNanos) { SliderScales.shutter(caps) }
-                val effective = telemetry.shutterNanos ?: state.ssValueNanos ?: scale.fallbackValue
+                val effective = if (state.isManualSs) state.ssValueNanos else telemetry.shutterNanos
                 StandardSlider(
                     scale = scale,
                     binding = StandardSliderBinding(
                         isManual = state.isManualSs,
-                        effectiveValue = if (state.isManualSs) state.ssValueNanos ?: effective else effective,
+                        effectiveValue = effective,
                         onToggleAuto = {
-                            if (state.isManualSs) onSetSs(false, null) else onSetSs(true, effective)
+                            if (state.isManualSs) {
+                                onSetSs(false, null)
+                            } else {
+                                effective?.let { onSetSs(true, it) }
+                            }
                         },
                         onManualValue = { onSetSs(true, it) }
                     ),
@@ -305,14 +312,22 @@ fun ActiveControlPanel(
             }
             ManualControl.FOCUS -> {
                 val scale = remember(caps?.focusMinDistanceDiopters) { SliderScales.focus(caps) }
-                val effective = telemetry.focusDistanceDiopters ?: state.focusDistanceDiopters ?: scale.fallbackValue
+                val effective = if (state.isManualFocus) {
+                    state.focusDistanceDiopters
+                } else {
+                    telemetry.focusDistanceDiopters
+                }
                 StandardSlider(
                     scale = scale,
                     binding = StandardSliderBinding(
                         isManual = state.isManualFocus,
-                        effectiveValue = if (state.isManualFocus) state.focusDistanceDiopters ?: effective else effective,
+                        effectiveValue = effective,
                         onToggleAuto = {
-                            if (state.isManualFocus) onSetFocus(false, null) else onSetFocus(true, effective)
+                            if (state.isManualFocus) {
+                                onSetFocus(false, null)
+                            } else {
+                                effective?.let { onSetFocus(true, it) }
+                            }
                         },
                         onManualValue = { onSetFocus(true, it) }
                     ),
@@ -322,17 +337,26 @@ fun ActiveControlPanel(
             }
             ManualControl.WHITE_BALANCE -> {
                 val scale = remember(caps?.cctTemperatureRange) { SliderScales.whiteBalance(caps) }
-                val effective = resolveEffectiveWhiteBalance(state, telemetry, caps)
+                val effective = resolveEffectiveWhiteBalance(state, telemetry)
                 StandardSlider(
                     scale = scale,
                     binding = StandardSliderBinding(
                         isManual = state.isManualWb,
-                        effectiveValue = if (state.isManualWb) state.wbTemp ?: effective.temperatureKelvin else effective.temperatureKelvin,
+                        effectiveValue = effective.temperatureKelvin,
                         onToggleAuto = {
-                            if (state.isManualWb) onSetWb(false, null, null)
-                            else onSetWb(true, effective.temperatureKelvin, effective.tint)
+                            if (state.isManualWb) {
+                                onSetWb(false, null, null)
+                            } else {
+                                val temperature = effective.temperatureKelvin
+                                val tint = effective.tint
+                                if (temperature != null && tint != null) {
+                                    onSetWb(true, temperature, tint)
+                                }
+                            }
                         },
-                        onManualValue = { onSetWb(true, it, effective.tint) }
+                        onManualValue = { temperature ->
+                            effective.tint?.let { tint -> onSetWb(true, temperature, tint) }
+                        }
                     ),
                     axis = axis,
                     onInteractionFinished = onManualControlInteractionFinished
@@ -340,18 +364,27 @@ fun ActiveControlPanel(
             }
             ManualControl.TINT -> {
                 val scale = remember { SliderScales.tint() }
-                val effective = resolveEffectiveWhiteBalance(state, telemetry, caps)
+                val effective = resolveEffectiveWhiteBalance(state, telemetry)
                 StandardSlider(
                     scale = scale,
                     binding = StandardSliderBinding(
                         isManual = state.isManualWb,
-                        effectiveValue = if (state.isManualWb) state.wbTint ?: effective.tint else effective.tint,
+                        effectiveValue = effective.tint,
                         onToggleAuto = {
-                            if (state.isManualWb) onSetWb(false, null, null)
-                            else onSetWb(true, effective.temperatureKelvin, effective.tint)
+                            if (state.isManualWb) {
+                                onSetWb(false, null, null)
+                            } else {
+                                val temperature = effective.temperatureKelvin
+                                val tint = effective.tint
+                                if (temperature != null && tint != null) {
+                                    onSetWb(true, temperature, tint)
+                                }
+                            }
                         },
-                        onManualValue = {
-                            onSetWb(true, state.wbTemp ?: effective.temperatureKelvin, it)
+                        onManualValue = { tint ->
+                            effective.temperatureKelvin?.let { temperature ->
+                                onSetWb(true, temperature, tint)
+                            }
                         }
                     ),
                     axis = axis,
@@ -439,17 +472,19 @@ private fun <T : Any> StandardSlider(
     enabled: Boolean = true,
     onInteractionFinished: () -> Unit
 ) {
+    val effectiveValue = binding.effectiveValue
+    val hasValue = effectiveValue != null
     BaseSlider(
-        value = scale.progress(binding.effectiveValue),
+        value = effectiveValue?.let(scale::progress) ?: 0f,
         axis = axis,
-        labelString = scale.formatValue(binding.effectiveValue),
-        ticks = scale.ticks,
-        layoutLabels = scale.layoutLabels,
+        labelString = effectiveValue?.let(scale.formatValue) ?: "—",
+        ticks = if (hasValue) scale.ticks else emptyList(),
+        layoutLabels = if (hasValue) scale.layoutLabels else listOf("—"),
         onValueChange = { binding.onManualValue(scale.value(it)) },
         onValueChangeFinished = onInteractionFinished,
         modifier = modifier,
-        sliderEnabled = enabled,
-        primaryButtonEnabled = enabled,
+        sliderEnabled = enabled && hasValue,
+        primaryButtonEnabled = enabled && (hasValue || binding.isManual),
         primaryButtonText = if (binding.isManual) "MAN" else "AUTO",
         primaryButtonColor = if (binding.isManual) Color.DarkGray else Color.White,
         primaryButtonTextColor = if (binding.isManual) Color.White else Color.Black,
@@ -472,20 +507,19 @@ private fun IsoPanel(
     onInteractionFinished: () -> Unit
 ) {
     val isoScale = remember(caps?.isoRange) { SliderScales.iso(caps) }
-    val effectiveIso = telemetry.iso ?: state.isoValue ?: isoScale.fallbackValue
+    val effectiveIso = if (state.isManualIso) state.isoValue else telemetry.iso
     val sensorSlider: @Composable (Modifier) -> Unit = { modifier ->
         StandardSlider(
             scale = isoScale,
             binding = StandardSliderBinding(
                 isManual = state.isManualIso,
-                effectiveValue = if (state.isManualIso) {
-                    state.isoValue ?: effectiveIso
-                } else {
-                    effectiveIso
-                },
+                effectiveValue = effectiveIso,
                 onToggleAuto = {
-                    if (state.isManualIso) onSetIso(false, null)
-                    else onSetIso(true, effectiveIso)
+                    if (state.isManualIso) {
+                        onSetIso(false, null)
+                    } else {
+                        effectiveIso?.let { onSetIso(true, it) }
+                    }
                 },
                 onManualValue = { onSetIso(true, it) }
             ),
@@ -504,24 +538,22 @@ private fun IsoPanel(
     val postScale = remember(caps.postRawSensitivityBoostRange) {
         SliderScales.postRawSensitivity(caps)
     }
-    val effectivePost = telemetry.postRawSensitivityBoost
-        ?: state.postRawSensitivityBoost
-        ?: postScale.fallbackValue
+    val effectivePost = if (state.isManualPostRawSensitivity) {
+        state.postRawSensitivityBoost
+    } else {
+        telemetry.postRawSensitivityBoost
+    }
     val postSlider: @Composable (Modifier) -> Unit = { modifier ->
         StandardSlider(
             scale = postScale,
             binding = StandardSliderBinding(
                 isManual = state.isManualPostRawSensitivity,
-                effectiveValue = if (state.isManualPostRawSensitivity) {
-                    state.postRawSensitivityBoost ?: effectivePost
-                } else {
-                    effectivePost
-                },
+                effectiveValue = effectivePost,
                 onToggleAuto = {
                     if (state.isManualPostRawSensitivity) {
                         onSetPostRawSensitivity(false, null)
                     } else {
-                        onSetPostRawSensitivity(true, effectivePost)
+                        effectivePost?.let { onSetPostRawSensitivity(true, it) }
                     }
                 },
                 onManualValue = { onSetPostRawSensitivity(true, it) }
@@ -548,12 +580,8 @@ private fun IsoPanel(
 
 private fun resolveEffectiveWhiteBalance(
     state: ManualControlsState,
-    telemetry: CameraTelemetry,
-    caps: CameraCapabilities?
+    telemetry: CameraTelemetry
 ): EffectiveWhiteBalance = EffectiveWhiteBalance(
-    temperatureKelvin = telemetry.cctTemperatureKelvin
-        ?: state.wbTemp
-        ?: caps?.cctTemperatureRange?.let { (it.lower + it.upper) / 2 }
-        ?: 5000,
-    tint = telemetry.cctTint ?: state.wbTint ?: 0
+    temperatureKelvin = if (state.isManualWb) state.wbTemp else telemetry.cctTemperatureKelvin,
+    tint = if (state.isManualWb) state.wbTint else telemetry.cctTint
 )

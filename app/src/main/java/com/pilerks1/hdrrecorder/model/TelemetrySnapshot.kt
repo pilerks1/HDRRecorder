@@ -38,18 +38,7 @@ data class CameraSample(
         cctTint = cctTint
     )
 
-    fun asExposureCaptureResult(): ExposureCaptureResult? {
-        if (frameNumber < 0L) return null
-        return ExposureCaptureResult(
-            frameNumber = frameNumber,
-            sensorSensitivityIso = sensorSensitivityIso,
-            postRawSensitivityBoost = postRawSensitivityBoost,
-            shutterNanos = shutterNanos,
-            frameDurationNanos = frameDurationNanos,
-            aeState = aeState,
-            aeLocked = aeLocked
-        )
-    }
+
 }
 
 data class RecordingSample(

@@ -3,79 +3,51 @@ package com.pilerks1.hdrrecorder.data.camera
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.os.Build
-import android.util.Range
-import android.util.Rational
-import androidx.annotation.OptIn
-import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
-import androidx.camera.core.CameraInfo
+import com.pilerks1.hdrrecorder.data.camera.core.CameraMetadata as ReportedCameraMetadata
+import com.pilerks1.hdrrecorder.data.camera.core.DeviceCompatibilityChecker
 
 /**
  * Data class representing the physical limits of the active camera hardware.
  */
-data class CameraCapabilities(
-    val isoRange: Range<Int>? = null,
-    val postRawSensitivityBoostRange: Range<Int>? = null,
-    val ssRangeNanos: Range<Long>? = null,
-    val evRange: Range<Int>? = null,
-    val evStep: Rational? = null,
-    val focusMinDistanceDiopters: Float = 0f,
-    val fpsRanges: List<Range<Int>> = emptyList(),
-    val maxFrameDurationNanos: Long? = null,
-    val supportsManualSensor: Boolean = false,
-    val supportsFullManualExposure: Boolean = false,
-    val hasManualIsoControl: Boolean = false,
-    val hasManualShutterControl: Boolean = false,
-    val hasExposureCompensationControl: Boolean = false,
-    val hasManualFocusControl: Boolean = false,
-    val supportsCCT: Boolean = false,
-    val cctTemperatureRange: Range<Int>? = null,
-    val supportsShutterPriorityAe: Boolean = false,
-    val supportsIsoPriorityAe: Boolean = false,
-    val supportsAeLock: Boolean = false,
-    val supportsPostRawSensitivityBoost: Boolean = false,
-    val supportsLowLightBoost: Boolean = false
-)
+typealias CameraCapabilities = com.pilerks1.hdrrecorder.data.camera.core.CameraCapabilities
 
 object CameraCapabilitiesManager {
 
     /**
-     * Extracts deep manual control limits from CameraX's CameraInfo wrapper.
+     * Projects reported Camera2 metadata and separately supplied CameraX support into app controls.
      */
-    @OptIn(ExperimentalCamera2Interop::class)
-    fun extractCapabilities(cameraInfo: CameraInfo): CameraCapabilities {
-        val camera2Info = Camera2CameraInfo.from(cameraInfo)
+    fun extractCapabilities(camera2Info: ReportedCameraMetadata, supportsLowLightBoost: Boolean): CameraCapabilities {
         
         // 1. ISO (Sensitivity)
-        val isoRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-        val postRawSensitivityBoostRange = camera2Info.getCameraCharacteristic(
+        val isoRange = camera2Info.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val postRawSensitivityBoostRange = camera2Info.get(
             CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE
         )
         
         // 2. Shutter Speed (Exposure Time in Nanos)
-        val ssRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        val ssRange = camera2Info.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
         
         // 3. Focus Distance (Diopters)
-        val minFocus = camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        val minFocus = camera2Info.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
         
         // 4. EV Compensation
-        val evRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
-        val evStep = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
+        val evRange = camera2Info.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+        val evStep = camera2Info.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
         
         // 5. FPS Ranges
-        val fpsArray = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        val fpsArray = camera2Info.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
         val fpsRanges = fpsArray?.toList() ?: emptyList()
-        val maxFrameDurationNanos = camera2Info.getCameraCharacteristic(
+        val maxFrameDurationNanos = camera2Info.get(
             CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION
         )
-        val supportsAeLock = camera2Info.getCameraCharacteristic(
+        val supportsAeLock = camera2Info.get(
             CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE
         ) == true
         val hasVariablePostRawSensitivityBoost = postRawSensitivityBoostRange?.let { range ->
             range.lower != range.upper && !(range.lower == 100 && range.upper == 100)
         } == true
 
-        val requestCapabilities = camera2Info.getCameraCharacteristic(
+        val requestCapabilities = camera2Info.get(
             CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
         )
         val supportsManualSensor = requestCapabilities
@@ -132,7 +104,7 @@ object CameraCapabilitiesManager {
             supportsIsoPriorityAe = supportsIsoPriorityAe,
             supportsAeLock = supportsAeLock,
             supportsPostRawSensitivityBoost = supportsPostRawSensitivityBoost,
-            supportsLowLightBoost = cameraInfo.isLowLightBoostSupported
+            supportsLowLightBoost = supportsLowLightBoost
         )
     }
 }

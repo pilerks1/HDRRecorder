@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.AxisStack
 import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
+import com.pilerks1.hdrrecorder.ui.layout.PrimaryActionSizes
 import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
 import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveControlPanel
 import com.pilerks1.hdrrecorder.ui.manualcontrols.SecondaryControlsRail
@@ -129,7 +130,7 @@ fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(48.dp)
+            .size(PrimaryActionSizes.RECORD_BUTTON_DP.dp)
             .clickable(enabled = uiState.isCameraReady && uiState.isCameraHardwareEnabled) {
                 if (!uiState.isSettingsSheetVisible) {
                     onEvent(CameraUiEvent.ToggleRecording)
@@ -151,7 +152,7 @@ fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Un
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(32.dp)
+                .size(PrimaryActionSizes.SECONDARY_ACTION_DP.dp)
                 .clickable { onEvent(CameraUiEvent.TogglePause) }
         ) {
             Icon(
@@ -165,7 +166,7 @@ fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Un
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(32.dp)
+                .size(PrimaryActionSizes.SECONDARY_ACTION_DP.dp)
                 .clickable { onEvent(CameraUiEvent.OpenSettings) }
         ) {
             Icon(

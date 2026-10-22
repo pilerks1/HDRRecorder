@@ -4,9 +4,16 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import android.util.Range
-import androidx.annotation.OptIn
-import androidx.camera.camera2.interop.Camera2Interop
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.camera.camera2.interop.camera2Interop
+import androidx.camera.camera2.interop.cameraId
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
+import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
+import com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager
+import com.pilerks1.hdrrecorder.data.camera.camerax.CameraXRequestBackend
+import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
+import com.pilerks1.hdrrecorder.data.camera.core.CameraFrameMetadata
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -19,6 +26,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
@@ -30,16 +39,30 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-@ExperimentalCamera2Interop
 @SuppressLint("MissingPermission")
 class CameraManager(
     private val context: Context,
-    private val telemetryCoordinator: TelemetryCoordinator
+    private val telemetryCoordinator: TelemetryCoordinator,
+    private val controls: CameraControlCoordinator
 ) {
 
     private var cameraProvider: ProcessCameraProvider? = null
-    private var camera: Camera? = null
     private var activeCameraGeneration: Long? = null
+    private var currentBind: BindRequest? = null
+    private var observedLifecycle: Lifecycle? = null
+    private val lifecycleObserver = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_STOP -> invalidateAttachment()
+            Lifecycle.Event.ON_START -> {
+                if (activeCameraGeneration == null) {
+                    val provider = cameraProvider
+                    val request = currentBind
+                    if (provider != null && request != null) bindUseCases(provider, request)
+                }
+            }
+            else -> Unit
+        }
+    }
 
     private var preview: Preview? = null
     var videoCapture: VideoCapture<Recorder>? = null
@@ -64,9 +87,10 @@ class CameraManager(
         onSurfaceRequest: (SurfaceRequest) -> Unit,
         uiState: CameraUiState,
         displayRotation: Int,
-        onCameraBound: (CameraControl, com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
+        onCameraBound: (com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
     ) {
         val request = BindRequest(lifecycleOwner, onSurfaceRequest, uiState, displayRotation, onCameraBound)
+        currentBind = request
         val readyProvider = cameraProvider
         if (readyProvider != null) {
             bindUseCases(readyProvider, request)
@@ -94,10 +118,9 @@ class CameraManager(
         }, ContextCompat.getMainExecutor(context))
     }
 
-    @OptIn(ExperimentalCamera2Interop::class)
     private fun bindUseCases(cameraProvider: ProcessCameraProvider, request: BindRequest) {
+        invalidateAttachment()
         clearLowLightBoostObserver()
-        activeCameraGeneration?.let(telemetryCoordinator::endCameraGeneration)
         cameraProvider.unbindAll()
         val cameraGeneration = telemetryCoordinator.beginCameraGeneration()
         activeCameraGeneration = cameraGeneration
@@ -148,9 +171,6 @@ class CameraManager(
             .setPreviewStabilizationEnabled(request.uiState.isStabilizationEnabled)
             .apply { requestedFrameRate?.let(::setTargetFrameRate) }
 
-        Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(
-            telemetryCoordinator.previewCaptureCallback(cameraGeneration)
-        )
 
         val newPreview = previewBuilder.build().also {
             it.setSurfaceProvider { surfaceRequest ->
@@ -177,32 +197,52 @@ class CameraManager(
             .setDynamicRange(dynamicRange)
             .apply { requestedFrameRate?.let(::setTargetFrameRate) }
 
-        Camera2Interop.Extender(videoCaptureBuilder).setSessionCaptureCallback(
-            telemetryCoordinator.videoCaptureCallback(cameraGeneration)
-        )
         val newVideoCapture = videoCaptureBuilder.build()
 
         try {
             val boundCamera = cameraProvider.bindToLifecycle(
                 request.lifecycleOwner,
                 cameraSelector,
-                newPreview,
-                newVideoCapture
+                SessionConfig.Builder(listOf(newPreview, newVideoCapture))
+                    .camera2Interop {
+                        setRepeatingCaptureCallback(cameraExecutor, object : CameraCaptureSession.CaptureCallback() {
+                            override fun onCaptureCompleted(
+                                session: CameraCaptureSession,
+                                request: CaptureRequest,
+                                result: TotalCaptureResult
+                            ) {
+                                telemetryCoordinator.acceptFrame(CameraFrameMetadata(cameraGeneration, result))
+                            }
+                        })
+                    }
+                    .build()
             )
-            camera = boundCamera
             preview = newPreview
             videoCapture = newVideoCapture
             observeLowLightBoostState(boundCamera.cameraInfo)
             
             // Extract characteristics and pass back to ViewModel
-            val caps = com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager.extractCapabilities(boundCamera.cameraInfo)
-            request.onCameraBound(boundCamera.cameraControl, caps)
+            val cameraId = boundCamera.cameraInfo.cameraId
+            val metadata = CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow()
+            val caps = CameraCapabilitiesManager.extractCapabilities(metadata, boundCamera.cameraInfo.isLowLightBoostSupported)
+            val attachment = CameraXRequestBackend(cameraId, cameraGeneration, boundCamera.cameraControl)
+            controls.attach(attachment, attachment)
+            request.onCameraBound(caps)
+            if (observedLifecycle !== request.lifecycleOwner.lifecycle) {
+                observedLifecycle?.removeObserver(lifecycleObserver)
+                observedLifecycle = request.lifecycleOwner.lifecycle
+                observedLifecycle?.addObserver(lifecycleObserver)
+            }
+            if (!request.lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                invalidateAttachment()
+            }
             
             Log.d("CameraManager", "Use cases bound successfully.")
         } catch (exc: Exception) {
+            controls.detach()
+            cameraProvider.unbindAll()
             telemetryCoordinator.endCameraGeneration(cameraGeneration)
             activeCameraGeneration = null
-            camera = null
             preview = null
             videoCapture = null
             Log.e("CameraManager", "Use case binding failed", exc)
@@ -214,30 +254,20 @@ class CameraManager(
         videoCapture?.targetRotation = rotation
     }
 
-    fun getCameraControl(): CameraControl? {
-        return camera?.cameraControl
-    }
-
-    fun setLowLightBoostEnabled(enabled: Boolean) =
-        camera?.cameraControl?.enableLowLightBoostAsync(enabled)
-
-    fun tapToMeter(meteringPoint: MeteringPoint) =
-        camera?.cameraControl?.startFocusAndMetering(
-            FocusMeteringAction.Builder(
-                meteringPoint,
-                FocusMeteringAction.FLAG_AF or
-                    FocusMeteringAction.FLAG_AE or
-                    FocusMeteringAction.FLAG_AWB
-            ).build()
-        )
-
-    fun release() {
-        clearLowLightBoostObserver()
+    private fun invalidateAttachment() {
+        controls.detach()
         activeCameraGeneration?.let(telemetryCoordinator::endCameraGeneration)
         activeCameraGeneration = null
+    }
+
+    fun release() {
+        observedLifecycle?.removeObserver(lifecycleObserver)
+        observedLifecycle = null
+        currentBind = null
+        invalidateAttachment()
+        clearLowLightBoostObserver()
         cameraExecutor.shutdown()
         pendingBind = null
-        camera = null
         preview = null
         videoCapture = null
         cameraProvider?.unbindAll()
@@ -270,6 +300,6 @@ class CameraManager(
         val onSurfaceRequest: (SurfaceRequest) -> Unit,
         val uiState: CameraUiState,
         val displayRotation: Int,
-        val onCameraBound: (CameraControl, com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
+        val onCameraBound: (com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
     )
 }

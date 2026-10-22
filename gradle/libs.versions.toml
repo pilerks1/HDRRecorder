@@ -1,14 +1,14 @@
 [versions]
 androidGradlePlugin = "9.2.1"
-kotlin = "2.4.10"
+kotlin = "2.4.21"
 kotlinx = "1.11.0"
-coreKtx = "1.19.0"
+coreKtx = "1.19.1"
 lifecycleRuntimeKtx = "2.11.0"
 lifecycleViewmodelCompose = "2.11.0"
 activityCompose = "1.13.0"
-composeBom = "2026.06.01"
-cameraX = "1.6.1"
-guava = "33.6.0-android"
+composeBom = "2026.09.00"
+cameraX = "1.7.0-rc01"
+guava = "33.7.2-android"
 junit = "4.13.2"
 
 

@@ -2,11 +2,10 @@ package com.pilerks1.hdrrecorder.compatibility
 
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
 import android.util.Log
 import android.util.Range
-import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.camera.camera2.interop.cameraId
+import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
@@ -54,7 +53,6 @@ class CcManager(private val context: Context) {
     /**
      * Performs the full compatibility scan and returns the results.
      */
-    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     suspend fun getCompatibilityData(): CompatibilityResult {
         initializeCamera()
 
@@ -79,9 +77,7 @@ class CcManager(private val context: Context) {
         val tableRows16by9 = mutableListOf<CompatibilityResult.TableRow>()
 
         // Get general device info first using the native Camera2 API
-        val androidCameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val cameraId = Camera2CameraInfo.from(cameraInfo).cameraId
-        val characteristics = androidCameraManager.getCameraCharacteristics(cameraId)
+        val characteristics = CameraCatalog.get(context).camera(cameraInfo.cameraId).metadata.getOrThrow()
         val hardwareLevel = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
 
 

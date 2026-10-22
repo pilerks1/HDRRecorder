@@ -14,7 +14,6 @@ data class SliderTick(val position: Float, val label: String)
 
 /** Immutable typed scale used by all standard single-value controls. */
 class SliderScale<T : Any>(
-    val fallbackValue: T,
     val valueToProgress: (T) -> Float,
     val progressToValue: (Float) -> T,
     val formatValue: (T) -> String,
@@ -27,7 +26,7 @@ class SliderScale<T : Any>(
 
 data class StandardSliderBinding<T : Any>(
     val isManual: Boolean,
-    val effectiveValue: T,
+    val effectiveValue: T?,
     val onToggleAuto: () -> Unit,
     val onManualValue: (T) -> Unit
 )
@@ -61,7 +60,6 @@ object SliderScales {
         }
         val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
         return SliderScale(
-            fallbackValue = 100.coerceIn(lower, upper),
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -80,7 +78,6 @@ object SliderScales {
         val format: (Int) -> String = Int::toString
         val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
         return SliderScale(
-            fallbackValue = midpoint(lower, upper),
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -108,7 +105,6 @@ object SliderScales {
         val format: (Long) -> String = ::formatShutter
         val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
         return SliderScale(
-            fallbackValue = midpoint(lower, upper),
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -154,7 +150,6 @@ object SliderScales {
             add(format(upper))
         }
         return SliderScale(
-            fallbackValue = 0.coerceIn(lower, upper),
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -177,7 +172,6 @@ object SliderScales {
             intervalCount = if (upper > 0f) MAX_TICK_COUNT - 1 else 0
         )
         return SliderScale(
-            fallbackValue = 0f,
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -196,7 +190,6 @@ object SliderScales {
         val format: (Int) -> String = Int::toString
         val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
         return SliderScale(
-            fallbackValue = midpoint(lower, upper),
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -215,7 +208,6 @@ object SliderScales {
         val format: (Int) -> String = { value -> if (value > 0) "+$value" else value.toString() }
         val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
         return SliderScale(
-            fallbackValue = 0,
             valueToProgress = toProgress,
             progressToValue = fromProgress,
             formatValue = format,
@@ -320,9 +312,6 @@ object SliderScales {
         if (upper <= lower) return lower
         return lower + progress.finiteProgress() * (upper - lower)
     }
-
-    private fun midpoint(lower: Int, upper: Int): Int = lower + (upper - lower) / 2
-    private fun midpoint(lower: Long, upper: Long): Long = lower + (upper - lower) / 2L
 
     private fun formatShutter(nanos: Long): String {
         val seconds = nanos / 1_000_000_000.0
