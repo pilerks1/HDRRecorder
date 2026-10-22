@@ -123,6 +123,11 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         }
     }
 
+    // Native zoom supersedes earlier zoom requests without waiting for exposure submissions.
+    fun setZoomRatio(ratio: Float) = cameraXControls?.setZoomRatio(ratio)
+
+    fun setLinearZoom(progress: Float) = cameraXControls?.setLinearZoom(progress)
+
     suspend fun flush() = mutex.withLock {
         if (!transitioning) desired?.let { state -> backend?.let { submit(it, state) } }
     }

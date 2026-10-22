@@ -8,6 +8,7 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import java.util.concurrent.Executor
+import kotlin.math.roundToInt
 
 /** Raw reported metadata. App control availability is a separate projection. */
 class CameraMetadata(private val characteristics: CameraCharacteristics) {
@@ -28,6 +29,23 @@ data class CameraDescriptor(
 ) {
     val lensFacing get() = metadata.getOrNull()?.get(CameraCharacteristics.LENS_FACING)
     val focalLengths get() = metadata.getOrNull()?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList()
+    val zoomRatioRange get() = metadata.getOrNull()?.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+    val maxDigitalZoom get() = metadata.getOrNull()?.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
+    val physicalCameraIds get() = metadata.getOrNull()?.physicalCameraIds.orEmpty()
+
+    /** Focal length per active sensor length: magnification, rather than a ratio of FoV angles. */
+    internal fun normalizedFocalLength(): Float? {
+        val info = metadata.getOrNull() ?: return null
+        val focalLength = focalLengths?.firstOrNull()?.takeIf { it > 0f } ?: return null
+        val sensor = info[CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE] ?: return null
+        val active = info[CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE] ?: return null
+        val pixels = info[CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE] ?: return null
+        val orientation = info[CameraCharacteristics.SENSOR_ORIENTATION] ?: return null
+        val rotated = orientation == 90 || orientation == 270
+        val length = if (rotated) sensor.height * active.height() / pixels.height
+            else sensor.width * active.width() / pixels.width
+        return (focalLength / length).takeIf { it.isFinite() && it > 0f }
+    }
 }
 
 /** Process-local catalog. Does not open cameras or change active sessions. */
@@ -73,6 +91,13 @@ class CameraCatalog private constructor(private val application: Application) {
 
     fun camera(id: String): CameraDescriptor = cameras().firstOrNull { it.id == id }
         ?: error("Camera $id is not reported by Android")
+
+    fun lensZoomRatio(id: String, referenceId: String): Float? {
+        if (id == referenceId) return 1f
+        val reference = camera(referenceId).normalizedFocalLength() ?: return null
+        val focalLength = camera(id).normalizedFocalLength() ?: return null
+        return ((focalLength / reference * 100f).roundToInt() / 100f).takeIf { it > 0f }
+    }
 
     companion object {
         @Volatile private var instance: CameraCatalog? = null

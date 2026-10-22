@@ -8,7 +8,6 @@ import androidx.camera.camera2.interop.cameraId
 import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraInfo
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.DynamicRange
 import androidx.camera.core.SessionConfig
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -19,6 +18,7 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoCapabilities
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
+import com.pilerks1.hdrrecorder.data.camera.RearLensRepository
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.Resolution
 import android.media.CamcorderProfile
@@ -43,10 +43,9 @@ class CcManager(private val context: Context) {
      */
     private suspend fun initializeCamera() {
         cameraProvider = CameraProviderRepository.awaitProvider(context)
-        // Get the CameraInfo for the first available back camera.
-        cameraInfo = cameraProvider.availableCameraInfos.first {
-            it.lensFacing == CameraSelector.LENS_FACING_BACK
-        }
+        val repository = RearLensRepository(context)
+        val inventory = repository.discover(cameraProvider)
+        cameraInfo = repository.defaultCameraInfo(cameraProvider, inventory)
         videoCapabilities = Recorder.getVideoCapabilities(cameraInfo)
     }
 

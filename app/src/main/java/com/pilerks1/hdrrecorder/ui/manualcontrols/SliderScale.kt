@@ -1,6 +1,8 @@
 package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
+import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.floor
@@ -36,6 +38,45 @@ object SliderScales {
     private const val LABEL_INTERVAL = 2
     private const val MAX_EV_MAJOR_LABEL_COUNT = 7
     private const val MAX_ISO_LIVE_LABEL = "99999"
+
+    fun formatZoomFactor(ratio: Float): String =
+        String.format(Locale.US, "%.2f", ratio).trimEnd('0').trimEnd('.') + "x"
+
+    fun zoom(state: CameraZoomState = CameraZoomState()): SliderScale<Float> {
+        val lower = state.minRatio
+        val upper = state.maxRatio
+        val lensRatios = state.inventory?.buttonLenses.orEmpty().mapNotNull { it.zoomRatio }
+            .filter { it in lower..upper }
+        val toProgress: (Float) -> Float = { ZoomMapping.progress(it, lower, upper) }
+        val fromProgress: (Float) -> Float = { ZoomMapping.ratio(it, lower, upper) }
+        val format: (Float) -> String = { String.format(Locale.US, "%.2fx", it) }
+        val ticks = uniformTicks(
+            fromProgress,
+            ::formatZoomFactor,
+            if (upper > lower) MAX_TICK_COUNT - 1 else 0
+        ).toMutableList()
+        val availableIndices = ticks.indices.toMutableSet()
+        // Keep 15 ticks, placing the nearest tick at each exact lens position.
+        lensRatios.forEach { ratio ->
+            val position = toProgress(ratio)
+            val index = availableIndices.minByOrNull { abs(ticks[it].position - position) }
+            val tick = SliderTick(position, formatZoomFactor(ratio))
+            if (index != null) {
+                ticks[index] = tick
+                availableIndices.remove(index)
+            } else {
+                // A device with more lenses than standard ticks still marks every lens.
+                ticks.add(tick)
+            }
+        }
+        return SliderScale(
+            valueToProgress = toProgress,
+            progressToValue = fromProgress,
+            formatValue = format,
+            ticks = ticks.sortedBy(SliderTick::position),
+            layoutLabels = layoutLabels(ticks, "—", format(lower), format(upper), *lensRatios.map(format).toTypedArray())
+        )
+    }
 
     fun iso(caps: CameraCapabilities?): SliderScale<Int> =
         isoRange(

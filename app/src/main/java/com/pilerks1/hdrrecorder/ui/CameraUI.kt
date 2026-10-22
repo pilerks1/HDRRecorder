@@ -96,7 +96,7 @@ internal fun CameraUI(
             .background(Color.Black)
     ) {
         val controlPanels = availableControlPanels(uiState.cameraCapabilities)
-        val panelSizing = rememberSliderPaneSizing(controlPanels, uiState.cameraCapabilities)
+        val panelSizing = rememberSliderPaneSizing(controlPanels, uiState.cameraCapabilities, uiState.zoomState)
         CameraSlotsLayout(
             aspectRatio = uiState.selectedAspectRatio,
             secondaryButtonCount = controlPanels.size,

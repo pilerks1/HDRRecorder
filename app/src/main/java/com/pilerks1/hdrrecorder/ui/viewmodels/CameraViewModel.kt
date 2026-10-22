@@ -103,6 +103,7 @@ internal class CameraViewModel(
         collectRecordingState()
         collectLowLightBoostState()
         collectControlErrors()
+        collectZoomState()
         statsManager.setRecordingState(false, requestedFpsForStats(), Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
     }
 
@@ -227,6 +228,12 @@ internal class CameraViewModel(
             }
             is CameraUiEvent.SetStabilization -> updateSettingsAndSave(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
             is CameraUiEvent.SetLowLightBoost -> setLowLightBoostRequested(event.enabled)
+            is CameraUiEvent.SetLinearZoom -> {
+                if (cameraRuntime.usesCameraHardware) {
+                    cameraManager.setLinearZoom(event.progress)
+                }
+            }
+            is CameraUiEvent.SelectZoomLens -> selectZoomLens(event.cameraId)
 
             // SDR Hacks (auto-saved)
             is CameraUiEvent.SetSdrToneMap -> updateSettingsAndSave(requiresHardRebind = true) {
@@ -314,6 +321,12 @@ internal class CameraViewModel(
             recordingManager.pauseRecording()
         }
         _uiState.update { it.copy(isPaused = !it.isPaused) }
+    }
+
+    private fun selectZoomLens(cameraId: String) {
+        val lens = _uiState.value.zoomState.inventory?.buttonLenses
+            ?.firstOrNull { it.cameraId == cameraId } ?: return
+        lens.zoomRatio?.let(cameraManager::setZoomRatio)
     }
 
     fun updateManualControls(updater: (ManualControlsState) -> ManualControlsState) {
@@ -688,6 +701,26 @@ internal class CameraViewModel(
         viewModelScope.launch {
             cameraManager.isLowLightBoostActive.collect { active ->
                 _uiState.update { it.copy(isLowLightBoostActive = active) }
+            }
+        }
+    }
+
+    private fun collectZoomState() {
+        if (!cameraRuntime.usesCameraHardware) return
+        viewModelScope.launch {
+            cameraManager.zoomState.collect { zoom ->
+                _uiState.update { it.copy(zoomState = zoom, isCameraReady = zoom.isReady) }
+            }
+        }
+        viewModelScope.launch {
+            cameraManager.cameraError.collect { error ->
+                if (error != null) {
+                    Log.w("CameraViewModel", error)
+                    val actualZoom = cameraManager.zoomState.value
+                    _uiState.update {
+                        it.copy(exposureTransitionMessage = error, zoomState = actualZoom, isCameraReady = actualZoom.isReady)
+                    }
+                }
             }
         }
     }

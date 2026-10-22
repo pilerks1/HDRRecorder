@@ -183,7 +183,8 @@ object ManualControlStateUpdater {
         panel: CameraControlPanel,
         caps: CameraCapabilities
     ): Boolean = when (panel) {
-        CameraControlPanel.RESOLUTION -> true
+        CameraControlPanel.RESOLUTION,
+        CameraControlPanel.ZOOM -> true
         CameraControlPanel.ISO -> caps.hasManualIsoControl
         CameraControlPanel.SHUTTER -> caps.hasManualShutterControl
         CameraControlPanel.EXPOSURE_COMPENSATION ->

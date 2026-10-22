@@ -14,6 +14,10 @@ import com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager
 import com.pilerks1.hdrrecorder.data.camera.camerax.CameraXRequestBackend
 import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
 import com.pilerks1.hdrrecorder.data.camera.core.CameraFrameMetadata
+import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
+import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
+import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
+import com.pilerks1.hdrrecorder.data.camera.RearLensRepository
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -49,6 +53,15 @@ class CameraManager(
     private var cameraProvider: ProcessCameraProvider? = null
     private var activeCameraGeneration: Long? = null
     private var currentBind: BindRequest? = null
+    private val rearLenses = RearLensRepository(context)
+    private val _zoomState = MutableStateFlow(CameraZoomState())
+    val zoomState = _zoomState.asStateFlow()
+    private val _cameraError = MutableStateFlow<String?>(null)
+    val cameraError = _cameraError.asStateFlow()
+    private var zoomSource: LiveData<ZoomState>? = null
+    private var zoomObserver: Observer<ZoomState>? = null
+    private var zoomRevision = 0L
+    private var confirmedZoomRatio = 1f
     private var observedLifecycle: Lifecycle? = null
     private val lifecycleObserver = LifecycleEventObserver { _, event ->
         when (event) {
@@ -119,15 +132,18 @@ class CameraManager(
     }
 
     private fun bindUseCases(cameraProvider: ProcessCameraProvider, request: BindRequest) {
+        val inventory = try {
+            rearLenses.discover(cameraProvider)
+        } catch (error: Exception) {
+            _cameraError.value = error.message ?: "Unable to discover rear lenses"
+            return
+        }
+        val cameraSelector = rearLenses.defaultCameraInfo(cameraProvider, inventory).cameraSelector
         invalidateAttachment()
         clearLowLightBoostObserver()
         cameraProvider.unbindAll()
         val cameraGeneration = telemetryCoordinator.beginCameraGeneration()
         activeCameraGeneration = cameraGeneration
-
-        val cameraSelector = CameraSelector.Builder()
-            .requireLensFacing(CameraSelector.LENS_FACING_BACK)
-            .build()
 
         // --- Dynamic Range Resolution ---
         // Map the Color Format UI selection to CameraX's exact 10-bit HDR Encodings
@@ -227,7 +243,12 @@ class CameraManager(
             val caps = CameraCapabilitiesManager.extractCapabilities(metadata, boundCamera.cameraInfo.isLowLightBoostSupported)
             val attachment = CameraXRequestBackend(cameraId, cameraGeneration, boundCamera.cameraControl)
             controls.attach(attachment, attachment)
+            observeZoom(boundCamera.cameraInfo, inventory)
+            val savedZoom = request.uiState.zoomState.ratio.coerceIn(_zoomState.value.minRatio, _zoomState.value.maxRatio)
+            confirmedZoomRatio = _zoomState.value.ratio
+            currentBind = request.copy(uiState = request.uiState.copy(zoomState = _zoomState.value.copy(ratio = savedZoom)))
             request.onCameraBound(caps)
+            setZoomRatio(savedZoom)
             if (observedLifecycle !== request.lifecycleOwner.lifecycle) {
                 observedLifecycle?.removeObserver(lifecycleObserver)
                 observedLifecycle = request.lifecycleOwner.lifecycle
@@ -246,7 +267,64 @@ class CameraManager(
             preview = null
             videoCapture = null
             Log.e("CameraManager", "Use case binding failed", exc)
+            _cameraError.value = "Unable to bind camera: ${exc.message ?: "binding failed"}"
+            invalidateAttachment()
         }
+    }
+
+    private fun observeZoom(
+        info: CameraInfo,
+        inventory: com.pilerks1.hdrrecorder.data.camera.core.RearLensInventory
+    ) {
+        val source = info.zoomState
+        val observer = Observer<ZoomState> { state ->
+            _zoomState.value = CameraZoomState(
+                inventory = inventory,
+                ratio = state.zoomRatio,
+                minRatio = state.minZoomRatio,
+                maxRatio = state.maxZoomRatio,
+                isReady = true
+            )
+        }
+        zoomSource = source
+        zoomObserver = observer
+        source.observeForever(observer)
+    }
+
+    fun setLinearZoom(progress: Float) = submitZoom(progress, linear = true)
+
+    fun setZoomRatio(ratio: Float) = submitZoom(ratio, linear = false)
+
+    private fun submitZoom(value: Float, linear: Boolean) {
+        val state = _zoomState.value
+        if (!state.isReady || !value.isFinite()) return
+        val ratio = if (linear) ZoomMapping.ratio(value, state.minRatio, state.maxRatio)
+            else value.coerceIn(state.minRatio, state.maxRatio)
+        val revision = ++zoomRevision
+        val generation = activeCameraGeneration
+        val future = if (linear) controls.setLinearZoom(value.coerceIn(0f, 1f))
+            else controls.setZoomRatio(ratio)
+        future ?: return
+        fun rememberRatio(ratio: Float) {
+            currentBind = currentBind?.let { it.copy(uiState = it.uiState.copy(zoomState = state.copy(ratio = ratio))) }
+        }
+        rememberRatio(ratio)
+        future.addListener({
+            if (revision == zoomRevision && generation == activeCameraGeneration) {
+                try {
+                    future.get()
+                    confirmedZoomRatio = ratio
+                } catch (error: Exception) {
+                    val cause = error.cause ?: error
+                    if (cause !is CameraControl.OperationCanceledException && cause !is CameraRequestSupersededException) {
+                        val restored = confirmedZoomRatio.coerceIn(state.minRatio, state.maxRatio)
+                        _zoomState.value = _zoomState.value.copy(ratio = restored)
+                        rememberRatio(restored)
+                        _cameraError.value = "Unable to apply zoom: ${cause.message}"
+                    }
+                }
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     fun updateRotation(rotation: Int) {
@@ -255,6 +333,11 @@ class CameraManager(
     }
 
     private fun invalidateAttachment() {
+        zoomRevision++
+        zoomObserver?.let { observer -> zoomSource?.removeObserver(observer) }
+        zoomSource = null
+        zoomObserver = null
+        _zoomState.value = _zoomState.value.copy(isReady = false)
         controls.detach()
         activeCameraGeneration?.let(telemetryCoordinator::endCameraGeneration)
         activeCameraGeneration = null

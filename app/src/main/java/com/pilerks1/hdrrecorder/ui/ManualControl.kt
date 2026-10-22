@@ -13,6 +13,7 @@ enum class ManualControl {
 /** Every translucent panel that can be opened from the secondary-control rail. */
 enum class CameraControlPanel(val gridLabel: String, val manualControl: ManualControl? = null) {
     RESOLUTION("RES"),
+    ZOOM("ZOM"),
     ISO("ISO", ManualControl.ISO),
     SHUTTER("SS", ManualControl.SHUTTER),
     EXPOSURE_COMPENSATION("EV", ManualControl.EXPOSURE_COMPENSATION),

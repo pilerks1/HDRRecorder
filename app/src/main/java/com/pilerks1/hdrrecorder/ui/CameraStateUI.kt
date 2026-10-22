@@ -6,6 +6,7 @@ import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import android.util.Range
+import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
 
 /**
  * Represents the state of all manual controls.
@@ -104,6 +105,7 @@ data class CameraUiState(
     // Manual Controls
     val manualControlsState: ManualControlsState = ManualControlsState(),
     val cameraCapabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities? = null,
+    val zoomState: CameraZoomState = CameraZoomState(),
 
     // Video Settings
     val isNoiseReductionEnabled: Boolean = true,
@@ -138,6 +140,8 @@ sealed interface CameraUiEvent {
     data object CycleFps : CameraUiEvent
     data object CycleResolution : CameraUiEvent
     data object CycleAspectRatio : CameraUiEvent
+    data class SetLinearZoom(val progress: Float) : CameraUiEvent
+    data class SelectZoomLens(val cameraId: String) : CameraUiEvent
     data class SetLowLightBoost(val enabled: Boolean) : CameraUiEvent
 
     // Color Events

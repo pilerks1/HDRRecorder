@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
 import com.pilerks1.hdrrecorder.ui.CameraControlPanel
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.CameraLayoutCalculator
@@ -55,12 +56,13 @@ internal data class SliderPaneSizing(
 @Composable
 internal fun rememberSliderPaneSizing(
     panels: List<CameraControlPanel>,
-    caps: CameraCapabilities?
+    caps: CameraCapabilities?,
+    zoomState: CameraZoomState = CameraZoomState()
 ): SliderPaneSizing {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
 
-    return remember(panels, caps, density, textMeasurer) {
+    return remember(panels, caps, zoomState.minRatio, zoomState.maxRatio, zoomState.inventory, density, textMeasurer) {
         val orientations = listOf(
             CameraLayoutCalculator.axisFor(1, 2),
             CameraLayoutCalculator.axisFor(2, 1)
@@ -68,7 +70,7 @@ internal fun rememberSliderPaneSizing(
         SliderPaneSizing(
             thicknesses = orientations.associate { axis ->
                 axis.orientation to panels.associateWith { panel ->
-                    val scale = panelScale(panel, caps)
+                    val scale = panelScale(panel, caps, zoomState)
                     val liveLabels = scale?.layoutLabels ?: fpsLayoutLabels(caps)
                     val tickLabels = scale?.ticks
                         ?.map(SliderTick::label)
@@ -205,9 +207,11 @@ internal fun rangePaneThicknessPx(
 
 private fun panelScale(
     panel: CameraControlPanel,
-    caps: CameraCapabilities?
+    caps: CameraCapabilities?,
+    zoomState: CameraZoomState
 ): SliderScale<*>? = when (panel) {
     CameraControlPanel.RESOLUTION -> null
+    CameraControlPanel.ZOOM -> SliderScales.zoom(zoomState)
     CameraControlPanel.ISO -> SliderScales.iso(caps)
     CameraControlPanel.SHUTTER -> SliderScales.shutter(caps)
     CameraControlPanel.EXPOSURE_COMPENSATION -> SliderScales.exposureCompensation(caps)

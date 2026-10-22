@@ -28,6 +28,7 @@ import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.ui.CameraControlPanel
 import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
+import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
 import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
@@ -59,6 +60,7 @@ internal fun orderedControlPanels(
     hasWhiteBalance: Boolean
 ): List<CameraControlPanel> = buildList {
     add(CameraControlPanel.RESOLUTION)
+    add(CameraControlPanel.ZOOM)
     if (hasShutter) add(CameraControlPanel.SHUTTER)
     if (hasIso) add(CameraControlPanel.ISO)
     if (hasExposureCompensation) add(CameraControlPanel.EXPOSURE_COMPENSATION)
@@ -165,6 +167,9 @@ private fun GridButton(
 @Composable
 fun ActiveControlPanel(
     state: ManualControlsState,
+    zoomState: CameraZoomState,
+    onLinearZoomChange: (Float) -> Unit,
+    onSelectZoomLens: (String) -> Unit,
     caps: CameraCapabilities?,
     cameraTelemetry: StateFlow<CameraTelemetry>,
     isRecording: Boolean,
@@ -216,6 +221,16 @@ fun ActiveControlPanel(
                 .padding(safeContentPadding),
             contentAlignment = Alignment.Center
         ) panelContent@{
+            if (activePanel == CameraControlPanel.ZOOM) {
+                ZoomPanel(
+                    zoomState = zoomState,
+                    onLinearZoomChange = onLinearZoomChange,
+                    onSelectZoomLens = onSelectZoomLens,
+                    axis = axis,
+                )
+                return@panelContent
+            }
+
             if (activePanel == CameraControlPanel.RESOLUTION) {
                 ResolutionPanel(
                     selectedResolution = selectedResolution,
@@ -395,6 +410,46 @@ fun ActiveControlPanel(
             }
         }
     }
+}
+
+@Composable
+private fun ZoomPanel(
+    zoomState: CameraZoomState,
+    onLinearZoomChange: (Float) -> Unit,
+    onSelectZoomLens: (String) -> Unit,
+    axis: AxisSpec
+) {
+    val scale = remember(zoomState.minRatio, zoomState.maxRatio, zoomState.inventory) { SliderScales.zoom(zoomState) }
+    val lenses = zoomState.inventory?.buttonLenses.orEmpty()
+    SliderPanelLayout(
+        axis = axis,
+        actionCount = lenses.size,
+        modifier = Modifier.fillMaxSize(),
+        actions = {
+            lenses.forEach { lens ->
+                val lensRatio = checkNotNull(lens.zoomRatio)
+                val selected = kotlin.math.abs(zoomState.ratio - lensRatio) < 0.005f
+                SliderActionButton(
+                    text = SliderScales.formatZoomFactor(lensRatio),
+                    background = if (selected) Color.White else Color.DarkGray,
+                    textColor = if (selected) Color.Black else Color.White,
+                    onClick = { onSelectZoomLens(lens.cameraId) }
+                )
+            }
+        },
+        content = { sliderModifier, axisReservation ->
+            RibbonSlider(
+                value = scale.progress(zoomState.ratio),
+                onValueChange = onLinearZoomChange,
+                axis = axis,
+                labelString = if (zoomState.isReady) scale.formatValue(zoomState.ratio) else "—",
+                ticks = scale.ticks,
+                layoutLabels = scale.layoutLabels,
+                axisReservation = axisReservation,
+                modifier = sliderModifier.fillMaxSize()
+            )
+        }
+    )
 }
 
 @Composable

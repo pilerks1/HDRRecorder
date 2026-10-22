@@ -41,6 +41,9 @@ fun ExpandedControlPanelUI(
 ) {
     ActiveControlPanel(
         state = uiState.manualControlsState,
+        zoomState = uiState.zoomState,
+        onLinearZoomChange = { actions.onEvent(CameraUiEvent.SetLinearZoom(it)) },
+        onSelectZoomLens = { actions.onEvent(CameraUiEvent.SelectZoomLens(it)) },
         caps = uiState.cameraCapabilities,
         cameraTelemetry = actions.sliderTelemetry,
         isRecording = uiState.isRecording,

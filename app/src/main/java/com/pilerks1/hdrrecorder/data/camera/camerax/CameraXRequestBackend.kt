@@ -86,6 +86,16 @@ class CameraXRequestBackend(
         }
     }
 
+    fun setZoomRatio(ratio: Float): com.google.common.util.concurrent.ListenableFuture<Void> {
+        ensureActive()
+        return control.setZoomRatio(ratio)
+    }
+
+    fun setLinearZoom(progress: Float): com.google.common.util.concurrent.ListenableFuture<Void> {
+        ensureActive()
+        return control.setLinearZoom(progress)
+    }
+
     private fun ensureActive() {
         if (!active.get()) throw CameraRequestSupersededException()
     }
