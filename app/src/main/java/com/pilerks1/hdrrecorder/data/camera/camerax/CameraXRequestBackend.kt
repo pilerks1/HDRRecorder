@@ -20,7 +20,6 @@ class CameraXRequestBackend(
     private val active = AtomicBoolean(true)
     private var successful: CameraRequestOverrides? = null
     private val ownedKeys = mutableSetOf<CaptureRequest.Key<*>>()
-    private var exposureCompensation: Int? = null
     private var lowLightBoost: Boolean? = null
 
     override suspend fun apply(overrides: CameraRequestOverrides) {
@@ -41,20 +40,6 @@ class CameraXRequestBackend(
             ownedKeys.retainAll(overrides.keys)
         } catch (error: Exception) {
             successful = null // Reconcile all possibly submitted keys on the next explicit operation.
-            if (error is CameraControl.OperationCanceledException) throw CameraRequestSupersededException(error)
-            throw error
-        }
-    }
-
-    suspend fun setExposureCompensation(index: Int) {
-        ensureActive()
-        if (exposureCompensation == index) return
-        try {
-            control.setExposureCompensationIndex(index).await()
-            ensureActive()
-            exposureCompensation = index
-        } catch (error: Exception) {
-            exposureCompensation = null
             if (error is CameraControl.OperationCanceledException) throw CameraRequestSupersededException(error)
             throw error
         }

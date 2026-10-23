@@ -152,9 +152,6 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
 
     private suspend fun submit(attachment: CameraRequestBackend, state: DesiredCameraState, lock: Boolean? = null) {
         ensureCurrent(attachment)
-        if (lock == null && state.capabilities?.hasExposureCompensationControl == true) {
-            cameraXControls?.setExposureCompensation(CameraRequestCompiler.exposureCompensationIndex(state.controls, state.capabilities))
-        }
         attachment.apply(snapshot(state, lock))
         ensureCurrent(attachment)
         lastSubmissionMs = SystemClock.elapsedRealtime()
@@ -185,16 +182,19 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                 try {
                     withTimeout(2_000L) {
                         checkCurrent()
-                        var resolved = target.controls
+                        // Reset EV only in the same snapshot that disables AE, never before locking.
+                        var resolved = if (newMode == ExposureMode.FULL_MANUAL) {
+                            target.controls.copy(isManualEv = false, evValueIndex = 0)
+                        } else target.controls
                         var unlocked = false
                         if (newMode != ExposureMode.AUTO) {
                             val held = if (oldMode != ExposureMode.FULL_MANUAL && caps.supportsAeLock) {
+                                val source = target.copy(controls = previous)
+                                val lockedOverrides = snapshot(source, lock = true)
                                 val before = results.latest.value?.frameNumber ?: -1L
-                                submit(attachment, target.copy(controls = previous), lock = true)
+                                submit(attachment, source, lock = true)
                                 awaitFrame(attachment, before) {
-                                    it.requested(CaptureRequest.CONTROL_AE_LOCK) == true &&
-                                        it[CaptureResult.CONTROL_AE_STATE] == CameraMetadata.CONTROL_AE_STATE_LOCKED &&
-                                        it[CaptureResult.CONTROL_AE_LOCK] == true
+                                    matchesExposure(it, lockedOverrides, oldMode, locked = true)
                                 }
                             } else {
                                 unlocked = oldMode != ExposureMode.FULL_MANUAL
@@ -260,7 +260,8 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                     if (failure is CancellationException && failure !is kotlinx.coroutines.TimeoutCancellationException) throw failure
                     val auto = target.controls.copy(
                         isManualIso = false, isoValue = null, isManualSs = false, ssValueNanos = null,
-                        isManualPostRawSensitivity = false, postRawSensitivityBoost = null
+                        isManualPostRawSensitivity = false, postRawSensitivityBoost = null,
+                        isManualEv = previous.isManualEv, evValueIndex = previous.evValueIndex
                     )
                     val recovery = target.copy(controls = auto)
                     val recovered = try {
@@ -304,14 +305,32 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         if (backend !== attachment) throw CameraRequestSupersededException()
     }
 
-    private fun matchesExposure(frame: CameraFrameMetadata, overrides: CameraRequestOverrides, mode: ExposureMode): Boolean {
+    private fun matchesExposure(
+        frame: CameraFrameMetadata,
+        overrides: CameraRequestOverrides,
+        mode: ExposureMode,
+        locked: Boolean = false
+    ): Boolean {
         val aeMode = frame[CaptureResult.CONTROL_AE_MODE] ?: return false
+        val ev = overrides[CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION]
+        if (ev != null && frame.requested(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION) != ev) return false
+        if (locked) {
+            if (frame.requested(CaptureRequest.CONTROL_AE_LOCK) != true ||
+                frame[CaptureResult.CONTROL_AE_LOCK] != true ||
+                frame[CaptureResult.CONTROL_AE_STATE] != CameraMetadata.CONTROL_AE_STATE_LOCKED ||
+                (ev != null && frame[CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION] != ev)
+            ) return false
+        } else if (frame.requested(CaptureRequest.CONTROL_AE_LOCK) == true ||
+            frame[CaptureResult.CONTROL_AE_LOCK] == true ||
+            frame[CaptureResult.CONTROL_AE_STATE] == CameraMetadata.CONTROL_AE_STATE_LOCKED
+        ) return false
         if (mode == ExposureMode.AUTO) {
             return aeMode != CameraMetadata.CONTROL_AE_MODE_OFF &&
                 frame.requested(CaptureRequest.CONTROL_AE_MODE) != CameraMetadata.CONTROL_AE_MODE_OFF &&
-                frame.requested(CaptureRequest.CONTROL_AE_LOCK) != true && frame[CaptureResult.CONTROL_AE_LOCK] != true &&
-                frame[CaptureResult.CONTROL_AE_STATE] != CameraMetadata.CONTROL_AE_STATE_LOCKED &&
-                (Build.VERSION.SDK_INT < 36 || frame[CaptureResult.CONTROL_AE_PRIORITY_MODE].let {
+                (Build.VERSION.SDK_INT < 36 || listOf(
+                    frame.requested(CaptureRequest.CONTROL_AE_PRIORITY_MODE),
+                    frame[CaptureResult.CONTROL_AE_PRIORITY_MODE]
+                ).all {
                     it == null || it == CameraMetadata.CONTROL_AE_PRIORITY_MODE_OFF
                 })
         }
@@ -324,7 +343,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                 val expected = overrides[CaptureRequest.CONTROL_AE_PRIORITY_MODE]
                 if (expected == null) actual == null || actual == CameraMetadata.CONTROL_AE_PRIORITY_MODE_OFF
                 else actual == expected && frame[CaptureResult.CONTROL_AE_PRIORITY_MODE] == expected
-            }) && frame[CaptureResult.CONTROL_AE_LOCK] != true
+            })
     }
 
     private fun CameraControlValues.withExposure(source: CameraControlValues): CameraControlValues = copy(
@@ -334,6 +353,8 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         ssValueNanos = source.ssValueNanos,
         isManualPostRawSensitivity = source.isManualPostRawSensitivity,
         postRawSensitivityBoost = source.postRawSensitivityBoost,
+        isManualEv = source.isManualEv,
+        evValueIndex = source.evValueIndex,
         isManualFps = source.isManualFps,
         fpsRange = source.fpsRange
     )

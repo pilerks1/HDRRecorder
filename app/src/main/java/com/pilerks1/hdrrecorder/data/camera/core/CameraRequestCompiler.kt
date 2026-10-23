@@ -40,12 +40,13 @@ object CameraRequestCompiler {
         return builder.build()
     }
 
-    fun exposureCompensationIndex(
+    private fun exposureCompensationIndex(
         state: CameraControlValues,
         capabilities: CameraCapabilities?
-    ): Int = state.evValueIndex.takeIf {
-        state.isManualEv && capabilities?.hasExposureCompensationControl == true
-    } ?: 0
+    ): Int {
+        if (!state.isManualEv || capabilities?.hasExposureCompensationControl != true) return 0
+        return capabilities.evRange?.clamp(state.evValueIndex) ?: 0
+    }
 
     // --- Exposure (ISO / SS / EV / AE mode) ---
 
@@ -54,6 +55,12 @@ object CameraRequestCompiler {
         state: CameraControlValues,
         capabilities: CameraCapabilities?
     ) {
+        if (capabilities?.hasExposureCompensationControl == true) {
+            builder.set(
+                CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,
+                exposureCompensationIndex(state, capabilities)
+            )
+        }
         val manualShutter = state.isManualSs &&
             state.ssValueNanos != null &&
             capabilities?.hasManualShutterControl == true
