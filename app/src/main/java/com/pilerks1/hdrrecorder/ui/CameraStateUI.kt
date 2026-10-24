@@ -1,6 +1,9 @@
 package com.pilerks1.hdrrecorder.ui
 
 import androidx.camera.core.MeteringPoint
+import com.pilerks1.hdrrecorder.data.camera.core.MeteringAnchor
+import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
+import com.pilerks1.hdrrecorder.data.camera.core.RegionalMeteringState
 import com.pilerks1.hdrrecorder.model.ColorFormat
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
@@ -44,8 +47,7 @@ data class ManualControlsState(
 )
 
 /**
- * A preview tap is an explicit request for point-based automatic 3A. Manual sensor, focus, and
- * white-balance overrides must be cleared before CameraX can calibrate at the tapped point.
+ * Explicit reset-all action; preview metering preserves manual overrides.
  */
 internal val ManualControlsState.hasManualSliderOverride: Boolean
     get() = isManualIso ||
@@ -73,9 +75,6 @@ internal fun ManualControlsState.resetManualSlidersToAuto(): ManualControlsState
         wbTint = null
     )
 }
-
-internal fun ManualControlsState.resetForTapToMeter(): ManualControlsState =
-    resetManualSlidersToAuto()
 
 /**
  * Represents the current state of the Camera UI.
@@ -106,6 +105,7 @@ data class CameraUiState(
     val manualControlsState: ManualControlsState = ManualControlsState(),
     val cameraCapabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities? = null,
     val zoomState: CameraZoomState = CameraZoomState(),
+    val meteringState: RegionalMeteringState = RegionalMeteringState(),
 
     // Video Settings
     val isNoiseReductionEnabled: Boolean = true,
@@ -141,6 +141,7 @@ sealed interface CameraUiEvent {
     data object CycleResolution : CameraUiEvent
     data object CycleAspectRatio : CameraUiEvent
     data class SetLinearZoom(val progress: Float) : CameraUiEvent
+    data class SetZoomRatio(val ratio: Float) : CameraUiEvent
     data class SelectZoomLens(val cameraId: String) : CameraUiEvent
     data class SetLowLightBoost(val enabled: Boolean) : CameraUiEvent
 
@@ -159,7 +160,14 @@ sealed interface CameraUiEvent {
     // Storage Event
     data class SetStorageUri(val uri: String) : CameraUiEvent
 
-    data class TapToMeter(val meteringPoint: MeteringPoint) : CameraUiEvent
+    data class StartMetering(
+        val point: MeteringPoint,
+        val anchor: MeteringAnchor,
+        val mode: MeteringMode,
+        val generation: Long
+    ) : CameraUiEvent
+    data class RemapMetering(val point: MeteringPoint, val generation: Long, val requestId: Long) : CameraUiEvent
+    data class CancelMetering(val generation: Long) : CameraUiEvent
     data object OpenSettings : CameraUiEvent
     data object CloseSettings : CameraUiEvent
 }

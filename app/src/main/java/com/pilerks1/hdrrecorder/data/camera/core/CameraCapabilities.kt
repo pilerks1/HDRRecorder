@@ -24,5 +24,9 @@ data class CameraCapabilities(
     val supportsIsoPriorityAe: Boolean = false,
     val supportsAeLock: Boolean = false,
     val supportsPostRawSensitivityBoost: Boolean = false,
-    val supportsLowLightBoost: Boolean = false
+    val supportsLowLightBoost: Boolean = false,
+    val maxAfRegions: Int = 0,
+    val maxAeRegions: Int = 0,
+    val maxAwbRegions: Int = 0,
+    val afModes: List<Int> = emptyList()
 )

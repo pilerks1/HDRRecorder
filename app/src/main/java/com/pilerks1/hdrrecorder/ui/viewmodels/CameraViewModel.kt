@@ -30,7 +30,6 @@ import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeBound
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeMath
-import com.pilerks1.hdrrecorder.ui.resetForTapToMeter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -104,6 +103,11 @@ internal class CameraViewModel(
         collectLowLightBoostState()
         collectControlErrors()
         collectZoomState()
+        viewModelScope.launch {
+            controlCoordinator.meteringState.collect { state ->
+                _uiState.update { it.copy(meteringState = state) }
+            }
+        }
         statsManager.setRecordingState(false, requestedFpsForStats(), Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
     }
 
@@ -233,6 +237,9 @@ internal class CameraViewModel(
                     cameraManager.setLinearZoom(event.progress)
                 }
             }
+            is CameraUiEvent.SetZoomRatio -> {
+                if (cameraRuntime.usesCameraHardware) cameraManager.setZoomRatio(event.ratio)
+            }
             is CameraUiEvent.SelectZoomLens -> selectZoomLens(event.cameraId)
 
             // SDR Hacks (auto-saved)
@@ -258,13 +265,13 @@ internal class CameraViewModel(
                 _uiState.update { it.copy(storageUri = event.uri) }
             }
 
-            is CameraUiEvent.TapToMeter -> {
-                updateManualControls { it.resetForTapToMeter() }
-                viewModelScope.launch {
-                    exposureTransitionJob?.join()
-                    controlCoordinator.tapToMeter(event.meteringPoint)
-                }
-            }
+            is CameraUiEvent.StartMetering -> controlCoordinator.startMetering(
+                event.point, event.anchor, event.mode, event.generation
+            )
+            is CameraUiEvent.RemapMetering -> controlCoordinator.remapMetering(
+                event.point, event.generation, event.requestId
+            )
+            is CameraUiEvent.CancelMetering -> controlCoordinator.cancelMetering(event.generation)
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
             is CameraUiEvent.CloseSettings -> {
                 _uiState.update { it.copy(isSettingsSheetVisible = false) }
@@ -293,6 +300,7 @@ internal class CameraViewModel(
      * never decides or requests a screen orientation and never rebinds the camera.
      */
     fun onDisplayRotationChanged(rotation: Int) {
+        if (rotation != lastDisplayRotation) controlCoordinator.cancelMetering()
         lastDisplayRotation = rotation
         if (!cameraRuntime.usesCameraHardware) return
         CameraRotationPolicy.targetRotation(rotation, _uiState.value.isRecording)
@@ -709,6 +717,7 @@ internal class CameraViewModel(
         if (!cameraRuntime.usesCameraHardware) return
         viewModelScope.launch {
             cameraManager.zoomState.collect { zoom ->
+                if (zoom.ratio != _uiState.value.zoomState.ratio) controlCoordinator.onZoomChanged()
                 _uiState.update { it.copy(zoomState = zoom, isCameraReady = zoom.isReady) }
             }
         }

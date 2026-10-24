@@ -59,12 +59,23 @@ class CameraXRequestBackend(
         }
     }
 
-    suspend fun tapToMeter(point: MeteringPoint) {
+    suspend fun applyMetering(point: MeteringPoint, flags: Int) {
         ensureActive()
         try {
-            control.startFocusAndMetering(FocusMeteringAction.Builder(
-                point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB
-            ).build()).await()
+            control.startFocusAndMetering(FocusMeteringAction.Builder(point, flags)
+                .setLockingMode(0)
+                .disableAutoCancel()
+                .build()).await()
+            ensureActive()
+        } catch (error: CameraControl.OperationCanceledException) {
+            throw CameraRequestSupersededException(error)
+        }
+    }
+
+    suspend fun cancelMetering() {
+        ensureActive()
+        try {
+            control.cancelFocusAndMetering().await()
             ensureActive()
         } catch (error: CameraControl.OperationCanceledException) {
             throw CameraRequestSupersededException(error)
@@ -85,5 +96,10 @@ class CameraXRequestBackend(
         if (!active.get()) throw CameraRequestSupersededException()
     }
 
-    override fun detach() { active.set(false) }
+    override fun detach() {
+        if (active.getAndSet(false)) {
+            // Submit cleanup to this camera before its lifecycle closes or a replacement binds.
+            control.cancelFocusAndMetering()
+        }
+    }
 }

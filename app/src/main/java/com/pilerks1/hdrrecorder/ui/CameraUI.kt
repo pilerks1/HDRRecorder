@@ -127,6 +127,8 @@ internal fun CameraUI(
                     recordingDurationNanos = actions.recordingDurationNanos,
                     isRecording = uiState.isRecording,
                     expandedPanelBounds = expandedBounds,
+                    zoomState = uiState.zoomState,
+                    meteringState = uiState.meteringState,
                     onEvent = actions.onEvent,
                     modifier = Modifier.fillMaxSize()
                 )

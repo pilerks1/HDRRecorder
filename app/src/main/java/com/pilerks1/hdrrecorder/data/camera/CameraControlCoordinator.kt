@@ -31,6 +31,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import com.pilerks1.hdrrecorder.data.camera.core.FixedFrameRates
+import androidx.camera.core.MeteringPoint
+import com.pilerks1.hdrrecorder.data.camera.core.MeteringAnchor
+import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
+import com.pilerks1.hdrrecorder.data.camera.core.RegionalMeteringState
+import com.pilerks1.hdrrecorder.data.camera.core.TemporaryMeteringMonitor
+import com.pilerks1.hdrrecorder.data.camera.core.meteringFlags
 
 data class DesiredCameraState(
     val controls: CameraControlValues,
@@ -63,15 +69,32 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     private val contributions = linkedMapOf<String, CameraRequestOverrides>()
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
+    private val _meteringState = MutableStateFlow(RegionalMeteringState())
+    val meteringState = _meteringState.asStateFlow()
+    private var meteringPoint: MeteringPoint? = null
+    private var meteringRevision = 0L
+    private var appliedMeteringRevision = 0L
+    private var nextMeteringId = 0L
+    private var meteringMonitor: TemporaryMeteringMonitor? = null
 
     init {
+        scope.launch {
+            results.latest.filterNotNull().collect { frame ->
+                if (!transitioning && frame.generation == backend?.generation &&
+                    meteringMonitor?.shouldCancel(frame) == true
+                ) cancelMetering()
+            }
+        }
         scope.launch {
             for (ignored in signal) {
                 if (!immediate) delay((lastSubmissionMs + 33L - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
                 immediate = false
                 try {
                     mutex.withLock {
-                        if (!transitioning) desired?.let { state -> backend?.let { submit(it, state) } }
+                        if (!transitioning) desired?.let { state -> backend?.let {
+                            submit(it, state)
+                            if (desired === state && !transitioning) reconcileMetering(it, state)
+                        } }
                     }
                 } catch (_: CameraRequestSupersededException) {
                     // The replacement attachment/update will receive the latest desired state.
@@ -88,10 +111,16 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         detach()
         backend = attachment
         cameraXControls = nativeControls
+        _meteringState.value = RegionalMeteringState(generation = attachment.generation)
         // The owner supplies a capability-adapted desired state after binding.
     }
 
     fun detach() {
+        meteringRevision++
+        appliedMeteringRevision = meteringRevision
+        meteringPoint = null
+        meteringMonitor = null
+        _meteringState.value = RegionalMeteringState()
         transitionVersion++
         transitioning = false
         backend?.detach()
@@ -101,10 +130,22 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     }
 
     fun update(state: DesiredCameraState, coalesce: Boolean = false) {
+        val previous = desired?.controls
+        if (previous != null && manualModes(previous) != manualModes(state.controls)) restartMetering()
         desired = state
         revision++
         immediate = immediate || !coalesce
         signal.trySend(Unit)
+    }
+
+    private fun manualModes(controls: CameraControlValues) = listOf(
+        controls.isManualIso, controls.isManualSs, controls.isManualFocus, controls.isManualWb
+    )
+
+    private fun restartMetering() {
+        if (meteringPoint == null) return
+        meteringMonitor = null
+        meteringRevision++
     }
 
     /** Future features use typed snapshots; ownership conflicts fail at composition. */
@@ -124,21 +165,105 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     }
 
     // Native zoom supersedes earlier zoom requests without waiting for exposure submissions.
-    fun setZoomRatio(ratio: Float) = cameraXControls?.setZoomRatio(ratio)
+    fun setZoomRatio(ratio: Float): com.google.common.util.concurrent.ListenableFuture<Void>? {
+        onZoomChanged()
+        return cameraXControls?.setZoomRatio(ratio)
+    }
 
-    fun setLinearZoom(progress: Float) = cameraXControls?.setLinearZoom(progress)
+    fun setLinearZoom(progress: Float): com.google.common.util.concurrent.ListenableFuture<Void>? {
+        onZoomChanged()
+        return cameraXControls?.setLinearZoom(progress)
+    }
+
+    fun onZoomChanged() {
+        if (_meteringState.value.mode == MeteringMode.TEMPORARY) cancelMetering()
+    }
 
     suspend fun flush() = mutex.withLock {
         if (!transitioning) desired?.let { state -> backend?.let { submit(it, state) } }
     }
 
-    suspend fun tapToMeter(point: androidx.camera.core.MeteringPoint) = mutex.withLock {
-        val attachment = backend ?: return@withLock
+    fun startMetering(point: MeteringPoint, anchor: MeteringAnchor, mode: MeteringMode, generation: Long) {
+        val attachment = backend ?: return
+        if (attachment.generation != generation || cameraXControls == null) return
+        val state = desired ?: return
+        val flags = meteringFlags(state.controls, state.capabilities)
+        if (flags == 0) {
+            cancelMetering()
+            return
+        }
+        meteringPoint = point
+        meteringMonitor = null
+        meteringRevision++
+        _meteringState.value = RegionalMeteringState(generation, ++nextMeteringId, mode, anchor, flags)
+        signal.trySend(Unit)
+    }
+
+    fun remapMetering(point: MeteringPoint, generation: Long, requestId: Long) {
+        val current = _meteringState.value
+        if (current.mode != MeteringMode.PERSISTENT || current.generation != generation ||
+            current.requestId != requestId
+        ) return
+        meteringPoint = point
+        meteringRevision++
+        signal.trySend(Unit)
+    }
+
+    fun cancelMetering(generation: Long = _meteringState.value.generation) {
+        if (_meteringState.value.generation != generation) return
+        meteringPoint = null
+        meteringMonitor = null
+        meteringRevision++
+        _meteringState.value = RegionalMeteringState(generation = generation)
+        signal.trySend(Unit)
+    }
+
+    private suspend fun reconcileMetering(attachment: CameraRequestBackend, state: DesiredCameraState) {
+        val native = cameraXControls ?: return
+        val current = _meteringState.value
+        val flags = if (current.mode == null) 0 else meteringFlags(state.controls, state.capabilities)
+        if (current.mode != null && flags != current.eligibleFlags) {
+            meteringMonitor = null
+            meteringRevision++
+            if (flags == 0) {
+                meteringPoint = null
+                _meteringState.value = RegionalMeteringState(generation = attachment.generation)
+            } else _meteringState.value = current.copy(eligibleFlags = flags)
+        }
+        if (appliedMeteringRevision == meteringRevision) return
+        val version = meteringRevision
+        val point = meteringPoint
+        meteringMonitor = null
         try {
-            desired?.let { submit(attachment, it) }
-            cameraXControls?.tapToMeter(point)
+            native.cancelMetering()
+            ensureCurrent(attachment)
+            if (version != meteringRevision) return
+            if (point != null && flags != 0) {
+                native.applyMetering(point, flags)
+                ensureCurrent(attachment)
+                if (version != meteringRevision) return
+                if (_meteringState.value.mode == MeteringMode.TEMPORARY) {
+                    meteringMonitor = TemporaryMeteringMonitor(flags, results.latest.value?.frameNumber ?: -1L)
+                }
+            }
+            appliedMeteringRevision = version
         } catch (_: CameraRequestSupersededException) {
-            // A tap on the previous preview must not affect its replacement.
+            // Rebind owns cleanup; an old request must never touch its replacement.
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (backend !== attachment) return
+            meteringPoint = null
+            _meteringState.value = RegionalMeteringState(generation = attachment.generation)
+            appliedMeteringRevision = ++meteringRevision
+            try {
+                native.cancelMetering()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Preserve the original application error.
+            }
+            _error.value = failure.message ?: "Unable to apply metering region"
         }
     }
 
@@ -166,6 +291,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     }
 
     suspend fun transition(previous: CameraControlValues, target: DesiredCameraState): ExposureTransitionResult {
+        restartMetering()
         val version = ++transitionVersion
         transitioning = true
         return try {

@@ -134,8 +134,14 @@ object CameraRequestCompiler {
         ) {
             builder.set(CaptureRequest.CONTROL_AF_MODE, AndroidCameraMetadata.CONTROL_AF_MODE_OFF)
             builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, state.focusDistanceDiopters)
-        } else if ((capabilities?.focusMinDistanceDiopters ?: 0f) > 0f) {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, AndroidCameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+        } else {
+            val modes = capabilities?.afModes.orEmpty()
+            val automaticMode = listOf(
+                AndroidCameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
+                AndroidCameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            ).firstOrNull { it in modes }
+            // Without a supported continuous mode, leave automatic mode selection to CameraX.
+            automaticMode?.let { builder.set(CaptureRequest.CONTROL_AF_MODE, it) }
         }
     }
 

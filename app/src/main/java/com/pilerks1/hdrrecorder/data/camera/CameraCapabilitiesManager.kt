@@ -104,7 +104,11 @@ object CameraCapabilitiesManager {
             supportsIsoPriorityAe = supportsIsoPriorityAe,
             supportsAeLock = supportsAeLock,
             supportsPostRawSensitivityBoost = supportsPostRawSensitivityBoost,
-            supportsLowLightBoost = supportsLowLightBoost
+            supportsLowLightBoost = supportsLowLightBoost,
+            maxAfRegions = camera2Info.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0,
+            maxAeRegions = camera2Info.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0,
+            maxAwbRegions = camera2Info.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AWB) ?: 0,
+            afModes = camera2Info.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.toList().orEmpty()
         )
     }
 }

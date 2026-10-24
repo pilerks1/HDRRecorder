@@ -52,7 +52,12 @@ private class UiTestbedCameraRuntime : CameraRuntime {
             is CameraUiEvent.SelectZoomLens -> currentState.zoomState.inventory?.buttonLenses
                 ?.firstOrNull { it.cameraId == event.cameraId }?.zoomRatio
                 ?.let { currentState.copy(zoomState = currentState.zoomState.copy(ratio = it)) }
-            is CameraUiEvent.TapToMeter,
+            is CameraUiEvent.SetZoomRatio -> currentState.copy(zoomState = currentState.zoomState.let {
+                it.copy(ratio = event.ratio.coerceIn(it.minRatio, it.maxRatio))
+            })
+            is CameraUiEvent.StartMetering,
+            is CameraUiEvent.RemapMetering,
+            is CameraUiEvent.CancelMetering,
             is CameraUiEvent.ToggleRecording,
             is CameraUiEvent.TogglePause -> null
             else -> return CameraRuntimeEventResult.NotHandled
