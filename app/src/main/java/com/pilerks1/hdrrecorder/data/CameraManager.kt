@@ -36,7 +36,7 @@ import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
-import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.RecordingOptions
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -56,8 +56,8 @@ class CameraManager(
     private val rearLenses = RearLensRepository(context)
     private val _zoomState = MutableStateFlow(CameraZoomState())
     val zoomState = _zoomState.asStateFlow()
-    private val _cameraError = MutableStateFlow<String?>(null)
-    val cameraError = _cameraError.asStateFlow()
+    private val _recordingOptions = MutableStateFlow(RecordingOptions())
+    val recordingOptions = _recordingOptions.asStateFlow()
     private var zoomSource: LiveData<ZoomState>? = null
     private var zoomObserver: Observer<ZoomState>? = null
     private var zoomRevision = 0L
@@ -135,87 +135,77 @@ class CameraManager(
         val inventory = try {
             rearLenses.discover(cameraProvider)
         } catch (error: Exception) {
-            _cameraError.value = error.message ?: "Unable to discover rear lenses"
+            Log.e("CameraManager", "Unable to discover rear lenses", error)
             return
         }
-        val cameraSelector = rearLenses.defaultCameraInfo(cameraProvider, inventory).cameraSelector
+        val cameraInfo = rearLenses.defaultCameraInfo(cameraProvider, inventory)
+        val cameraSelector = cameraInfo.cameraSelector
         invalidateAttachment()
         clearLowLightBoostObserver()
         cameraProvider.unbindAll()
         val cameraGeneration = telemetryCoordinator.beginCameraGeneration()
         activeCameraGeneration = cameraGeneration
 
-        // --- Dynamic Range Resolution ---
-        // Map the Color Format UI selection to CameraX's exact 10-bit HDR Encodings
-        val baseDynamicRange = when (request.uiState.colorFormat) {
-            ColorFormat.HDR10 -> DynamicRange.HDR10_10_BIT
-            ColorFormat.HDR10_PLUS -> DynamicRange.HDR10_PLUS_10_BIT
-            ColorFormat.UNSPECIFIED_10_BIT -> DynamicRange.HDR_UNSPECIFIED_10_BIT
-            ColorFormat.DOLBY_VISION_84 -> DynamicRange.DOLBY_VISION_10_BIT
-            ColorFormat.HLG -> DynamicRange.HLG_10_BIT
-        }
-
-        // The SDR UI hack explicitly forces standard dynamic range
-        val dynamicRange = if (request.uiState.isSdrToneMapEnabled) DynamicRange.SDR else baseDynamicRange
-        val requestedFrameRate = request.uiState.selectedFps
-            .takeUnless { request.uiState.manualControlsState.isManualFps }
-            ?.let { Range(it, it) }
-
-        // --- Preview Use Case Configuration ---
-        val previewResolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(
-                AspectRatioStrategy(
-                    request.uiState.selectedAspectRatio.cameraXValue,
-                    AspectRatioStrategy.FALLBACK_RULE_NONE
-                )
-            )
-            .setResolutionStrategy(
-                ResolutionStrategy(
-                    android.util.Size(
-                        1000,
-                        (1000f / request.uiState.selectedAspectRatio.landscapeRatio).roundToInt()
-                    ),
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
-                )
-            )
-            .build()
-
-        val previewBuilder = Preview.Builder()
-            .setResolutionSelector(previewResolutionSelector)
-            .setTargetRotation(request.displayRotation)
-            .setDynamicRange(dynamicRange)
-            .setPreviewStabilizationEnabled(request.uiState.isStabilizationEnabled)
-            .apply { requestedFrameRate?.let(::setTargetFrameRate) }
-
-
-        val newPreview = previewBuilder.build().also {
-            it.setSurfaceProvider { surfaceRequest ->
-                request.onSurfaceRequest(surfaceRequest)
-            }
-        }
-
-        // --- Video Capture Use Case Configuration ---
-        // Bitrate string conversion and fail-safe
-        val bitrateMbps = Bitrate.parseOrDefault(request.uiState.bitrate)
-        val bitrateBps = bitrateMbps * 1_000_000
-        val qualitySelector = QualitySelector.from(request.uiState.selectedResolution.toCameraXQuality())
-
-        val recorder = Recorder.Builder()
-            .setExecutor(cameraExecutor)
-            .setQualitySelector(qualitySelector)
-            .setAspectRatio(request.uiState.selectedAspectRatio.cameraXValue)
-            .setTargetVideoEncodingBitRate(bitrateBps)
-            .build()
-
-        val videoCaptureBuilder = VideoCapture.Builder(recorder)
-            .setVideoStabilizationEnabled(request.uiState.isStabilizationEnabled)
-            .setTargetRotation(request.displayRotation)
-            .setDynamicRange(dynamicRange)
-            .apply { requestedFrameRate?.let(::setTargetFrameRate) }
-
-        val newVideoCapture = videoCaptureBuilder.build()
-
         try {
+            val options = RecordingConfiguration.queryOptions(cameraInfo)
+            _recordingOptions.value = options
+            RecordingConfiguration.validate(request.uiState, options)
+            // --- Dynamic Range Resolution ---
+            val dynamicRange = RecordingConfiguration.dynamicRange(request.uiState)
+            val requestedFrameRate = request.uiState.selectedFps
+                .takeUnless { request.uiState.manualControlsState.isManualFps }
+                ?.let { Range(it, it) }
+
+            // --- Preview Use Case Configuration ---
+            val previewResolutionSelector = ResolutionSelector.Builder()
+                .setAspectRatioStrategy(
+                    AspectRatioStrategy(
+                        request.uiState.selectedAspectRatio.cameraXValue,
+                        AspectRatioStrategy.FALLBACK_RULE_NONE
+                    )
+                )
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        android.util.Size(
+                            1000,
+                            (1000f / request.uiState.selectedAspectRatio.landscapeRatio).roundToInt()
+                        ),
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                    )
+                )
+                .build()
+
+            val previewBuilder = Preview.Builder()
+                .setResolutionSelector(previewResolutionSelector)
+                .setTargetRotation(request.displayRotation)
+                .setDynamicRange(dynamicRange)
+                .setPreviewStabilizationEnabled(request.uiState.isStabilizationEnabled)
+                .apply { requestedFrameRate?.let(::setTargetFrameRate) }
+
+
+            val newPreview = previewBuilder.build().also {
+                it.setSurfaceProvider { surfaceRequest ->
+                    request.onSurfaceRequest(surfaceRequest)
+                }
+            }
+
+            // --- Video Capture Use Case Configuration ---
+            val qualitySelector = QualitySelector.from(request.uiState.selectedResolution.toCameraXQuality())
+
+            val recorder = RecordingConfiguration.configure(Recorder.Builder()
+                .setExecutor(cameraExecutor)
+                .setQualitySelector(qualitySelector)
+                .setAspectRatio(request.uiState.selectedAspectRatio.cameraXValue), request.uiState)
+                .build()
+
+            val videoCaptureBuilder = VideoCapture.Builder(recorder)
+                .setVideoStabilizationEnabled(request.uiState.isStabilizationEnabled)
+                .setTargetRotation(request.displayRotation)
+                .setDynamicRange(dynamicRange)
+                .apply { requestedFrameRate?.let(::setTargetFrameRate) }
+
+            val newVideoCapture = videoCaptureBuilder.build()
+
             val boundCamera = cameraProvider.bindToLifecycle(
                 request.lifecycleOwner,
                 cameraSelector,
@@ -267,7 +257,6 @@ class CameraManager(
             preview = null
             videoCapture = null
             Log.e("CameraManager", "Use case binding failed", exc)
-            _cameraError.value = "Unable to bind camera: ${exc.message ?: "binding failed"}"
             invalidateAttachment()
         }
     }
@@ -320,7 +309,7 @@ class CameraManager(
                         val restored = confirmedZoomRatio.coerceIn(state.minRatio, state.maxRatio)
                         _zoomState.value = _zoomState.value.copy(ratio = restored)
                         rememberRatio(restored)
-                        _cameraError.value = "Unable to apply zoom: ${cause.message}"
+                        Log.w("CameraManager", "Unable to apply zoom", cause)
                     }
                 }
             }

@@ -27,6 +27,8 @@ class RecordingManager(private val context: Context, private val statsManager: S
     private data class ActiveRecording(
         val id: Long,
         val outputPfd: ParcelFileDescriptor?,
+        val fileName: String,
+        val safDocumentUri: android.net.Uri?,
         var recording: Recording? = null,
         var stopRequested: Boolean = false,
         var lastBytes: Long = 0L,
@@ -57,7 +59,8 @@ class RecordingManager(private val context: Context, private val statsManager: S
             Log.e("RecordingManager", "Failed to prepare recording output", e)
             return false
         }
-        val session = ActiveRecording(id = nextRecordingId++, outputPfd = output.outputPfd)
+        val session = ActiveRecording(id = nextRecordingId++, outputPfd = output.outputPfd,
+            fileName = name, safDocumentUri = output.safDocumentUri)
         activeRecording = session
 
         return try {
@@ -181,17 +184,51 @@ class RecordingManager(private val context: Context, private val statsManager: S
             }
             is VideoRecordEvent.Finalize -> {
                 session.outputPfd?.closeQuietly()
-                activeRecording = null
-                _isRecording.value = false
 
                 if (!event.hasError()) {
-                    val msg = "Video saved successfully"
+                    val msg = try {
+                        correctOutputMetadata(session, session.safDocumentUri ?: event.outputResults.outputUri)
+                        "Video saved successfully"
+                    } catch (error: Exception) {
+                        Log.w("RecordingManager", "Video saved but output metadata could not be updated", error)
+                        "Video saved, but its filename or MIME type could not be updated"
+                    }
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     Log.d("RecordingManager", "Video saved to: ${event.outputResults.outputUri}")
                 } else {
                     Log.e("RecordingManager", "Video capture error: ${event.error}")
+                    Toast.makeText(context, "Video recording failed (error ${event.error})", Toast.LENGTH_LONG).show()
                 }
+                activeRecording = null
+                _isRecording.value = false
             }
+        }
+    }
+
+    /** Recorder selects the container; identify its header without relying on restricted APIs. */
+    private fun correctOutputMetadata(session: ActiveRecording, uri: android.net.Uri) {
+        val header = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(12) }
+            ?: error("Unable to read recording header")
+        val isWebM = header.size >= 4 && header[0] == 0x1a.toByte() && header[1] == 0x45.toByte() &&
+            header[2] == 0xdf.toByte() && header[3] == 0xa3.toByte()
+        val isMp4 = header.size >= 8 && String(header, 4, 4, Charsets.US_ASCII) == "ftyp"
+        check(isWebM || isMp4) { "Unrecognized recording container" }
+        if (isMp4) return // Output was created with MP4 metadata.
+        val fileName = session.fileName.removeSuffix(".mp4") + ".webm"
+        if (session.safDocumentUri != null) {
+            val renamed = DocumentsContract.renameDocument(context.contentResolver, uri, fileName)
+                ?: error("Document provider could not rename the recording")
+            // Providers may reject MIME changes; report this instead of claiming metadata is correct.
+            val values = ContentValues().apply { put(DocumentsContract.Document.COLUMN_MIME_TYPE, "video/webm") }
+            check(context.contentResolver.update(renamed, values, null, null) > 0) {
+                "Document provider could not update the recording MIME type"
+            }
+        } else {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "video/webm")
+            }
+            check(context.contentResolver.update(uri, values, null, null) > 0) { "Unable to update recording metadata" }
         }
     }
 

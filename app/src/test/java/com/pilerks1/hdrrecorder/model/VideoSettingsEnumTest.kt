@@ -6,10 +6,10 @@ import org.junit.Test
 
 class VideoSettingsEnumTest {
     @Test
-    fun colorFormatReadsStableAndLegacyPresetValues() {
-        assertEquals(ColorFormat.HDR10_PLUS, ColorFormat.fromStorageId("hdr10_plus"))
-        assertEquals(ColorFormat.HDR10_PLUS, ColorFormat.fromStorageId("HDR10+"))
-        assertNull(ColorFormat.fromStorageId("unsupported"))
+    fun encodingReadsStableAndLegacyPresetValues() {
+        assertEquals(VideoEncoding.HDR10_PLUS, VideoEncoding.fromStorageId("hdr10_plus"))
+        assertEquals(VideoEncoding.HDR10_PLUS, VideoEncoding.fromStorageId("HDR10+"))
+        assertNull(VideoEncoding.fromStorageId("unsupported"))
     }
 
     @Test

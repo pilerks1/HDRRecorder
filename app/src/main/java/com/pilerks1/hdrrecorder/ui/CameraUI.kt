@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ModeNight
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,7 +22,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -204,8 +202,17 @@ internal fun CameraUI(
                 onLoadPreset = { actions.onEvent(CameraUiEvent.LoadPreset(it)) },
                 onDeletePreset = { actions.onEvent(CameraUiEvent.DeletePreset(it)) },
                 onDeleteAllPresets = { actions.onEvent(CameraUiEvent.DeleteAllPresets) },
-                colorFormat = uiState.colorFormat,
-                onColorFormatChange = { actions.onEvent(CameraUiEvent.CycleColorFormat) },
+                encoding = uiState.encoding,
+                bitDepth = uiState.videoBitDepth,
+                onBitDepthChange = { actions.onEvent(CameraUiEvent.SetVideoBitDepth(it)) },
+                recordingOptions = uiState.recordingOptions,
+                videoCodec = uiState.videoCodec,
+                onVideoCodecChange = { actions.onEvent(CameraUiEvent.SetVideoCodec(it)) },
+                audioCodec = uiState.audioCodec,
+                onAudioCodecChange = { actions.onEvent(CameraUiEvent.SetAudioCodec(it)) },
+                audioBitrate = uiState.audioBitrate,
+                onAudioBitrateChange = { actions.onEvent(CameraUiEvent.SetAudioBitrate(it)) },
+                onEncodingChange = { actions.onEvent(CameraUiEvent.SetEncoding(it)) },
                 gammaCurve = uiState.gammaCurve,
                 onGammaCurveChange = { actions.onEvent(CameraUiEvent.CycleGammaCurve) },
                 noiseReductionEnabled = uiState.isNoiseReductionEnabled,
@@ -214,8 +221,6 @@ internal fun CameraUI(
                 onBitrateChange = { actions.onEvent(CameraUiEvent.SetBitrate(it)) },
                 isStabilizationEnabled = uiState.isStabilizationEnabled,
                 onStabilizationChange = { actions.onEvent(CameraUiEvent.SetStabilization(it)) },
-                isSdrToneMapEnabled = uiState.isSdrToneMapEnabled,
-                onSdrToneMapChange = { actions.onEvent(CameraUiEvent.SetSdrToneMap(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
                 onForceDisplaySdrChange = { actions.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
                 storageUri = uiState.storageUri,
@@ -227,16 +232,6 @@ internal fun CameraUI(
             )
         }
 
-        uiState.exposureTransitionMessage?.let { message ->
-            Text(
-                text = message,
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .background(Color.Black.copy(alpha = 0.75f))
-            )
-        }
     }
 }
 

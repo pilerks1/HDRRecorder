@@ -2,7 +2,7 @@ package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
@@ -39,12 +39,15 @@ class PreferencesManager(context: Context) {
             put("fps", state.selectedFps)
             put("res", state.selectedResolution.storageId)
             put("aspect", state.selectedAspectRatio.storageId)
-            put("color", state.colorFormat.storageId)
+            put("encoding", state.encoding.storageId)
+            put("bitDepth", state.videoBitDepth)
+            put("videoCodec", state.videoCodec ?: "")
+            put("audioCodec", state.audioCodec ?: "")
+            put("audioBitrate", state.audioBitrate)
             put("gamma", state.gammaCurve.storageId)
             put("nr", state.isNoiseReductionEnabled)
             put("bitrate", state.bitrate)
             put("stab", state.isStabilizationEnabled)
-            put("sdr", state.isSdrToneMapEnabled)
             put("forceSdr", state.isForceDisplaySdrEnabled)
             // Note: Storage URI remains global, so we don't bake it into individual presets.
         }
@@ -65,18 +68,26 @@ class PreferencesManager(context: Context) {
             val aspectRatio = RecordingAspectRatio.fromStorageId(json.optString("aspect", ""))
                 ?: defaultState.selectedAspectRatio
 
+            val legacySdr = json.optBoolean("sdr", false)
+            val encoding = if (legacySdr) VideoEncoding.SDR else
+                VideoEncoding.fromStorageId(json.optString("encoding", json.optString("color", "")))
+                    ?: VideoEncoding.HLG
+            val gamma = if (encoding.supportsGammaCurveSelection)
+                GammaCurve.fromStorageId(json.optString("gamma", "")) ?: GammaCurve.AUTO
+                else GammaCurve.AUTO
             defaultState.copy(
                 selectedFps = json.optInt("fps", defaultState.selectedFps),
                 selectedResolution = resolution,
                 selectedAspectRatio = aspectRatio,
-                colorFormat = ColorFormat.fromStorageId(json.optString("color", ""))
-                    ?: defaultState.colorFormat,
-                gammaCurve = GammaCurve.fromStorageId(json.optString("gamma", ""))
-                    ?: defaultState.gammaCurve,
+                encoding = encoding,
+                videoBitDepth = if (legacySdr) 8 else json.optInt("bitDepth", 10),
+                gammaCurve = gamma,
+                videoCodec = json.optString("videoCodec", "").takeIf { it.isNotEmpty() },
+                audioCodec = json.optString("audioCodec", "").takeIf { it.isNotEmpty() },
+                audioBitrate = json.optString("audioBitrate", ""),
                 isNoiseReductionEnabled = json.optBoolean("nr", defaultState.isNoiseReductionEnabled),
                 bitrate = json.optString("bitrate", defaultState.bitrate),
                 isStabilizationEnabled = json.optBoolean("stab", defaultState.isStabilizationEnabled),
-                isSdrToneMapEnabled = json.optBoolean("sdr", defaultState.isSdrToneMapEnabled),
                 isForceDisplaySdrEnabled = json.optBoolean("forceSdr", defaultState.isForceDisplaySdrEnabled),
                 currentPresetName = name
             )

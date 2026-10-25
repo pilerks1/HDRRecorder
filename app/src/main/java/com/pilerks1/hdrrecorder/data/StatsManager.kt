@@ -280,6 +280,7 @@ class StatsManager(
         val secondsRemaining =
             if (bytesPerSecond > 0.0) (availableBytes / bytesPerSecond).toLong() else 0L
         val time = when {
+            bitrateToUse <= 0.0 -> "N/A"
             secondsRemaining <= 0L -> "0 Min"
             secondsRemaining < 3_600L ->
                 "${round(secondsRemaining / 60.0).toInt()} Min"

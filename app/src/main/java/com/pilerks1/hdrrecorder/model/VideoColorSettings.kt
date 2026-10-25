@@ -1,22 +1,23 @@
 package com.pilerks1.hdrrecorder.model
 
-/** Stable color-format identifiers for UI state and persisted presets. */
-enum class ColorFormat(val storageId: String, val displayName: String) {
+/** Stable encoding identifiers for UI state and persisted presets. */
+enum class VideoEncoding(val storageId: String, val displayName: String) {
+    SDR("sdr", "SDR"),
     HLG("hlg", "HLG"),
     HDR10("hdr10", "HDR10"),
     HDR10_PLUS("hdr10_plus", "HDR10+"),
-    DOLBY_VISION_84("dolby_vision_84", "DB 8.4"),
-    UNSPECIFIED_10_BIT("unspecified_10_bit", "Unspec");
+    DOLBY_VISION("dolby_vision", "DV"),
+    UNSPECIFIED("unspecified", "Unspecified");
 
     val supportsGammaCurveSelection: Boolean
-        get() = this == UNSPECIFIED_10_BIT
-
-    fun next(): ColorFormat = entries[(ordinal + 1) % entries.size]
+        get() = this == UNSPECIFIED
 
     companion object {
         /** Accepts both stable IDs and the labels written by older app versions. */
-        fun fromStorageId(value: String?): ColorFormat? = entries.firstOrNull {
-            it.storageId == value || it.displayName == value
+        fun fromStorageId(value: String?): VideoEncoding? = when (value) {
+            "dolby_vision_84", "DB 8.4" -> DOLBY_VISION
+            "unspecified_10_bit", "Unspec" -> UNSPECIFIED
+            else -> entries.firstOrNull { it.storageId == value || it.displayName == value }
         }
     }
 }

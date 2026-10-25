@@ -24,6 +24,7 @@ import com.pilerks1.hdrrecorder.data.camera.CameraRuntimeEventResult
 import com.pilerks1.hdrrecorder.data.camera.core.InteropSettings
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
 import com.pilerks1.hdrrecorder.model.GammaCurve
+import com.pilerks1.hdrrecorder.model.VideoColorOption
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.ui.ManualControl
@@ -101,14 +102,19 @@ internal class CameraViewModel(
 
         collectRecordingState()
         collectLowLightBoostState()
-        collectControlErrors()
+
         collectZoomState()
+        viewModelScope.launch {
+            cameraManager.recordingOptions.collect { options ->
+                _uiState.update { it.copy(recordingOptions = options) }
+            }
+        }
         viewModelScope.launch {
             controlCoordinator.meteringState.collect { state ->
                 _uiState.update { it.copy(meteringState = state) }
             }
         }
-        statsManager.setRecordingState(false, requestedFpsForStats(), Bitrate.parseOrDefault(_uiState.value.bitrate), _uiState.value.storageUri)
+        statsManager.setRecordingState(false, requestedFpsForStats(), (Bitrate.parse(_uiState.value.bitrate) ?: 0), _uiState.value.storageUri)
     }
 
     /**
@@ -116,6 +122,7 @@ internal class CameraViewModel(
      * Defer camera rebinds if the Settings UI is currently open.
      */
     private fun updateSettingsAndSave(requiresHardRebind: Boolean = false, update: (CameraUiState) -> CameraUiState) {
+        if (recordingManager.isRecording.value) return
         _uiState.update { oldState -> update(oldState) }
         if (!cameraRuntime.usesCameraHardware) return
 
@@ -132,6 +139,13 @@ internal class CameraViewModel(
     }
 
     fun onEvent(event: CameraUiEvent) {
+        // isRecording stays true until Finalize, including after stop was requested.
+        if (recordingManager.isRecording.value && when (event) {
+            is CameraUiEvent.LoadPreset, is CameraUiEvent.DeletePreset,
+            CameraUiEvent.DeleteAllPresets, CameraUiEvent.OpenSettings,
+            is CameraUiEvent.SetStorageUri -> true
+            else -> false
+        }) return
         when (val runtimeResult = cameraRuntime.handleEvent(event, _uiState.value)) {
             CameraRuntimeEventResult.NotHandled -> Unit
             is CameraRuntimeEventResult.Handled -> {
@@ -167,7 +181,7 @@ internal class CameraViewModel(
             }
             is CameraUiEvent.DeleteAllPresets -> {
                 preferencesManager.deleteAllPresets()
-                val loadedState = preferencesManager.loadPreset("Default", CameraUiState())
+                val loadedState = preferencesManager.loadPreset("Default", CameraUiState(recordingOptions = _uiState.value.recordingOptions))
                 preferencesManager.savePreset("Default", loadedState)
                 preferencesManager.currentPresetName = "Default"
                 _uiState.update { loadedState.copy(presetsList = listOf("Default")) }
@@ -208,15 +222,22 @@ internal class CameraViewModel(
                 }
             }
 
-            // Format & Gamma (auto-saved)
-            is CameraUiEvent.CycleColorFormat -> updateSettingsAndSave(requiresHardRebind = true) { state ->
-                val newFormat = state.colorFormat.next()
-                state.copy(
-                    colorFormat = newFormat,
-                    gammaCurve = if (newFormat.supportsGammaCurveSelection) state.gammaCurve else GammaCurve.AUTO
-                )
+            // Encoding & Gamma
+            is CameraUiEvent.SetVideoBitDepth -> selectVideoConfiguration(
+                RecordingSetting.BIT_DEPTH, _uiState.value.copy(videoBitDepth = event.bitDepth))
+            is CameraUiEvent.SetEncoding -> selectVideoConfiguration(
+                RecordingSetting.ENCODING, _uiState.value.copy(encoding = event.encoding))
+            is CameraUiEvent.SetVideoCodec -> selectVideoConfiguration(
+                RecordingSetting.CODEC, _uiState.value.copy(videoCodec = event.mimeType))
+            is CameraUiEvent.SetAudioCodec -> {
+                if (event.mimeType == null || event.mimeType in _uiState.value.recordingOptions.audioCodecs) {
+                    updateSettingsAndSave(requiresHardRebind = true) { it.copy(audioCodec = event.mimeType) }
+                }
             }
-            is CameraUiEvent.CycleGammaCurve -> if (_uiState.value.colorFormat.supportsGammaCurveSelection) {
+            is CameraUiEvent.SetAudioBitrate -> if (event.bitrate.isEmpty() || Bitrate.parseAudio(event.bitrate) != null) {
+                updateSettingsAndSave(requiresHardRebind = true) { it.copy(audioBitrate = event.bitrate) }
+            }
+            is CameraUiEvent.CycleGammaCurve -> if (_uiState.value.encoding.supportsGammaCurveSelection) {
                 updateSettingsAndSave(requiresHardRebind = false) { state ->
                     state.copy(gammaCurve = state.gammaCurve.next())
                 }
@@ -225,7 +246,7 @@ internal class CameraViewModel(
             is CameraUiEvent.SetNoiseReduction -> updateSettingsAndSave(requiresHardRebind = false) { it.copy(isNoiseReductionEnabled = event.enabled) }
             is CameraUiEvent.SetBitrate -> {
                 if (event.bitrate.isEmpty() || Bitrate.parse(event.bitrate) != null) {
-                    updateSettingsAndSave(requiresHardRebind = Bitrate.parse(event.bitrate) != null) {
+                    updateSettingsAndSave(requiresHardRebind = true) {
                         it.copy(bitrate = event.bitrate)
                     }
                 }
@@ -243,11 +264,8 @@ internal class CameraViewModel(
             is CameraUiEvent.SelectZoomLens -> selectZoomLens(event.cameraId)
 
             // SDR Hacks (auto-saved)
-            is CameraUiEvent.SetSdrToneMap -> updateSettingsAndSave(requiresHardRebind = true) {
-                it.copy(isSdrToneMapEnabled = event.enabled, isForceDisplaySdrEnabled = if (event.enabled) false else it.isForceDisplaySdrEnabled)
-            }
             is CameraUiEvent.SetForceDisplaySdr -> updateSettingsAndSave(requiresHardRebind = false) {
-                it.copy(isForceDisplaySdrEnabled = event.enabled, isSdrToneMapEnabled = if (event.enabled) false else it.isSdrToneMapEnabled)
+                it.copy(isForceDisplaySdrEnabled = event.enabled)
             }
 
             // Storage (Maintained globally out of the presets)
@@ -312,8 +330,9 @@ internal class CameraViewModel(
         if (_uiState.value.isRecording) {
             recordingManager.stopRecording()
         } else {
+            if (!_uiState.value.isCameraReady || _uiState.value.isSettingsSheetVisible || pendingHardRebind) return
             val videoCapture = cameraManager.videoCapture ?: return
-            val targetBitrate = Bitrate.parseOrDefault(_uiState.value.bitrate)
+            val targetBitrate = (Bitrate.parse(_uiState.value.bitrate) ?: 0)
             if (!recordingManager.startRecording(videoCapture, _uiState.value.storageUri)) return
             val requestedFps = requestedFpsForStats()
             telemetryCoordinator.startFpsCalculation()
@@ -407,8 +426,7 @@ internal class CameraViewModel(
         val generation = ++exposureTransitionGeneration
         _uiState.update {
             it.copy(
-                isExposureTransitioning = true,
-                exposureTransitionMessage = null
+                isExposureTransitioning = true
             )
         }
 
@@ -426,20 +444,13 @@ internal class CameraViewModel(
                 _uiState.update {
                     it.copy(
                         manualControlsState = it.manualControlsState.withCameraValues(result.controls),
-                        isExposureTransitioning = false,
-                        exposureTransitionMessage = result.message
+                        isExposureTransitioning = false
                     )
                 }
                 if (result.usedUnlockedHandoff) Log.d("CameraViewModel", "Exposure handoff used an unlocked camera result")
                 if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
                 else if (triggersRebind) scheduleCameraRebind(debounce = true)
                 if (lowLightBoostChanged) applyLowLightBoostPreference()
-                if (result.message != null) {
-                    delay(EXPOSURE_MESSAGE_DURATION_MS)
-                    if (generation == exposureTransitionGeneration) {
-                        _uiState.update { it.copy(exposureTransitionMessage = null) }
-                    }
-                }
             } catch (_: CameraRequestSupersededException) {
                 if (generation == exposureTransitionGeneration) {
                     _uiState.update { it.copy(isExposureTransitioning = false) }
@@ -450,7 +461,7 @@ internal class CameraViewModel(
             } catch (error: Exception) {
                 Log.w("CameraViewModel", "Exposure transition failed", error)
                 if (generation == exposureTransitionGeneration) {
-                    _uiState.update { it.copy(isExposureTransitioning = false, exposureTransitionMessage = error.message) }
+                    _uiState.update { it.copy(isExposureTransitioning = false) }
                 }
             }
         }
@@ -673,18 +684,38 @@ internal class CameraViewModel(
         if (cameraRuntime.usesCameraHardware) controlCoordinator.update(desiredState(), coalesce)
     }
 
-    fun finishManualControlInteraction() = applyInterop()
+    private enum class RecordingSetting { CODEC, BIT_DEPTH, ENCODING }
 
-    private fun collectControlErrors() {
-        viewModelScope.launch {
-            controlCoordinator.error.collect { error ->
-                if (error != null) {
-                    Log.w("CameraViewModel", error)
-                    _uiState.update { it.copy(exposureTransitionMessage = error) }
-                }
-            }
+    private var recordingPriority = listOf(RecordingSetting.CODEC, RecordingSetting.BIT_DEPTH, RecordingSetting.ENCODING)
+
+    private fun selectVideoConfiguration(touched: RecordingSetting, requested: CameraUiState) {
+        if (recordingManager.isRecording.value) return
+        val state = _uiState.value
+        val options = state.recordingOptions
+        val combinations = options.colorsByVideoCodec.flatMap { (codec, colors) -> colors.map { codec to it } }
+        fun matches(candidate: Pair<String?, VideoColorOption>, setting: RecordingSetting): Boolean = when (setting) {
+            RecordingSetting.CODEC -> candidate.first == requested.videoCodec
+            RecordingSetting.BIT_DEPTH -> candidate.second.bitDepth == requested.videoBitDepth
+            RecordingSetting.ENCODING -> candidate.second.encoding == requested.encoding
+        }
+        // Keep the touched value, then preserve the other values in most-recently-touched order.
+        val remaining = recordingPriority.filter { it != touched }
+        val selected = combinations.filter { matches(it, touched) }.maxWithOrNull(
+            compareBy<Pair<String?, VideoColorOption>> { matches(it, remaining[0]) }
+                .thenBy { matches(it, remaining[1]) }
+        ) ?: return
+        recordingPriority = listOf(touched) + remaining
+        updateSettingsAndSave(requiresHardRebind = true) {
+            it.copy(
+                videoCodec = selected.first,
+                videoBitDepth = selected.second.bitDepth,
+                encoding = selected.second.encoding,
+                gammaCurve = if (selected.second.encoding.supportsGammaCurveSelection) it.gammaCurve else GammaCurve.AUTO
+            )
         }
     }
+
+    fun finishManualControlInteraction() = applyInterop()
 
     // --- State Collection ---
     private fun collectRecordingState() {
@@ -697,7 +728,7 @@ internal class CameraViewModel(
                     statsManager.setRecordingState(
                         recording = false,
                         targetFps = requestedFpsForStats(),
-                        targetBitrate = Bitrate.parseOrDefault(state.bitrate),
+                        targetBitrate = (Bitrate.parse(state.bitrate) ?: 0),
                         storageUri = state.storageUri
                     )
                 }
@@ -721,17 +752,6 @@ internal class CameraViewModel(
                 _uiState.update { it.copy(zoomState = zoom, isCameraReady = zoom.isReady) }
             }
         }
-        viewModelScope.launch {
-            cameraManager.cameraError.collect { error ->
-                if (error != null) {
-                    Log.w("CameraViewModel", error)
-                    val actualZoom = cameraManager.zoomState.value
-                    _uiState.update {
-                        it.copy(exposureTransitionMessage = error, zoomState = actualZoom, isCameraReady = actualZoom.isReady)
-                    }
-                }
-            }
-        }
     }
 
     override fun onCleared() {
@@ -747,7 +767,7 @@ internal class CameraViewModel(
     private companion object {
         const val CAMERA_REBIND_DEBOUNCE_MS = 300L
         const val LOW_LIGHT_BOOST_MAX_FPS = 30
-        const val EXPOSURE_MESSAGE_DURATION_MS = 3_000L
+
     }
 
 }

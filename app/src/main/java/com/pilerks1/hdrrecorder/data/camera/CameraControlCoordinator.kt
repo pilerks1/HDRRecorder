@@ -5,6 +5,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.camerax.CameraXRequestBackend
 import com.pilerks1.hdrrecorder.data.camera.core.CameraControlValues
@@ -49,7 +50,6 @@ enum class ExposureMode { AUTO, SHUTTER_PRIORITY, SENSITIVITY_PRIORITY, FULL_MAN
 
 data class ExposureTransitionResult(
     val controls: CameraControlValues,
-    val message: String? = null,
     val usedUnlockedHandoff: Boolean = false
 )
 
@@ -67,8 +67,6 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     private var transitionVersion = 0L
     private var transitioning = false
     private val contributions = linkedMapOf<String, CameraRequestOverrides>()
-    private val _error = MutableStateFlow<String?>(null)
-    val error = _error.asStateFlow()
     private val _meteringState = MutableStateFlow(RegionalMeteringState())
     val meteringState = _meteringState.asStateFlow()
     private var meteringPoint: MeteringPoint? = null
@@ -101,7 +99,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
-                    _error.value = failure.message ?: "Unable to apply camera settings"
+                    Log.w("CameraControlCoordinator", "Unable to apply camera settings", failure)
                 }
             }
         }
@@ -126,7 +124,6 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         backend?.detach()
         backend = null
         cameraXControls = null
-        _error.value = null
     }
 
     fun update(state: DesiredCameraState, coalesce: Boolean = false) {
@@ -263,7 +260,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
             } catch (_: Exception) {
                 // Preserve the original application error.
             }
-            _error.value = failure.message ?: "Unable to apply metering region"
+            Log.w("CameraControlCoordinator", "Unable to apply metering region", failure)
         }
     }
 
@@ -280,7 +277,6 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         attachment.apply(snapshot(state, lock))
         ensureCurrent(attachment)
         lastSubmissionMs = SystemClock.elapsedRealtime()
-        _error.value = null
     }
 
     fun exposureMode(controls: CameraControlValues, caps: CameraCapabilities): ExposureMode = when {
@@ -408,8 +404,8 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                     }
                     val message = if (recovered) "Exposure transition failed; Auto restored"
                         else "Exposure transition failed; unable to confirm Auto"
-                    _error.value = message
-                    ExposureTransitionResult(auto, message)
+                    Log.w("CameraControlCoordinator", message, failure)
+                    ExposureTransitionResult(auto)
                 }
             }
         } finally {

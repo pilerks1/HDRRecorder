@@ -4,7 +4,8 @@ import androidx.camera.core.MeteringPoint
 import com.pilerks1.hdrrecorder.data.camera.core.MeteringAnchor
 import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
 import com.pilerks1.hdrrecorder.data.camera.core.RegionalMeteringState
-import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.RecordingOptions
+import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
@@ -98,7 +99,9 @@ data class CameraUiState(
     val selectedAspectRatio: RecordingAspectRatio = RecordingAspectRatio.FOUR_THREE,
 
     // Color Settings
-    val colorFormat: ColorFormat = ColorFormat.HLG,
+    val encoding: VideoEncoding = VideoEncoding.HLG,
+    val videoBitDepth: Int = 10,
+    val recordingOptions: RecordingOptions = RecordingOptions(),
     val gammaCurve: GammaCurve = GammaCurve.AUTO,
 
     // Manual Controls
@@ -110,10 +113,12 @@ data class CameraUiState(
     // Video Settings
     val isNoiseReductionEnabled: Boolean = true,
     val bitrate: String = "30",
+    val videoCodec: String? = null,
+    val audioCodec: String? = null,
+    val audioBitrate: String = "",
     val isStabilizationEnabled: Boolean = true,
 
     // SDR Hacks
-    val isSdrToneMapEnabled: Boolean = false,
     val isForceDisplaySdrEnabled: Boolean = false,
 
     // Storage
@@ -121,8 +126,7 @@ data class CameraUiState(
 
     // UI Visibility
     val isSettingsSheetVisible: Boolean = false,
-    val isExposureTransitioning: Boolean = false,
-    val exposureTransitionMessage: String? = null
+    val isExposureTransitioning: Boolean = false
 )
 
 /**
@@ -146,7 +150,11 @@ sealed interface CameraUiEvent {
     data class SetLowLightBoost(val enabled: Boolean) : CameraUiEvent
 
     // Color Events
-    data object CycleColorFormat : CameraUiEvent
+    data class SetVideoBitDepth(val bitDepth: Int) : CameraUiEvent
+    data class SetEncoding(val encoding: VideoEncoding) : CameraUiEvent
+    data class SetVideoCodec(val mimeType: String?) : CameraUiEvent
+    data class SetAudioCodec(val mimeType: String?) : CameraUiEvent
+    data class SetAudioBitrate(val bitrate: String) : CameraUiEvent
     data object CycleGammaCurve : CameraUiEvent
 
     data class SetNoiseReduction(val enabled: Boolean) : CameraUiEvent
@@ -154,7 +162,6 @@ sealed interface CameraUiEvent {
     data class SetStabilization(val enabled: Boolean) : CameraUiEvent
 
     // SDR Hack Events
-    data class SetSdrToneMap(val enabled: Boolean) : CameraUiEvent
     data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent
 
     // Storage Event

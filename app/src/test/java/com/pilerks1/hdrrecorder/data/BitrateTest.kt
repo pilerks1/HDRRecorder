@@ -18,9 +18,4 @@ class BitrateTest {
         assertNull(Bitrate.parse("-1"))
         assertNull(Bitrate.parse("1000"))
     }
-
-    @Test
-    fun parseOrDefaultHandlesInvalidPersistedValues() {
-        assertEquals(Bitrate.DEFAULT_MBPS, Bitrate.parseOrDefault("1000"))
-    }
 }

@@ -15,7 +15,7 @@ object FixedFrameRates {
 
     fun nearestFixedFrameRate(
         requestedFps: Int,
-        validRanges: List<Range<Int>>
+        validRanges: List<Range<Int>> 
     ): Int? = fixedFrameRates(validRanges)
         .minWithOrNull(
             compareBy<Int> { fps -> abs(fps - requestedFps) }

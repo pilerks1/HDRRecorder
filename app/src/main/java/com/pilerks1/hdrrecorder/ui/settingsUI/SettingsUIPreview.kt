@@ -12,8 +12,6 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SdrSection(
-    isSdrToneMapEnabled: Boolean,
-    onSdrToneMapChange: (Boolean) -> Unit,
     isForceDisplaySdrEnabled: Boolean,
     onForceDisplaySdrChange: (Boolean) -> Unit
 ) {
@@ -24,15 +22,6 @@ fun SdrSection(
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(bottom = 8.dp)
     )
-
-    HdrSettingsSwitchRow(
-        label = "SDR Tone Map",
-        description = "Forces SDR in preview builder",
-        checked = isSdrToneMapEnabled,
-        onCheckedChange = onSdrToneMapChange
-    )
-
-    Spacer(modifier = Modifier.height(8.dp))
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
         HdrSettingsSwitchRow(

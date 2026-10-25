@@ -6,11 +6,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import com.pilerks1.hdrrecorder.model.RecordingOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.pilerks1.hdrrecorder.model.ColorFormat
+import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaCurve
 
 /**
@@ -27,6 +28,15 @@ fun SettingsUI(
     onDeletePreset: (String) -> Unit,
     onDeleteAllPresets: () -> Unit,
 
+    videoCodec: String?,
+    onVideoCodecChange: (String?) -> Unit,
+    audioCodec: String?,
+    onAudioCodecChange: (String?) -> Unit,
+    audioBitrate: String,
+    onAudioBitrateChange: (String) -> Unit,
+    recordingOptions: RecordingOptions,
+    bitDepth: Int,
+    onBitDepthChange: (Int) -> Unit,
     // Video Settings
     noiseReductionEnabled: Boolean,
     onNoiseReductionChange: (Boolean) -> Unit,
@@ -36,14 +46,12 @@ fun SettingsUI(
     onStabilizationChange: (Boolean) -> Unit,
 
     // Color Settings
-    colorFormat: ColorFormat,
-    onColorFormatChange: () -> Unit,
+    encoding: VideoEncoding,
+    onEncodingChange: (VideoEncoding) -> Unit,
     gammaCurve: GammaCurve,
     onGammaCurveChange: () -> Unit,
 
     // SDR Hacks
-    isSdrToneMapEnabled: Boolean,
-    onSdrToneMapChange: (Boolean) -> Unit,
     isForceDisplaySdrEnabled: Boolean,
     onForceDisplaySdrChange: (Boolean) -> Unit,
 
@@ -76,6 +84,12 @@ fun SettingsUI(
         SectionDivider()
 
         VideoSection(
+            videoCodec = videoCodec,
+            videoCodecs = recordingOptions.videoCodecs,
+            onVideoCodecChange = onVideoCodecChange,
+            compatibleVideoCodecs = recordingOptions.colorsByVideoCodec.filterValues {
+                com.pilerks1.hdrrecorder.model.VideoColorOption(bitDepth, encoding) in it
+            }.keys,
             bitrate = bitrate,
             onBitrateChange = onBitrateChange,
             noiseReductionEnabled = noiseReductionEnabled,
@@ -87,17 +101,29 @@ fun SettingsUI(
         SectionDivider()
 
         ColorSection(
-            colorFormat = colorFormat,
-            onColorFormatChange = onColorFormatChange,
+            bitDepth = bitDepth,
+            colors = recordingOptions.allColors(),
+            compatibleColors = recordingOptions.colors(videoCodec),
+            onBitDepthChange = onBitDepthChange,
+            encoding = encoding,
+            onEncodingChange = onEncodingChange,
             gammaCurve = gammaCurve,
             onGammaCurveChange = onGammaCurveChange
         )
 
         SectionDivider()
 
+        AudioSection(
+            codec = audioCodec,
+            codecs = recordingOptions.audioCodecs,
+            onCodecChange = onAudioCodecChange,
+            bitrate = audioBitrate,
+            onBitrateChange = onAudioBitrateChange
+        )
+
+        SectionDivider()
+
         SdrSection(
-            isSdrToneMapEnabled = isSdrToneMapEnabled,
-            onSdrToneMapChange = onSdrToneMapChange,
             isForceDisplaySdrEnabled = isForceDisplaySdrEnabled,
             onForceDisplaySdrChange = onForceDisplaySdrChange
         )
