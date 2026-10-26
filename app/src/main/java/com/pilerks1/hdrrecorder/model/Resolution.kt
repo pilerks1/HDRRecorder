@@ -7,6 +7,7 @@ package com.pilerks1.hdrrecorder.model
  */
 enum class Resolution(val qualityName: String, val storageId: String) {
     FHD("FHD", "fhd"),
+    QHD("QHD", "qhd"),
     UHD("UHD", "uhd"),
     HIGHEST("MAX", "highest");
 
