@@ -146,10 +146,10 @@ object SliderScales {
     fun postRawSensitivity(caps: CameraCapabilities?): SliderScale<Int> {
         val lower = caps?.postRawSensitivityBoostRange?.lower ?: 100
         val upper = (caps?.postRawSensitivityBoostRange?.upper ?: 100).coerceAtLeast(lower)
-        return linearScale(
-            lower.toDouble(), upper.toDouble(), interval = 25.0, reference = 100.0,
+        return logarithmicScale(
+            lower.toDouble(), upper.toDouble(), reference = 100.0,
             decode = { it.roundToInt() }, encode = Int::toDouble,
-            format = { String.format(Locale.US, "%.2f×", it / 100.0) }
+            format = { String.format(Locale.US, "%.2fx", it / 100.0) }
         )
     }
 

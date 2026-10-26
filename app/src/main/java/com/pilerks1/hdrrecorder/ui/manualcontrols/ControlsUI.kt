@@ -599,7 +599,7 @@ private fun IsoPanel(
     val effectivePost = if (state.isManualPostRawSensitivity) {
         state.postRawSensitivityBoost
     } else {
-        telemetry.postRawSensitivityBoost
+        telemetry.postRawSensitivityBoost ?: 100
     }
     val postSlider: @Composable (Modifier) -> Unit = { modifier ->
         StandardSlider(

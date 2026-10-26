@@ -49,6 +49,8 @@ class PreferencesManager(context: Context) {
             put("bitrate", state.bitrate)
             put("stab", state.isStabilizationEnabled)
             put("forceSdr", state.isForceDisplaySdrEnabled)
+            put("extendManualRanges", state.isExtendManualRangesEnabled)
+            put("waitToLockAe", state.isWaitToLockAeEnabled)
             // Note: Storage URI remains global, so we don't bake it into individual presets.
         }
         prefs.edit { putString("preset_$name", json.toString()) }
@@ -89,6 +91,8 @@ class PreferencesManager(context: Context) {
                 bitrate = json.optString("bitrate", defaultState.bitrate),
                 isStabilizationEnabled = json.optBoolean("stab", defaultState.isStabilizationEnabled),
                 isForceDisplaySdrEnabled = json.optBoolean("forceSdr", defaultState.isForceDisplaySdrEnabled),
+                isExtendManualRangesEnabled = json.optBoolean("extendManualRanges", false),
+                isWaitToLockAeEnabled = json.optBoolean("waitToLockAe", true),
                 currentPresetName = name
             )
         } catch (e: Exception) {

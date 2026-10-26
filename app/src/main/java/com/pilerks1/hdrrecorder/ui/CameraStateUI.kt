@@ -121,6 +121,10 @@ data class CameraUiState(
     // SDR Hacks
     val isForceDisplaySdrEnabled: Boolean = false,
 
+    // Camera2
+    val isExtendManualRangesEnabled: Boolean = false,
+    val isWaitToLockAeEnabled: Boolean = true,
+
     // Storage
     val storageUri: String? = null,
 
@@ -163,6 +167,10 @@ sealed interface CameraUiEvent {
 
     // SDR Hack Events
     data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent
+
+    // Camera2 Events
+    data class SetExtendManualRanges(val enabled: Boolean) : CameraUiEvent
+    data class SetWaitToLockAe(val enabled: Boolean) : CameraUiEvent
 
     // Storage Event
     data class SetStorageUri(val uri: String) : CameraUiEvent

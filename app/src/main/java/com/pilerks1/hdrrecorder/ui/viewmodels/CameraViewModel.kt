@@ -29,6 +29,7 @@ import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
+import com.pilerks1.hdrrecorder.ui.resetManualSlidersToAuto
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeBound
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeMath
 import kotlinx.coroutines.CancellationException
@@ -263,6 +264,17 @@ internal class CameraViewModel(
             }
             is CameraUiEvent.SelectZoomLens -> selectZoomLens(event.cameraId)
 
+            is CameraUiEvent.SetExtendManualRanges -> updateSettingsAndSave(requiresHardRebind = true) {
+                it.copy(
+                    isExtendManualRangesEnabled = event.enabled,
+                    manualControlsState = it.manualControlsState.resetManualSlidersToAuto()
+                )
+            }
+
+            is CameraUiEvent.SetWaitToLockAe -> updateSettingsAndSave {
+                it.copy(isWaitToLockAeEnabled = event.enabled)
+            }
+
             // SDR Hacks (auto-saved)
             is CameraUiEvent.SetForceDisplaySdr -> updateSettingsAndSave(requiresHardRebind = false) {
                 it.copy(isForceDisplaySdrEnabled = event.enabled)
@@ -365,7 +377,7 @@ internal class CameraViewModel(
         val exposureDefaults = ManualControlStateUpdater.ExposureDefaults(
             isoValue = telemetry.iso,
             shutterNanos = telemetry.shutterNanos,
-            postRawSensitivityBoost = telemetry.postRawSensitivityBoost
+            postRawSensitivityBoost = telemetry.postRawSensitivityBoost ?: 100
         )
         val (calculatedState, triggersRebind) = ManualControlStateUpdater.calculateNextState(
             oldControls,
@@ -438,7 +450,8 @@ internal class CameraViewModel(
                         ssValueNanos = oldControls.ssValueNanos ?: defaults.shutterNanos,
                         postRawSensitivityBoost = oldControls.postRawSensitivityBoost ?: defaults.postRawSensitivityBoost
                     ),
-                    target = desiredState(targetControls)
+                    target = desiredState(targetControls),
+                    waitToLockAe = _uiState.value.isWaitToLockAeEnabled
                 )
                 if (generation != exposureTransitionGeneration) return@launch
                 _uiState.update {

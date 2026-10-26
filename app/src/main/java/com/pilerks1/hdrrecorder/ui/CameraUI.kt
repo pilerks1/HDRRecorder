@@ -223,6 +223,10 @@ internal fun CameraUI(
                 onStabilizationChange = { actions.onEvent(CameraUiEvent.SetStabilization(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
                 onForceDisplaySdrChange = { actions.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
+                isExtendManualRangesEnabled = uiState.isExtendManualRangesEnabled,
+                onExtendManualRangesChange = { actions.onEvent(CameraUiEvent.SetExtendManualRanges(it)) },
+                isWaitToLockAeEnabled = uiState.isWaitToLockAeEnabled,
+                onWaitToLockAeChange = { actions.onEvent(CameraUiEvent.SetWaitToLockAe(it)) },
                 storageUri = uiState.storageUri,
                 onStorageUriSelected = { actions.onEvent(CameraUiEvent.SetStorageUri(it)) },
                 onNavigateToCompatibility = {

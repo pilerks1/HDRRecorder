@@ -3,6 +3,7 @@ package com.pilerks1.hdrrecorder.data.camera
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.os.Build
+import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.core.CameraMetadata as ReportedCameraMetadata
 import com.pilerks1.hdrrecorder.data.camera.core.DeviceCompatibilityChecker
 
@@ -16,7 +17,11 @@ object CameraCapabilitiesManager {
     /**
      * Projects reported Camera2 metadata and separately supplied CameraX support into app controls.
      */
-    fun extractCapabilities(camera2Info: ReportedCameraMetadata, supportsLowLightBoost: Boolean): CameraCapabilities {
+    fun extractCapabilities(
+        camera2Info: ReportedCameraMetadata,
+        supportsLowLightBoost: Boolean,
+        extendManualRanges: Boolean = false
+    ): CameraCapabilities {
         
         // 1. ISO (Sensitivity)
         val isoRange = camera2Info.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
@@ -70,7 +75,7 @@ object CameraCapabilitiesManager {
         val supportsFullManualExposure =
             supportsManualSensor && hasValidIsoRange && hasValidShutterRange
         val supportsPostRawSensitivityBoost =
-            supportsFullManualExposure && hasVariablePostRawSensitivityBoost
+            supportsFullManualExposure && (extendManualRanges || hasVariablePostRawSensitivityBoost)
         val hasExposureCompensationControl = evRange?.let { range ->
             evStep?.let { step ->
                 val hasNonZeroRange = range.lower != 0 || range.upper != 0
@@ -82,9 +87,10 @@ object CameraCapabilitiesManager {
         } == true
 
         return CameraCapabilities(
-            isoRange = isoRange,
-            postRawSensitivityBoostRange = postRawSensitivityBoostRange,
-            ssRangeNanos = ssRange,
+            isoRange = if (extendManualRanges) Range(16, 25600) else isoRange,
+            postRawSensitivityBoostRange = if (extendManualRanges) Range(10, 6400) else postRawSensitivityBoostRange,
+            // 1/32768 second rounded to the nearest nanosecond, through 1 second.
+            ssRangeNanos = if (extendManualRanges) Range(30_518L, 1_000_000_000L) else ssRange,
             evRange = evRange,
             evStep = evStep,
             focusMinDistanceDiopters = minFocus,

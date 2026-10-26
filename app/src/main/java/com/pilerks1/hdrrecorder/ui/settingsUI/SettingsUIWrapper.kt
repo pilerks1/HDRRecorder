@@ -55,6 +55,12 @@ fun SettingsUI(
     isForceDisplaySdrEnabled: Boolean,
     onForceDisplaySdrChange: (Boolean) -> Unit,
 
+    // Camera2
+    isExtendManualRangesEnabled: Boolean,
+    onExtendManualRangesChange: (Boolean) -> Unit,
+    isWaitToLockAeEnabled: Boolean,
+    onWaitToLockAeChange: (Boolean) -> Unit,
+
     // Storage
     storageUri: String?,
     onStorageUriSelected: (String) -> Unit,
@@ -126,6 +132,15 @@ fun SettingsUI(
         SdrSection(
             isForceDisplaySdrEnabled = isForceDisplaySdrEnabled,
             onForceDisplaySdrChange = onForceDisplaySdrChange
+        )
+
+        SectionDivider()
+
+        Camera2Section(
+            isExtendManualRangesEnabled = isExtendManualRangesEnabled,
+            onExtendManualRangesChange = onExtendManualRangesChange,
+            isWaitToLockAeEnabled = isWaitToLockAeEnabled,
+            onWaitToLockAeChange = onWaitToLockAeChange
         )
 
         SectionDivider()

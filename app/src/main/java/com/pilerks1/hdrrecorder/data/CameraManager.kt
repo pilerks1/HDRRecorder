@@ -230,7 +230,11 @@ class CameraManager(
             // Extract characteristics and pass back to ViewModel
             val cameraId = boundCamera.cameraInfo.cameraId
             val metadata = CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow()
-            val caps = CameraCapabilitiesManager.extractCapabilities(metadata, boundCamera.cameraInfo.isLowLightBoostSupported)
+            val caps = CameraCapabilitiesManager.extractCapabilities(
+                metadata,
+                boundCamera.cameraInfo.isLowLightBoostSupported,
+                extendManualRanges = request.uiState.isExtendManualRangesEnabled
+            )
             val attachment = CameraXRequestBackend(cameraId, cameraGeneration, boundCamera.cameraControl)
             controls.attach(attachment, attachment)
             observeZoom(boundCamera.cameraInfo, inventory)

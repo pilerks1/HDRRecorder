@@ -286,7 +286,11 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         else -> ExposureMode.AUTO
     }
 
-    suspend fun transition(previous: CameraControlValues, target: DesiredCameraState): ExposureTransitionResult {
+    suspend fun transition(
+        previous: CameraControlValues,
+        target: DesiredCameraState,
+        waitToLockAe: Boolean = true
+    ): ExposureTransitionResult {
         restartMetering()
         val version = ++transitionVersion
         transitioning = true
@@ -310,7 +314,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                         } else target.controls
                         var unlocked = false
                         if (newMode != ExposureMode.AUTO) {
-                            val held = if (oldMode != ExposureMode.FULL_MANUAL && caps.supportsAeLock) {
+                            val held = if (waitToLockAe && oldMode != ExposureMode.FULL_MANUAL && caps.supportsAeLock) {
                                 val source = target.copy(controls = previous)
                                 val lockedOverrides = snapshot(source, lock = true)
                                 val before = results.latest.value?.frameNumber ?: -1L
@@ -328,34 +332,48 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                                 ?: error("No reported sensor sensitivity")
                             val heldShutter = held[CaptureResult.SENSOR_EXPOSURE_TIME]
                                 ?: error("No reported exposure time")
-                            val heldDuration = held[CaptureResult.SENSOR_FRAME_DURATION]
-                                ?: error("No reported frame duration")
                             val heldBoost = held[CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST]
+                                // Forced Post RAW control may have no reported gain; use unity.
+                                ?: if (caps.supportsPostRawSensitivityBoost) {
+                                    previous.postRawSensitivityBoost ?: 100
+                                } else null
                             val handoff = resolved.copy(
                                 isoValue = if (resolved.isManualIso) heldIso else null,
                                 ssValueNanos = if (resolved.isManualSs) heldShutter else null,
                                 isManualPostRawSensitivity = newMode == ExposureMode.FULL_MANUAL && caps.supportsPostRawSensitivityBoost,
                                 postRawSensitivityBoost = if (newMode == ExposureMode.FULL_MANUAL) heldBoost else null
                             )
-                            // Values copied from the locked result establish continuity before a user target is applied.
-                            val overrides = CameraRequestOverrides.Builder().add(
-                                snapshot(target.copy(controls = handoff), lock = false), "handoff"
-                            ).apply {
-                                if (newMode == ExposureMode.FULL_MANUAL) {
-                                    set(CaptureRequest.SENSOR_FRAME_DURATION, maxOf(heldDuration, heldShutter), "handoff")
-                                }
-                            }.build()
-                            val before = results.latest.value?.frameNumber ?: -1L
-                            attachment.apply(overrides)
-                            awaitFrame(attachment, before) { frame -> matchesExposure(frame, overrides, newMode) }
-                            checkCurrent()
+                            if (waitToLockAe) {
+                                val heldDuration = held[CaptureResult.SENSOR_FRAME_DURATION]
+                                    ?: error("No reported frame duration")
+                                // Establish continuity before applying an explicit user target.
+                                val overrides = CameraRequestOverrides.Builder().add(
+                                    snapshot(target.copy(controls = handoff), lock = false), "handoff"
+                                ).apply {
+                                    if (newMode == ExposureMode.FULL_MANUAL) {
+                                        set(CaptureRequest.SENSOR_FRAME_DURATION, maxOf(heldDuration, heldShutter), "handoff")
+                                    }
+                                }.build()
+                                val before = results.latest.value?.frameNumber ?: -1L
+                                attachment.apply(overrides)
+                                awaitFrame(attachment, before) { frame -> matchesExposure(frame, overrides, newMode) }
+                                checkCurrent()
+                            }
                             // Automatic slider values are observations, not explicit new user targets.
+                            // Immediate transitions preserve controls that were already manual.
                             resolved = resolved.copy(
-                                isoValue = if (resolved.isManualIso && resolved.isoValue == previous.isoValue) heldIso else resolved.isoValue,
-                                ssValueNanos = if (resolved.isManualSs && resolved.ssValueNanos == previous.ssValueNanos) heldShutter else resolved.ssValueNanos,
+                                isoValue = if (resolved.isManualIso && resolved.isoValue == previous.isoValue &&
+                                    (waitToLockAe || !previous.isManualIso)
+                                ) heldIso else resolved.isoValue,
+                                ssValueNanos = if (resolved.isManualSs && resolved.ssValueNanos == previous.ssValueNanos &&
+                                    (waitToLockAe || !previous.isManualSs)
+                                ) heldShutter else resolved.ssValueNanos,
                                 isManualPostRawSensitivity = handoff.isManualPostRawSensitivity,
                                 postRawSensitivityBoost = if (handoff.isManualPostRawSensitivity) {
-                                    resolved.postRawSensitivityBoost?.takeUnless { it == previous.postRawSensitivityBoost } ?: heldBoost
+                                    resolved.postRawSensitivityBoost?.takeUnless {
+                                        it == previous.postRawSensitivityBoost &&
+                                            (waitToLockAe || !previous.isManualPostRawSensitivity)
+                                    } ?: heldBoost
                                 } else null
                             )
                             if (newMode == ExposureMode.FULL_MANUAL && resolved.isManualFps) {
