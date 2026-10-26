@@ -29,6 +29,7 @@ import com.pilerks1.hdrrecorder.ui.CameraControlPanel
 import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
+import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
 import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
@@ -297,7 +298,7 @@ fun ActiveControlPanel(
                     value = scale.progress(state.evValueIndex),
                     axis = axis,
                     labelString = scale.formatValue(state.evValueIndex),
-                    ticks = scale.ticks,
+                    ruler = scale.ruler,
                     layoutLabels = scale.layoutLabels,
                     onValueChange = { onSetEv(true, scale.value(it)) },
                     onValueChangeFinished = onManualControlInteractionFinished,
@@ -440,10 +441,12 @@ private fun ZoomPanel(
         content = { sliderModifier, axisReservation ->
             RibbonSlider(
                 value = scale.progress(zoomState.ratio),
-                onValueChange = onLinearZoomChange,
+                onValueChange = { progress ->
+                    onLinearZoomChange(ZoomMapping.progress(scale.value(progress), zoomState.minRatio, zoomState.maxRatio))
+                },
                 axis = axis,
                 labelString = if (zoomState.isReady) scale.formatValue(zoomState.ratio) else "—",
-                ticks = scale.ticks,
+                ruler = scale.ruler,
                 layoutLabels = scale.layoutLabels,
                 axisReservation = axisReservation,
                 modifier = sliderModifier.fillMaxSize()
@@ -533,7 +536,7 @@ private fun <T : Any> StandardSlider(
         value = effectiveValue?.let(scale::progress) ?: 0f,
         axis = axis,
         labelString = effectiveValue?.let(scale.formatValue) ?: "—",
-        ticks = if (hasValue) scale.ticks else emptyList(),
+        ruler = if (hasValue) scale.ruler else scale.ruler.copy(ticks = emptyList(), markers = emptyList()),
         layoutLabels = if (hasValue) scale.layoutLabels else listOf("—"),
         onValueChange = { binding.onManualValue(scale.value(it)) },
         onValueChangeFinished = onInteractionFinished,

@@ -52,7 +52,9 @@ private val ClipXAxisShape = object : Shape {
 
 private data class RibbonTickLayout(
     val fraction: Float,
-    val label: TextLayoutResult?
+    val label: TextLayoutResult?,
+    val isMarker: Boolean,
+    val auxiliaryLabel: Boolean
 )
 
 internal data class RibbonAxisGeometry(
@@ -92,7 +94,7 @@ fun RibbonSlider(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     labelString: String = "",
-    ticks: List<SliderTick>,
+    ruler: SliderRuler,
     layoutLabels: List<String>,
     axisReservation: SliderAxisReservation = SliderAxisReservation()
 ) {
@@ -103,11 +105,14 @@ fun RibbonSlider(
     val tickStartYOffset = SliderPaneStyle.centerIndicatorHalfHeight + SliderPaneStyle.standardElementGap
     // ==========================================
 
+    val ticks = ruler.ticks
     val textRotation = axis.contentCounterRotationDegrees
     
     val density = LocalDensity.current
     val tickStartYOffsetPx = with(density) { tickStartYOffset.toPx() }
     val tickToTextPaddingPx = with(density) { tickToTextPadding.toPx() }
+    val virtualLengthPx = with(density) { SliderPaneStyle.rulerTickSpacing.toPx() } * ruler.intervalCount
+    val labelGapPx = with(density) { SliderPaneStyle.rulerLabelGap.toPx() }
     val tickHeightPx = with(density) { SliderPaneStyle.sliderTickHeight.toPx() }
     val axisEdgePaddingPx = with(density) { SliderPaneStyle.sliderAxisEdgePadding.toPx() }
     val axisReservedStartPx = with(density) { axisReservation.start.toPx() }
@@ -118,15 +123,28 @@ fun RibbonSlider(
     val tickTextStyle = remember { SliderPaneStyle.tickTextStyle.copy(color = Color.Gray) }
     val liveTextStyle = remember { SliderPaneStyle.liveReadoutTextStyle.copy(color = Color.White) }
     val textMeasurer = rememberTextMeasurer()
-    val tickLayouts = remember(ticks, density, textMeasurer) {
-        ticks.map { tick ->
-            RibbonTickLayout(
-                fraction = tick.position,
-                label = tick.label.takeIf(String::isNotEmpty)?.let {
-                    textMeasurer.measure(AnnotatedString(it), style = tickTextStyle)
-                }
+    val tickLayouts = remember(ruler, density, textMeasurer) {
+        fun layout(tick: SliderTick, isMarker: Boolean, auxiliaryLabel: Boolean) = RibbonTickLayout(
+            fraction = tick.position,
+            label = tick.label.takeIf(String::isNotEmpty)?.let {
+                textMeasurer.measure(AnnotatedString(it), style = tickTextStyle)
+            },
+            isMarker = isMarker,
+            auxiliaryLabel = auxiliaryLabel
+        )
+        fun coincides(first: SliderTick, second: SliderTick): Boolean =
+            abs(first.position - second.position) * ruler.intervalCount < 0.00001f
+        val regular = ticks.map { tick ->
+            val marker = ruler.markers.firstOrNull { coincides(tick, it) }
+            layout(
+                tick = if (tick.label.isEmpty() && marker != null) marker else tick,
+                isMarker = marker != null,
+                auxiliaryLabel = tick.label.isEmpty() && marker != null
             )
         }
+        val markers = ruler.markers.filter { marker -> ticks.none { coincides(it, marker) } }
+            .map { layout(it, isMarker = true, auxiliaryLabel = true) }
+        (regular + markers).sortedBy(RibbonTickLayout::fraction)
     }
     val maximumLiveLabelSize = remember(layoutLabels, density, textMeasurer) {
         layoutLabels.fold(IntSize.Zero) { maximum, label ->
@@ -190,8 +208,8 @@ fun RibbonSlider(
                 .fillMaxSize()
                 .onSizeChanged { sliderSurfaceSize = it }
                 .clip(ClipXAxisShape)
-                .pointerInput(enabled, axisReservation) {
-                    if (!enabled) return@pointerInput
+                .pointerInput(enabled, axisReservation, ruler, virtualLengthPx) {
+                    if (!enabled || ruler.intervalCount <= 0f) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { 
                             velocityTracker.resetTracking()
@@ -201,12 +219,7 @@ fun RibbonSlider(
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
                             velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            val trackLengthPx = ribbonAxisGeometry(
-                                width = size.width.toFloat(),
-                                edgePadding = axisEdgePaddingPx,
-                                reservedStart = axisReservedStartPx,
-                                reservedEnd = axisReservedEndPx
-                            ).let { (it.axisEnd - it.axisStart).coerceAtLeast(1f) }
+                            val trackLengthPx = virtualLengthPx.coerceAtLeast(1f)
                             dragAccumulator -= (dragAmount / trackLengthPx)
                             val newValue = dragAccumulator.coerceIn(0f, 1f)
                             scope.launch { animatable.snapTo(newValue) }
@@ -214,12 +227,7 @@ fun RibbonSlider(
                         },
                         onDragEnd = {
                             val velocityPx = velocityTracker.calculateVelocity().x
-                            val trackLengthPx = ribbonAxisGeometry(
-                                width = size.width.toFloat(),
-                                edgePadding = axisEdgePaddingPx,
-                                reservedStart = axisReservedStartPx,
-                                reservedEnd = axisReservedEndPx
-                            ).let { (it.axisEnd - it.axisStart).coerceAtLeast(1f) }
+                            val trackLengthPx = virtualLengthPx.coerceAtLeast(1f)
                             val velocityInValue = -(velocityPx / trackLengthPx)
                             
                             scope.launch {
@@ -269,17 +277,27 @@ fun RibbonSlider(
                 )
                 val centerX = (axisGeometry.axisStart + axisGeometry.axisEnd) / 2f
                 val centerY = standardPaneEdgePaddingPx + sliderTopExtentPx
-                val totalPanDistancePx = (axisGeometry.axisEnd - axisGeometry.axisStart).coerceAtLeast(1f)
+                val totalPanDistancePx = virtualLengthPx
 
                 clipRect(left = axisGeometry.axisStart, right = axisGeometry.axisEnd) {
+                    fun labelHalfExtent(label: TextLayoutResult): Float =
+                        (if (textRotation == 0f) label.size.width else label.size.height) / 2f
+                    val regularLabelBounds = tickLayouts.filter { !it.auxiliaryLabel && it.label != null }
+                        .map { tick ->
+                            val x = centerX + (tick.fraction - value) * totalPanDistancePx
+                            val half = labelHalfExtent(checkNotNull(tick.label))
+                            (x - half)..(x + half)
+                        }
+                    val markerLabelBounds = mutableListOf<ClosedFloatingPointRange<Float>>()
                     tickLayouts.forEach { tick ->
                         val tickX = centerX + (tick.fraction - value) * totalPanDistancePx
+                        if (tickX < axisGeometry.axisStart || tickX > axisGeometry.axisEnd) return@forEach
                         val tickTop = centerY + tickStartYOffsetPx
                         drawLine(
-                            color = Color.White,
+                            color = if (tick.isMarker) Color.Yellow else Color.White,
                             start = Offset(tickX, tickTop),
                             end = Offset(tickX, tickTop + tickHeightPx),
-                            strokeWidth = 1.dp.toPx()
+                            strokeWidth = (if (tick.isMarker) 2.dp else 1.dp).toPx()
                         )
 
                         tick.label?.let { label ->
@@ -294,15 +312,18 @@ fun RibbonSlider(
                                 x = tickX - label.size.width / 2f,
                                 y = labelTop
                             )
-                            val labelPrimaryHalfExtent = if (textRotation == 0f) {
-                                label.size.width / 2f
-                            } else {
-                                label.size.height / 2f
-                            }
+                            val labelPrimaryHalfExtent = labelHalfExtent(label)
+                            val labelBounds = (tickX - labelPrimaryHalfExtent)..(tickX + labelPrimaryHalfExtent)
+                            val collision = tick.auxiliaryLabel &&
+                                (regularLabelBounds + markerLabelBounds).any { bounds ->
+                                    labelBounds.start < bounds.endInclusive + labelGapPx &&
+                                        labelBounds.endInclusive + labelGapPx > bounds.start
+                                }
                             if (
-                                tickX - labelPrimaryHalfExtent >= axisGeometry.axisStart &&
+                                !collision && tickX - labelPrimaryHalfExtent >= axisGeometry.axisStart &&
                                 tickX + labelPrimaryHalfExtent <= axisGeometry.axisEnd
                             ) {
+                                if (tick.auxiliaryLabel) markerLabelBounds.add(labelBounds)
                                 rotate(
                                     degrees = textRotation,
                                     pivot = Offset(tickX, topLeft.y + label.size.height / 2f)

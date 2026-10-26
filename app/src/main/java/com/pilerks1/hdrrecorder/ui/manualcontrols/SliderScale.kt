@@ -2,26 +2,37 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
-import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.log2
-import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
+// Also used by the independent FPS range slider.
 data class SliderTick(val position: Float, val label: String)
+
+/** Coordinates are measured in regular tick intervals; ticks retain normalized positions. */
+data class SliderRuler(
+    val minimum: Double,
+    val maximum: Double,
+    val ticks: List<SliderTick>,
+    val markers: List<SliderTick>
+) {
+    val intervalCount: Float get() = (maximum - minimum).toFloat()
+}
 
 /** Immutable typed scale used by all standard single-value controls. */
 class SliderScale<T : Any>(
     val valueToProgress: (T) -> Float,
     val progressToValue: (Float) -> T,
     val formatValue: (T) -> String,
-    val ticks: List<SliderTick>,
+    val ruler: SliderRuler,
     val layoutLabels: List<String>
 ) {
+    val ticks: List<SliderTick> get() = ruler.ticks
     fun progress(value: T): Float = valueToProgress(value).finiteProgress()
     fun value(progress: Float): T = progressToValue(progress.finiteProgress())
 }
@@ -34,324 +45,188 @@ data class StandardSliderBinding<T : Any>(
 )
 
 object SliderScales {
-    private const val MAX_TICK_COUNT = 15
-    private const val LABEL_INTERVAL = 2
-    private const val MAX_EV_MAJOR_LABEL_COUNT = 7
     private const val MAX_ISO_LIVE_LABEL = "99999"
 
     fun formatZoomFactor(ratio: Float): String =
         String.format(Locale.US, "%.2f", ratio).trimEnd('0').trimEnd('.') + "x"
 
-    fun zoom(state: CameraZoomState = CameraZoomState()): SliderScale<Float> {
-        val lower = state.minRatio
-        val upper = state.maxRatio
-        val lensRatios = state.inventory?.buttonLenses.orEmpty().mapNotNull { it.zoomRatio }
-            .filter { it in lower..upper }
-        val toProgress: (Float) -> Float = { ZoomMapping.progress(it, lower, upper) }
-        val fromProgress: (Float) -> Float = { ZoomMapping.ratio(it, lower, upper) }
-        val format: (Float) -> String = { String.format(Locale.US, "%.2fx", it) }
-        val ticks = uniformTicks(
-            fromProgress,
-            ::formatZoomFactor,
-            if (upper > lower) MAX_TICK_COUNT - 1 else 0
-        ).toMutableList()
-        val availableIndices = ticks.indices.toMutableSet()
-        // Keep 15 ticks, placing the nearest tick at each exact lens position.
-        lensRatios.forEach { ratio ->
-            val position = toProgress(ratio)
-            val index = availableIndices.minByOrNull { abs(ticks[it].position - position) }
-            val tick = SliderTick(position, formatZoomFactor(ratio))
-            if (index != null) {
-                ticks[index] = tick
-                availableIndices.remove(index)
-            } else {
-                // A device with more lenses than standard ticks still marks every lens.
-                ticks.add(tick)
-            }
-        }
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks.sortedBy(SliderTick::position),
-            layoutLabels = layoutLabels(ticks, "â€”", format(lower), format(upper), *lensRatios.map(format).toTypedArray())
-        )
-    }
+    fun zoom(state: CameraZoomState = CameraZoomState()): SliderScale<Float> = logarithmicScale(
+        lower = state.minRatio.toDouble(),
+        upper = state.maxRatio.toDouble(),
+        reference = 1.0,
+        decode = Double::toFloat,
+        encode = Float::toDouble,
+        format = { String.format(Locale.US, "%.2fx", it) },
+        tickFormat = ::formatZoomFactor,
+        markers = state.inventory?.buttonLenses.orEmpty().mapNotNull { it.zoomRatio },
+        extraLabels = listOf("—")
+    )
 
-    fun iso(caps: CameraCapabilities?): SliderScale<Int> =
-        isoRange(
-            caps?.isoRange?.lower ?: 100,
-            caps?.isoRange?.upper ?: 3200
-        )
+    fun iso(caps: CameraCapabilities?): SliderScale<Int> = isoRange(
+        caps?.isoRange?.lower ?: 100,
+        caps?.isoRange?.upper ?: 3200
+    )
 
-    fun postRawSensitivity(caps: CameraCapabilities?): SliderScale<Int> {
-        val range = caps?.postRawSensitivityBoostRange
-        val lower = range?.lower ?: 100
-        val upper = (range?.upper ?: 100).coerceAtLeast(lower)
-        val toProgress: (Int) -> Float = { value ->
-            linearProgress(value.toFloat(), lower.toFloat(), upper.toFloat())
-        }
-        val fromProgress: (Float) -> Int = { progress ->
-            linearValue(progress, lower.toFloat(), upper.toFloat())
-                .roundToInt()
-                .coerceIn(lower, upper)
-        }
-        val format: (Int) -> String = { value ->
-            String.format(Locale.US, "%.2fÃ—", value / 100.0)
-        }
-        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = layoutLabels(ticks, format(lower), format(upper))
-        )
-    }
+    internal fun isoRange(minimum: Int, maximum: Int): SliderScale<Int> = logarithmicScale(
+        lower = minimum.coerceAtLeast(1).toDouble(),
+        upper = maximum.coerceAtLeast(minimum.coerceAtLeast(1)).toDouble(),
+        reference = 100.0,
+        decode = { it.roundToInt() },
+        encode = Int::toDouble,
+        format = Int::toString,
+        extraLabels = listOf(MAX_ISO_LIVE_LABEL)
+    )
 
-    internal fun isoRange(minimum: Int, maximum: Int): SliderScale<Int> {
-        val lower = minimum.coerceAtLeast(1)
-        val upper = maximum.coerceAtLeast(lower)
-        val toProgress: (Int) -> Float = { value -> logarithmicProgress(value.toDouble(), lower.toDouble(), upper.toDouble()) }
-        val fromProgress: (Float) -> Int = { progress ->
-            logarithmicValue(progress, lower.toDouble(), upper.toDouble()).roundToInt().coerceIn(lower, upper)
-        }
-        val format: (Int) -> String = Int::toString
-        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = (
-                layoutLabels(ticks, format(lower), format(upper)) + MAX_ISO_LIVE_LABEL
-                ).distinct()
-        )
-    }
+    fun shutter(caps: CameraCapabilities?): SliderScale<Long> = shutterRange(
+        caps?.ssRangeNanos?.lower ?: (1_000_000_000L / 8000L),
+        caps?.ssRangeNanos?.upper ?: (1_000_000_000L / 15L)
+    )
 
-    fun shutter(caps: CameraCapabilities?): SliderScale<Long> {
-        return shutterRange(
-            caps?.ssRangeNanos?.lower ?: (1_000_000_000L / 8000L),
-            caps?.ssRangeNanos?.upper ?: (1_000_000_000L / 15L)
-        )
-    }
+    internal fun shutterRange(minimum: Long, maximum: Long): SliderScale<Long> = logarithmicScale(
+        lower = minimum.coerceAtLeast(1L).toDouble(),
+        upper = maximum.coerceAtLeast(minimum.coerceAtLeast(1L)).toDouble(),
+        reference = 1_000_000_000.0,
+        decode = { it.roundToLong() },
+        encode = Long::toDouble,
+        format = ::formatShutter
+    )
 
-    internal fun shutterRange(minimum: Long, maximum: Long): SliderScale<Long> {
-        val lower = minimum.coerceAtLeast(1L)
-        val upper = maximum.coerceAtLeast(lower)
-        val toProgress: (Long) -> Float = { value -> logarithmicProgress(value.toDouble(), lower.toDouble(), upper.toDouble()) }
-        val fromProgress: (Float) -> Long = { progress ->
-            logarithmicValue(progress, lower.toDouble(), upper.toDouble()).roundToLong().coerceIn(lower, upper)
-        }
-        val format: (Long) -> String = ::formatShutter
-        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = layoutLabels(ticks, format(lower), format(upper))
-        )
-    }
-
-    fun exposureCompensation(caps: CameraCapabilities?): SliderScale<Int> {
-        val lower = caps?.evRange?.lower ?: -6
-        val upper = (caps?.evRange?.upper ?: 6).coerceAtLeast(lower)
-        val stepNumerator = caps?.evStep?.numerator ?: 1
-        val stepDenominator = caps?.evStep?.denominator ?: 3
-        return exposureCompensationRange(lower, upper, stepNumerator, stepDenominator)
-    }
+    fun exposureCompensation(caps: CameraCapabilities?): SliderScale<Int> = exposureCompensationRange(
+        caps?.evRange?.lower ?: -6,
+        caps?.evRange?.upper ?: 6,
+        caps?.evStep?.numerator ?: 1,
+        caps?.evStep?.denominator ?: 3
+    )
 
     internal fun exposureCompensationRange(
         minimumIndex: Int,
         maximumIndex: Int,
         stepNumerator: Int,
         stepDenominator: Int
-    ): SliderScale<Int> {
-        val lower = minimumIndex
-        val upper = maximumIndex.coerceAtLeast(lower)
-        val toProgress: (Int) -> Float = { value -> linearProgress(value.toFloat(), lower.toFloat(), upper.toFloat()) }
-        val fromProgress: (Float) -> Int = { progress ->
-            linearValue(progress, lower.toFloat(), upper.toFloat()).roundToInt().coerceIn(lower, upper)
-        }
-        val format: (Int) -> String = { index ->
-            formatEv(index, stepNumerator, stepDenominator)
-        }
-        val ticks = exposureCompensationTicks(
-            lower = lower,
-            upper = upper,
-            stepNumerator = stepNumerator,
-            stepDenominator = stepDenominator,
-            toProgress = toProgress,
-            format = format
-        )
-        val valueLabels = buildList {
-            add(format(lower))
-            if (lower <= 0 && upper >= 0) add(format(0))
-            add(format(upper))
-        }
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = layoutLabels(ticks, *valueLabels.toTypedArray())
-        )
-    }
+    ): SliderScale<Int> = linearScale(
+        lower = minimumIndex.toDouble(),
+        upper = maximumIndex.coerceAtLeast(minimumIndex).toDouble(),
+        interval = 1.0,
+        decode = { it.roundToInt() },
+        encode = Int::toDouble,
+        format = { formatEv(it, stepNumerator, stepDenominator) }
+    )
 
     fun focus(caps: CameraCapabilities?): SliderScale<Float> {
         val upper = caps?.focusMinDistanceDiopters?.coerceAtLeast(0f) ?: 10f
-        val toProgress: (Float) -> Float = { value -> linearProgress(value, 0f, upper) }
-        val fromProgress: (Float) -> Float = { progress -> linearValue(progress, 0f, upper).coerceIn(0f, upper) }
-        val format: (Float) -> String = { value ->
-            val progress = toProgress(value)
-            if (progress <= 0.01f) "INF" else String.format(Locale.US, "%.2f", progress)
-        }
-        val ticks = uniformTicks(
-            fromProgress = fromProgress,
-            format = format,
-            intervalCount = if (upper > 0f) MAX_TICK_COUNT - 1 else 0
-        )
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = layoutLabels(ticks, "INF", "0.00", "1.00")
+        return linearScale(
+            lower = 0.0,
+            upper = if (upper > 0f) 1.0 else 0.0,
+            interval = 0.05,
+            decode = { (it * upper).toFloat() },
+            encode = { if (upper > 0f) it.toDouble() / upper else 0.0 },
+            format = { value ->
+                val normalized = if (upper > 0f) value / upper else 0f
+                if (normalized <= 0.01f) "INF" else String.format(Locale.US, "%.2f", normalized)
+            }
         )
     }
 
     fun whiteBalance(caps: CameraCapabilities?): SliderScale<Int> {
         val lower = caps?.cctTemperatureRange?.lower ?: 2000
         val upper = (caps?.cctTemperatureRange?.upper ?: 8000).coerceAtLeast(lower)
-        val toProgress: (Int) -> Float = { value -> linearProgress(value.toFloat(), lower.toFloat(), upper.toFloat()) }
-        val fromProgress: (Float) -> Int = { progress ->
-            linearValue(progress, lower.toFloat(), upper.toFloat()).roundToInt().coerceIn(lower, upper)
-        }
-        val format: (Int) -> String = Int::toString
-        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = layoutLabels(ticks, format(lower), format(upper))
+        return linearScale(
+            lower.toDouble(), upper.toDouble(), 250.0,
+            decode = { it.roundToInt() }, encode = Int::toDouble, format = Int::toString
         )
     }
 
-    fun tint(): SliderScale<Int> {
-        val lower = -50
-        val upper = 50
-        val toProgress: (Int) -> Float = { value -> linearProgress(value.toFloat(), lower.toFloat(), upper.toFloat()) }
-        val fromProgress: (Float) -> Int = { progress ->
-            linearValue(progress, lower.toFloat(), upper.toFloat()).roundToInt().coerceIn(lower, upper)
-        }
-        val format: (Int) -> String = { value -> if (value > 0) "+$value" else value.toString() }
-        val ticks = uniformTicks(fromProgress, format, discreteIntervals(lower, upper))
-        return SliderScale(
-            valueToProgress = toProgress,
-            progressToValue = fromProgress,
-            formatValue = format,
-            ticks = ticks,
-            layoutLabels = layoutLabels(ticks, *(lower..upper).map(format).toTypedArray())
+    fun tint(): SliderScale<Int> = linearScale(
+        -50.0, 50.0, 5.0,
+        decode = { it.roundToInt() },
+        encode = Int::toDouble,
+        format = { if (it > 0) "+$it" else it.toString() }
+    )
+
+    fun postRawSensitivity(caps: CameraCapabilities?): SliderScale<Int> {
+        val lower = caps?.postRawSensitivityBoostRange?.lower ?: 100
+        val upper = (caps?.postRawSensitivityBoostRange?.upper ?: 100).coerceAtLeast(lower)
+        return linearScale(
+            lower.toDouble(), upper.toDouble(), interval = 25.0, reference = 100.0,
+            decode = { it.roundToInt() }, encode = Int::toDouble,
+            format = { String.format(Locale.US, "%.2f×", it / 100.0) }
         )
     }
 
-    /** Tick positions stay visually linear even when value conversion is logarithmic. */
-    private fun <T : Any> uniformTicks(
-        fromProgress: (Float) -> T,
+    private fun <T : Any> linearScale(
+        lower: Double,
+        upper: Double,
+        interval: Double,
+        reference: Double = 0.0,
+        decode: (Double) -> T,
+        encode: (T) -> Double,
+        format: (T) -> String
+    ): SliderScale<T> = rulerScale(
+        lower, upper, decode, encode, format,
+        toCoordinate = { (it - reference) / interval },
+        fromCoordinate = { reference + it * interval }
+    )
+
+    private fun <T : Any> logarithmicScale(
+        lower: Double,
+        upper: Double,
+        reference: Double,
+        decode: (Double) -> T,
+        encode: (T) -> Double,
         format: (T) -> String,
-        intervalCount: Int = MAX_TICK_COUNT - 1
-    ): List<SliderTick> {
-        if (intervalCount <= 0) {
-            return listOf(SliderTick(0.5f, format(fromProgress(0.5f))))
-        }
+        tickFormat: (T) -> String = format,
+        markers: List<T> = emptyList(),
+        extraLabels: List<String> = emptyList()
+    ): SliderScale<T> = rulerScale(
+        lower, upper, decode, encode, format,
+        toCoordinate = { 2.0 * log2(it / reference) },
+        fromCoordinate = { reference * 2.0.pow(it / 2.0) },
+        tickFormat = tickFormat, markerValues = markers, extraLabels = extraLabels
+    )
 
-        val seenLabels = mutableSetOf<String>()
-        return (0..intervalCount).map { index ->
-            val position = index / intervalCount.toFloat()
-            val shouldLabel = index % LABEL_INTERVAL == 0
-            val formatted = format(fromProgress(position))
-            val label = if (shouldLabel && seenLabels.add(formatted)) formatted else ""
-            SliderTick(position, label)
-        }
-    }
-
-    private fun layoutLabels(ticks: List<SliderTick>, vararg values: String): List<String> =
-        (ticks.map(SliderTick::label) + values)
-            .filter(String::isNotEmpty)
-            .distinct()
-
-    private fun exposureCompensationTicks(
-        lower: Int,
-        upper: Int,
-        stepNumerator: Int,
-        stepDenominator: Int,
-        toProgress: (Int) -> Float,
-        format: (Int) -> String
-    ): List<SliderTick> {
-        val safeDenominator = stepDenominator.toLong().takeIf { it != 0L } ?: 1L
-        val stepEv = abs(stepNumerator.toDouble() / safeDenominator.toDouble())
-            .takeIf { it > 0.0 && it.isFinite() } ?: 1.0
-        val spanEv = (upper.toLong() - lower.toLong()).toDouble() * stepEv
-        val targetMajorInterval = maxOf(
-            1.0,
-            spanEv / (MAX_EV_MAJOR_LABEL_COUNT - 1).toDouble()
+    private fun <T : Any> rulerScale(
+        lower: Double,
+        upper: Double,
+        decode: (Double) -> T,
+        encode: (T) -> Double,
+        format: (T) -> String,
+        toCoordinate: (Double) -> Double,
+        fromCoordinate: (Double) -> Double,
+        tickFormat: (T) -> String = format,
+        markerValues: List<T> = emptyList(),
+        extraLabels: List<String> = emptyList()
+    ): SliderScale<T> {
+        val minimum = toCoordinate(lower)
+        val maximum = toCoordinate(upper)
+        val span = maximum - minimum
+        fun progress(number: Double): Float = if (span > 0.0) {
+            ((toCoordinate(number.coerceIn(lower, upper)) - minimum) / span).toFloat().finiteProgress()
+        } else 0.5f
+        fun value(position: Float): T = decode(
+            fromCoordinate(minimum + position.finiteProgress() * span).coerceIn(lower, upper)
         )
-        val majorIntervalEv = niceEvInterval(targetMajorInterval)
-        val majorIndexStride = (majorIntervalEv / stepEv)
-            .roundToLong()
-            .coerceAtLeast(1L)
-
-        return (lower..upper).map { evIndex ->
-            val shouldLabel = evIndex == lower ||
-                evIndex == upper ||
-                evIndex == 0 ||
-                evIndex.toLong() % majorIndexStride == 0L
-            SliderTick(
-                position = toProgress(evIndex),
-                label = if (shouldLabel) format(evIndex) else ""
-            )
+        val ticks = if (span <= 0.0) {
+            listOf(SliderTick(0.5f, tickFormat(decode(lower))))
+        } else {
+            (ceil(minimum).toInt()..floor(maximum).toInt()).map { index ->
+                val position = ((index - minimum) / span).toFloat().finiteProgress()
+                SliderTick(position, if (index % 2 == 0) tickFormat(value(position)) else "")
+            }
         }
-    }
-
-    private fun niceEvInterval(target: Double): Double {
-        val magnitude = 10.0.pow(floor(log10(target)))
-        val normalized = target / magnitude
-        val multiplier = when {
-            normalized <= 1.0 -> 1.0
-            normalized <= 2.0 -> 2.0
-            normalized <= 5.0 -> 5.0
-            else -> 10.0
-        }
-        return multiplier * magnitude
-    }
-
-    private fun discreteIntervals(lower: Int, upper: Int): Int =
-        (upper.toLong() - lower.toLong()).coerceIn(0L, (MAX_TICK_COUNT - 1).toLong()).toInt()
-
-    private fun discreteIntervals(lower: Long, upper: Long): Int =
-        (upper - lower).coerceIn(0L, (MAX_TICK_COUNT - 1).toLong()).toInt()
-
-    private fun logarithmicProgress(value: Double, lower: Double, upper: Double): Float {
-        if (upper <= lower) return 0.5f
-        val safeValue = value.coerceIn(lower, upper)
-        return (log2(safeValue / lower) / log2(upper / lower)).toFloat().finiteProgress()
-    }
-
-    private fun logarithmicValue(progress: Float, lower: Double, upper: Double): Double {
-        if (upper <= lower) return lower
-        return lower * 2.0.pow(progress.finiteProgress() * log2(upper / lower))
-    }
-
-    private fun linearProgress(value: Float, lower: Float, upper: Float): Float {
-        if (upper <= lower) return 0.5f
-        return ((value.coerceIn(lower, upper) - lower) / (upper - lower)).finiteProgress()
-    }
-
-    private fun linearValue(progress: Float, lower: Float, upper: Float): Float {
-        if (upper <= lower) return lower
-        return lower + progress.finiteProgress() * (upper - lower)
+        val markers = (listOf(decode(lower), decode(upper)) + markerValues)
+            .filter { encode(it) in lower..upper }
+            .map { SliderTick(progress(encode(it)), tickFormat(it)) }
+            .distinctBy(SliderTick::position)
+            .sortedBy(SliderTick::position)
+        return SliderScale(
+            valueToProgress = { progress(encode(it)) },
+            progressToValue = ::value,
+            formatValue = format,
+            ruler = SliderRuler(minimum, maximum, ticks, markers),
+            layoutLabels = (ticks.map(SliderTick::label) + markers.map(SliderTick::label) +
+                listOf(format(decode(lower)), format(decode(upper))) + extraLabels)
+                .filter(String::isNotEmpty).distinct()
+        )
     }
 
     private fun formatShutter(nanos: Long): String {

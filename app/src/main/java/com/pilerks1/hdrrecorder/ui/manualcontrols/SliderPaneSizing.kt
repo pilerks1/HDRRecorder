@@ -25,6 +25,8 @@ internal object SliderPaneStyle {
     val resolutionContentPadding = 8.dp
     val sliderAxisEdgePadding = 8.dp
     val sliderTickHeight = 8.dp
+    val rulerTickSpacing = 20.dp
+    val rulerLabelGap = 8.dp
     val standardElementGap = 2.dp
     val standardPaneEdgePadding = 2.dp
     val centerIndicatorHalfHeight = 10.dp
@@ -71,11 +73,14 @@ internal fun rememberSliderPaneSizing(
             thicknesses = orientations.associate { axis ->
                 axis.orientation to panels.associateWith { panel ->
                     val scale = panelScale(panel, caps, zoomState)
-                    val liveLabels = scale?.layoutLabels ?: fpsLayoutLabels(caps)
-                    val tickLabels = scale?.ticks
-                        ?.map(SliderTick::label)
-                        ?.filter(String::isNotEmpty)
-                        .orEmpty()
+                    val panelScales = listOfNotNull(scale) + if (
+                        panel == CameraControlPanel.ISO && caps?.supportsPostRawSensitivityBoost == true
+                    ) listOf(SliderScales.postRawSensitivity(caps)) else emptyList()
+                    val liveLabels = if (scale != null) panelScales.flatMap { it.layoutLabels }
+                        else fpsLayoutLabels(caps)
+                    val tickLabels = panelScales.flatMap { it.ruler.ticks + it.ruler.markers }
+                        .map(SliderTick::label)
+                        .filter(String::isNotEmpty)
                         .ifEmpty { liveLabels }
                     val standardLiveSize = liveLabels.maxMeasuredSize(
                         textMeasurer,
