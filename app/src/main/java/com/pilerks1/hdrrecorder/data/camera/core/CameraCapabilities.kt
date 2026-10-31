@@ -2,6 +2,7 @@ package com.pilerks1.hdrrecorder.data.camera.core
 
 import android.util.Range
 import android.util.Rational
+import com.pilerks1.hdrrecorder.model.GammaMode
 
 data class CameraCapabilities(
     val isoRange: Range<Int>? = null,
@@ -28,5 +29,7 @@ data class CameraCapabilities(
     val maxAfRegions: Int = 0,
     val maxAeRegions: Int = 0,
     val maxAwbRegions: Int = 0,
-    val afModes: List<Int> = emptyList()
+    val afModes: List<Int> = emptyList(),
+    val camera2Modes: Camera2ModeCapabilities? = null,
+    val gammaModes: List<GammaMode> = emptyList()
 )

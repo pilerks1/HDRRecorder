@@ -29,8 +29,6 @@ enum class GammaCurve(val storageId: String, val displayName: String) {
     PQ("pq", "PQ"),
     CUSTOM("custom", "Custom");
 
-    fun next(): GammaCurve = entries[(ordinal + 1) % entries.size]
-
     companion object {
         /** Accepts both stable IDs and the labels written by older app versions. */
         fun fromStorageId(value: String?): GammaCurve? = entries.firstOrNull {

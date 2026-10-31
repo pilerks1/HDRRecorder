@@ -4,8 +4,13 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.os.Build
 import android.util.Range
+import com.pilerks1.hdrrecorder.model.GammaMode
 import com.pilerks1.hdrrecorder.data.camera.core.CameraMetadata as ReportedCameraMetadata
 import com.pilerks1.hdrrecorder.data.camera.core.DeviceCompatibilityChecker
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeCapabilities
+import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
+import com.pilerks1.hdrrecorder.data.camera.core.RearLensInventory
 
 /**
  * Data class representing the physical limits of the active camera hardware.
@@ -13,6 +18,28 @@ import com.pilerks1.hdrrecorder.data.camera.core.DeviceCompatibilityChecker
 typealias CameraCapabilities = com.pilerks1.hdrrecorder.data.camera.core.CameraCapabilities
 
 object CameraCapabilitiesManager {
+
+    fun extractCamera2Modes(catalog: CameraCatalog, inventory: RearLensInventory): Camera2ModeCapabilities {
+        val ids = inventory.buttonLenses.map { it.cameraId } + inventory.defaultCameraId
+        val modesByCamera = ids.distinct().associateWith { id ->
+            val metadata = catalog.camera(id).metadata.getOrNull()
+            Camera2Control.entries.associateWith { control ->
+                if (metadata == null || control.requestKey !in metadata.requestKeys) emptyList()
+                else metadata[control.availableModesKey]?.filter { mode ->
+                    control != Camera2Control.CONTROL_AF_MODE || mode in listOf(
+                        CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
+                        CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                        CameraMetadata.CONTROL_AF_MODE_EDOF
+                    )
+                }?.distinct()?.sorted().orEmpty()
+            }
+        }
+        val common = Camera2Control.entries.associateWith { control ->
+            inventory.buttonLenses.map { modesByCamera.getValue(it.cameraId).getValue(control).toSet() }
+                .reduceOrNull { left, right -> left intersect right }?.sorted().orEmpty()
+        }
+        return Camera2ModeCapabilities(modesByCamera.getValue(inventory.defaultCameraId), common)
+    }
 
     /**
      * Projects reported Camera2 metadata and separately supplied CameraX support into app controls.
@@ -86,6 +113,7 @@ object CameraCapabilitiesManager {
             }
         } == true
 
+        val tonemapModes = camera2Info.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
         return CameraCapabilities(
             isoRange = if (extendManualRanges) Range(16, 25600) else isoRange,
             postRawSensitivityBoostRange = if (extendManualRanges) Range(10, 6400) else postRawSensitivityBoostRange,
@@ -114,7 +142,8 @@ object CameraCapabilitiesManager {
             maxAfRegions = camera2Info.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0,
             maxAeRegions = camera2Info.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0,
             maxAwbRegions = camera2Info.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AWB) ?: 0,
-            afModes = camera2Info.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.toList().orEmpty()
+            afModes = camera2Info.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.toList().orEmpty(),
+            gammaModes = GammaMode.entries.filter { tonemapModes?.contains(it.camera2Value) == true }
         )
     }
 }

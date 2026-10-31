@@ -22,8 +22,9 @@ import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededExceptio
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntimeEventResult
 import com.pilerks1.hdrrecorder.data.camera.core.InteropSettings
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
-import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.VideoColorOption
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
@@ -238,13 +239,13 @@ internal class CameraViewModel(
             is CameraUiEvent.SetAudioBitrate -> if (event.bitrate.isEmpty() || Bitrate.parseAudio(event.bitrate) != null) {
                 updateSettingsAndSave(requiresHardRebind = true) { it.copy(audioBitrate = event.bitrate) }
             }
-            is CameraUiEvent.CycleGammaCurve -> if (_uiState.value.encoding.supportsGammaCurveSelection) {
+            is CameraUiEvent.SetGammaSettings -> if (_uiState.value.encoding.supportsGammaCurveSelection &&
+                event.settings.mode in _uiState.value.cameraCapabilities?.gammaModes.orEmpty()) {
                 updateSettingsAndSave(requiresHardRebind = false) { state ->
-                    state.copy(gammaCurve = state.gammaCurve.next())
+                    state.copy(gammaSettings = event.settings)
                 }
             }
 
-            is CameraUiEvent.SetNoiseReduction -> updateSettingsAndSave(requiresHardRebind = false) { it.copy(isNoiseReductionEnabled = event.enabled) }
             is CameraUiEvent.SetBitrate -> {
                 if (event.bitrate.isEmpty() || Bitrate.parse(event.bitrate) != null) {
                     updateSettingsAndSave(requiresHardRebind = true) {
@@ -263,6 +264,29 @@ internal class CameraViewModel(
                 if (cameraRuntime.usesCameraHardware) cameraManager.setZoomRatio(event.ratio)
             }
             is CameraUiEvent.SelectZoomLens -> selectZoomLens(event.cameraId)
+
+            is CameraUiEvent.SetCamera2CapabilitySource -> updateCamera2Settings {
+                it.copy(capabilitySource = event.source)
+            }
+            is CameraUiEvent.SetCamera2OverrideEnabled -> {
+                if (event.control != Camera2Control.CONTROL_AF_MODE || !_uiState.value.manualControlsState.isManualFocus) {
+                    updateCamera2Settings { settings ->
+                        settings.withOverride(event.control, settings[event.control].copy(enabled = event.enabled))
+                    }
+                }
+            }
+            is CameraUiEvent.SetCamera2Mode -> {
+                val state = _uiState.value
+                val modes = state.cameraCapabilities?.camera2Modes?.modes(state.camera2Settings.capabilitySource)
+                    ?.get(event.control).orEmpty()
+                if (state.camera2Settings[event.control].enabled && event.mode in modes &&
+                    (event.control != Camera2Control.CONTROL_AF_MODE || !state.manualControlsState.isManualFocus)
+                ) {
+                    updateCamera2Settings { settings ->
+                        settings.withOverride(event.control, settings[event.control].copy(mode = event.mode))
+                    }
+                }
+            }
 
             is CameraUiEvent.SetExtendManualRanges -> updateSettingsAndSave(requiresHardRebind = true) {
                 it.copy(
@@ -322,6 +346,16 @@ internal class CameraViewModel(
         if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
         else scheduleCameraRebind(debounce = true)
+    }
+
+    private fun updateCamera2Settings(update: (Camera2Settings) -> Camera2Settings) {
+        if (recordingManager.isRecording.value) return
+        val capabilities = _uiState.value.cameraCapabilities?.camera2Modes ?: return
+        _uiState.update { state ->
+            state.copy(camera2Settings = update(state.camera2Settings).reconcile(capabilities))
+        }
+        // Camera2 overrides apply immediately, including while the settings screen is open.
+        applyInterop()
     }
 
     /**
@@ -518,6 +552,7 @@ internal class CameraViewModel(
                     _uiState.update {
                         it.copy(
                             cameraCapabilities = caps,
+                            camera2Settings = it.camera2Settings.reconcile(caps.camera2Modes),
                             manualControlsState = ManualControlStateUpdater.adaptToCapabilities(
                                 it.manualControlsState,
                                 caps
@@ -687,7 +722,10 @@ internal class CameraViewModel(
         val state = _uiState.value
         return DesiredCameraState(
             controls = controls.toCameraValues(),
-            settings = InteropSettings(state.gammaCurve, state.isNoiseReductionEnabled),
+            settings = InteropSettings(
+                gamma = state.gammaSettings.takeIf { state.encoding.supportsGammaCurveSelection },
+                camera2 = state.camera2Settings
+            ),
             capabilities = state.cameraCapabilities,
             selectedFps = state.selectedFps
         )
@@ -723,7 +761,6 @@ internal class CameraViewModel(
                 videoCodec = selected.first,
                 videoBitDepth = selected.second.bitDepth,
                 encoding = selected.second.encoding,
-                gammaCurve = if (selected.second.encoding.supportsGammaCurveSelection) it.gammaCurve else GammaCurve.AUTO
             )
         }
     }

@@ -6,11 +6,14 @@ import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
 import com.pilerks1.hdrrecorder.data.camera.core.RegionalMeteringState
 import com.pilerks1.hdrrecorder.model.RecordingOptions
 import com.pilerks1.hdrrecorder.model.VideoEncoding
-import com.pilerks1.hdrrecorder.model.GammaCurve
+import com.pilerks1.hdrrecorder.model.GammaSettings
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2CapabilitySource
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
 
 /**
  * Represents the state of all manual controls.
@@ -102,7 +105,7 @@ data class CameraUiState(
     val encoding: VideoEncoding = VideoEncoding.HLG,
     val videoBitDepth: Int = 10,
     val recordingOptions: RecordingOptions = RecordingOptions(),
-    val gammaCurve: GammaCurve = GammaCurve.AUTO,
+    val gammaSettings: GammaSettings = GammaSettings(),
 
     // Manual Controls
     val manualControlsState: ManualControlsState = ManualControlsState(),
@@ -111,8 +114,7 @@ data class CameraUiState(
     val meteringState: RegionalMeteringState = RegionalMeteringState(),
 
     // Video Settings
-    val isNoiseReductionEnabled: Boolean = true,
-    val bitrate: String = "30",
+    val bitrate: String = "",
     val videoCodec: String? = null,
     val audioCodec: String? = null,
     val audioBitrate: String = "",
@@ -122,6 +124,7 @@ data class CameraUiState(
     val isForceDisplaySdrEnabled: Boolean = false,
 
     // Camera2
+    val camera2Settings: Camera2Settings = Camera2Settings(),
     val isExtendManualRangesEnabled: Boolean = false,
     val isWaitToLockAeEnabled: Boolean = true,
 
@@ -159,9 +162,8 @@ sealed interface CameraUiEvent {
     data class SetVideoCodec(val mimeType: String?) : CameraUiEvent
     data class SetAudioCodec(val mimeType: String?) : CameraUiEvent
     data class SetAudioBitrate(val bitrate: String) : CameraUiEvent
-    data object CycleGammaCurve : CameraUiEvent
+    data class SetGammaSettings(val settings: GammaSettings) : CameraUiEvent
 
-    data class SetNoiseReduction(val enabled: Boolean) : CameraUiEvent
     data class SetBitrate(val bitrate: String) : CameraUiEvent
     data class SetStabilization(val enabled: Boolean) : CameraUiEvent
 
@@ -169,6 +171,9 @@ sealed interface CameraUiEvent {
     data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent
 
     // Camera2 Events
+    data class SetCamera2CapabilitySource(val source: Camera2CapabilitySource) : CameraUiEvent
+    data class SetCamera2OverrideEnabled(val control: Camera2Control, val enabled: Boolean) : CameraUiEvent
+    data class SetCamera2Mode(val control: Camera2Control, val mode: Int) : CameraUiEvent
     data class SetExtendManualRanges(val enabled: Boolean) : CameraUiEvent
     data class SetWaitToLockAe(val enabled: Boolean) : CameraUiEvent
 

@@ -51,6 +51,7 @@ fun StorageSection(
             Text(
                 text = displayPath,
                 fontSize = 12.sp,
+                lineHeight = 12.sp,
                 color = Color.Gray,
                 maxLines = 2
             )

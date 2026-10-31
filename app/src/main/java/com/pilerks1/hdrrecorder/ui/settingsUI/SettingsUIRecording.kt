@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,30 +23,14 @@ fun <T> RecordingChoiceRow(
     value: String,
     choices: List<Pair<T, String>>,
     onSelect: (T) -> Unit,
-    isCompatible: (T) -> Boolean = { true }
+    isCompatible: (T) -> Boolean = { true },
+    enabled: Boolean = true
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = 16.sp, color = Color.White)
-        Box {
-            Button(onClick = { expanded = true }, enabled = choices.isNotEmpty(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
-                Text(value)
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                choices.forEach { (choice, name) ->
-                    DropdownMenuItem(text = {
-                        Text(name, color = if (isCompatible(choice)) LocalContentColor.current else Color.Gray)
-                    }, onClick = {
-                        expanded = false
-                        onSelect(choice)
-                    })
-                }
-            }
-        }
+        Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp,
+            color = if (enabled) Color.White else Color.Gray)
+        SettingsChoiceDropdown(value, choices, onSelect, enabled = enabled, isCompatible = isCompatible)
     }
 }
 
@@ -65,7 +49,7 @@ fun RecordingBitrateRow(label: String, value: String, onChange: (String) -> Unit
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 16.sp, color = Color.White)
-            Text("Target; CameraX may adjust", fontSize = 12.sp, color = Color.Gray)
+            Text("Target; CameraX may adjust", fontSize = 12.sp, lineHeight = 12.sp, color = Color.Gray)
         }
         OutlinedTextField(
             value = value,

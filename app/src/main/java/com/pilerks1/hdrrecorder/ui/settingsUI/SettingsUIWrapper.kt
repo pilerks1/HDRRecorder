@@ -12,7 +12,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.model.VideoEncoding
-import com.pilerks1.hdrrecorder.model.GammaCurve
+import com.pilerks1.hdrrecorder.model.GammaMode
+import com.pilerks1.hdrrecorder.model.GammaSettings
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2CapabilitySource
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeCapabilities
+import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
 
 /**
  * Settings UI overlay.
@@ -38,8 +43,6 @@ fun SettingsUI(
     bitDepth: Int,
     onBitDepthChange: (Int) -> Unit,
     // Video Settings
-    noiseReductionEnabled: Boolean,
-    onNoiseReductionChange: (Boolean) -> Unit,
     bitrate: String,
     onBitrateChange: (String) -> Unit,
     isStabilizationEnabled: Boolean,
@@ -48,14 +51,21 @@ fun SettingsUI(
     // Color Settings
     encoding: VideoEncoding,
     onEncodingChange: (VideoEncoding) -> Unit,
-    gammaCurve: GammaCurve,
-    onGammaCurveChange: () -> Unit,
+    gammaSettings: GammaSettings,
+    gammaModes: List<GammaMode>,
+    onGammaSettingsChange: (GammaSettings) -> Unit,
 
     // SDR Hacks
     isForceDisplaySdrEnabled: Boolean,
     onForceDisplaySdrChange: (Boolean) -> Unit,
 
     // Camera2
+    camera2Settings: Camera2Settings,
+    camera2Capabilities: Camera2ModeCapabilities?,
+    isManualFocus: Boolean,
+    onCamera2CapabilitySourceChange: (Camera2CapabilitySource) -> Unit,
+    onCamera2OverrideEnabledChange: (Camera2Control, Boolean) -> Unit,
+    onCamera2ModeChange: (Camera2Control, Int) -> Unit,
     isExtendManualRangesEnabled: Boolean,
     onExtendManualRangesChange: (Boolean) -> Unit,
     isWaitToLockAeEnabled: Boolean,
@@ -98,8 +108,6 @@ fun SettingsUI(
             }.keys,
             bitrate = bitrate,
             onBitrateChange = onBitrateChange,
-            noiseReductionEnabled = noiseReductionEnabled,
-            onNoiseReductionChange = onNoiseReductionChange,
             isStabilizationEnabled = isStabilizationEnabled,
             onStabilizationChange = onStabilizationChange
         )
@@ -112,10 +120,13 @@ fun SettingsUI(
             compatibleColors = recordingOptions.colors(videoCodec),
             onBitDepthChange = onBitDepthChange,
             encoding = encoding,
-            onEncodingChange = onEncodingChange,
-            gammaCurve = gammaCurve,
-            onGammaCurveChange = onGammaCurveChange
+            onEncodingChange = onEncodingChange
         )
+
+        if (encoding.supportsGammaCurveSelection) {
+            SectionDivider()
+            GammaSection(gammaSettings, gammaModes, onGammaSettingsChange)
+        }
 
         SectionDivider()
 
@@ -137,6 +148,12 @@ fun SettingsUI(
         SectionDivider()
 
         Camera2Section(
+            settings = camera2Settings,
+            capabilities = camera2Capabilities,
+            isManualFocus = isManualFocus,
+            onCapabilitySourceChange = onCamera2CapabilitySourceChange,
+            onOverrideEnabledChange = onCamera2OverrideEnabledChange,
+            onModeChange = onCamera2ModeChange,
             isExtendManualRangesEnabled = isExtendManualRangesEnabled,
             onExtendManualRangesChange = onExtendManualRangesChange,
             isWaitToLockAeEnabled = isWaitToLockAeEnabled,

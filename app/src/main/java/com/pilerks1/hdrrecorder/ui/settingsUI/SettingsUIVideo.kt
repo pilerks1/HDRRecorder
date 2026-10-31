@@ -15,8 +15,6 @@ fun VideoSection(
     compatibleVideoCodecs: Set<String?>,
     bitrate: String,
     onBitrateChange: (String) -> Unit,
-    noiseReductionEnabled: Boolean,
-    onNoiseReductionChange: (Boolean) -> Unit,
     isStabilizationEnabled: Boolean,
     onStabilizationChange: (Boolean) -> Unit
 ) {
@@ -31,13 +29,6 @@ fun VideoSection(
     CodecRow("Video Codec", videoCodec, videoCodecs, onVideoCodecChange,
         isCompatible = { it in compatibleVideoCodecs })
     RecordingBitrateRow("Bitrate (Mbps)", bitrate, onBitrateChange)
-    Spacer(modifier = Modifier.height(8.dp))
-    HdrSettingsSwitchRow(
-        label = "Noise Reduction",
-        checked = noiseReductionEnabled,
-        onCheckedChange = onNoiseReductionChange
-    )
-
     Spacer(modifier = Modifier.height(8.dp))
 
     HdrSettingsSwitchRow(

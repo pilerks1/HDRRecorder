@@ -234,6 +234,8 @@ class CameraManager(
                 metadata,
                 boundCamera.cameraInfo.isLowLightBoostSupported,
                 extendManualRanges = request.uiState.isExtendManualRangesEnabled
+            ).copy(
+                camera2Modes = CameraCapabilitiesManager.extractCamera2Modes(CameraCatalog.get(context), inventory)
             )
             val attachment = CameraXRequestBackend(cameraId, cameraGeneration, boundCamera.cameraControl)
             controls.attach(attachment, attachment)

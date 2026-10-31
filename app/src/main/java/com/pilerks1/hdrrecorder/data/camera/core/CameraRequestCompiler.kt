@@ -6,11 +6,13 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import com.pilerks1.hdrrecorder.model.TonemapCurves
 import com.pilerks1.hdrrecorder.model.GammaCurve
+import com.pilerks1.hdrrecorder.model.GammaMode
+import com.pilerks1.hdrrecorder.model.GammaSettings
 
 /** Processing preferences supplied independently of screen state. */
 data class InteropSettings(
-    val gammaCurve: GammaCurve = GammaCurve.AUTO,
-    val isNoiseReductionEnabled: Boolean = true
+    val gamma: GammaSettings? = null,
+    val camera2: Camera2Settings = Camera2Settings()
 )
 
 /** Existing control policies contribute to the generic request snapshot. */
@@ -24,11 +26,11 @@ object CameraRequestCompiler {
     ): CameraRequestOverrides {
         val builder = CameraRequestOverrides.Builder()
         applyExposure(builder, state, capabilities)
-        applyFocus(builder, state, capabilities)
+        applyFocus(builder, state, settings, capabilities)
         applyWhiteBalance(builder, state, capabilities)
         applyFps(builder, state, capabilities)
-        applyNoiseReduction(builder, settings.isNoiseReductionEnabled)
-        applyGamma(builder, settings.gammaCurve)
+        applyCamera2Modes(builder, settings.camera2)
+        applyGamma(builder, settings.gamma, capabilities)
 
         if (capabilities?.supportsAeLock == true && aeLockOverride != null) {
             builder.set(
@@ -125,25 +127,25 @@ object CameraRequestCompiler {
     private fun applyFocus(
         builder: CameraRequestOverrides.Builder,
         state: CameraControlValues,
+        settings: InteropSettings,
         capabilities: CameraCapabilities?
     ) {
-        if (
-            state.isManualFocus &&
-            state.focusDistanceDiopters != null &&
-            capabilities?.hasManualFocusControl == true
-        ) {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, AndroidCameraMetadata.CONTROL_AF_MODE_OFF)
+        val mode = focusMode(state, settings, capabilities)
+        mode?.let { builder.set(CaptureRequest.CONTROL_AF_MODE, it) }
+        if (mode == AndroidCameraMetadata.CONTROL_AF_MODE_OFF && state.focusDistanceDiopters != null) {
             builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, state.focusDistanceDiopters)
-        } else {
-            val modes = capabilities?.afModes.orEmpty()
-            val automaticMode = listOf(
-                AndroidCameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
-                AndroidCameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            ).firstOrNull { it in modes }
-            // Without a supported continuous mode, leave automatic mode selection to CameraX.
-            automaticMode?.let { builder.set(CaptureRequest.CONTROL_AF_MODE, it) }
         }
     }
+
+    /** Null releases AF mode selection to CameraX. Manual distance always takes priority. */
+    internal fun focusMode(
+        state: CameraControlValues,
+        settings: InteropSettings,
+        capabilities: CameraCapabilities?
+    ): Int? = if (state.isManualFocus && state.focusDistanceDiopters != null &&
+        capabilities?.hasManualFocusControl == true
+    ) AndroidCameraMetadata.CONTROL_AF_MODE_OFF
+    else settings.camera2.selectedMode(Camera2Control.CONTROL_AF_MODE)
 
     // --- White Balance (CCT) ---
 
@@ -194,35 +196,36 @@ object CameraRequestCompiler {
         }
     }
 
-    // --- Noise Reduction ---
+    // --- Independent Camera2 processing overrides ---
 
-    private fun applyNoiseReduction(builder: CameraRequestOverrides.Builder, enabled: Boolean) {
-        if (enabled) {
-            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
-            builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
-        } else {
-            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
-            builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+    private fun applyCamera2Modes(builder: CameraRequestOverrides.Builder, settings: Camera2Settings) {
+        for (control in Camera2Control.entries) {
+            if (control == Camera2Control.CONTROL_AF_MODE) continue // Focus policy owns this key.
+            // Settings source controls the choices; do not filter against the active lens.
+            settings.selectedMode(control)?.let { builder.set(control.requestKey, it) }
         }
     }
 
     // --- Gamma / Tonemap ---
 
-    private fun applyGamma(builder: CameraRequestOverrides.Builder, gammaCurve: GammaCurve) {
-        when (gammaCurve) {
-            GammaCurve.AUTO -> builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
-            GammaCurve.HLG -> {
-                builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
-                builder.set(CaptureRequest.TONEMAP_CURVE, TonemapCurves.hlg())
-            }
-            GammaCurve.PQ -> {
-                builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
-                builder.set(CaptureRequest.TONEMAP_CURVE, TonemapCurves.pq())
-            }
-            GammaCurve.CUSTOM -> {
-                builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
-                builder.set(CaptureRequest.TONEMAP_CURVE, TonemapCurves.custom())
-            }
+    private fun applyGamma(
+        builder: CameraRequestOverrides.Builder,
+        settings: GammaSettings?,
+        capabilities: CameraCapabilities?
+    ) {
+        settings ?: return
+        val mode = settings.supportedMode(capabilities?.gammaModes.orEmpty()) ?: return
+        builder.set(CaptureRequest.TONEMAP_MODE, mode.camera2Value)
+        when (mode) {
+            GammaMode.GAMMA_VALUE -> builder.set(CaptureRequest.TONEMAP_GAMMA, settings.value)
+            GammaMode.CONTRAST_CURVE -> builder.set(CaptureRequest.TONEMAP_CURVE, when (settings.curve) {
+                GammaCurve.HLG -> TonemapCurves.hlg()
+                GammaCurve.PQ -> TonemapCurves.pq()
+                GammaCurve.CUSTOM -> TonemapCurves.custom()
+                GammaCurve.AUTO -> error("Select an explicit contrast curve")
+            })
+            GammaMode.PRESET_CURVE -> builder.set(CaptureRequest.TONEMAP_PRESET_CURVE, settings.preset.camera2Value)
+            GammaMode.FAST, GammaMode.HIGH_QUALITY -> Unit
         }
     }
 

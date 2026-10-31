@@ -16,10 +16,12 @@ data class RegionalMeteringState(
     val eligibleFlags: Int = 0
 )
 
-internal fun meteringFlags(controls: CameraControlValues, caps: CameraCapabilities?): Int {
+internal fun meteringFlags(controls: CameraControlValues, caps: CameraCapabilities?, afMode: Int?): Int {
     caps ?: return 0
     var flags = 0
-    if (!controls.isManualFocus && caps.maxAfRegions > 0 && caps.afModes.any {
+    // Without an override, retain CameraX's automatic regional AF when supported.
+    val afModes = afMode?.let { listOf(it) } ?: caps.afModes
+    if (!controls.isManualFocus && caps.maxAfRegions > 0 && afModes.any {
             it == CaptureResult.CONTROL_AF_MODE_CONTINUOUS_VIDEO ||
                 it == CaptureResult.CONTROL_AF_MODE_CONTINUOUS_PICTURE
         }) flags = flags or FocusMeteringAction.FLAG_AF

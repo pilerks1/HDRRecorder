@@ -5,10 +5,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -42,6 +47,55 @@ fun SectionDivider() {
 }
 
 @Composable
+fun <T> SettingsChoiceDropdown(
+    value: String,
+    choices: List<Pair<T, String>>,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isCompatible: (T) -> Boolean = { true }
+) {
+    val available = enabled && choices.isNotEmpty()
+    var expanded by remember(available, choices) { mutableStateOf(false) }
+    Box(modifier) {
+        Button(
+            onClick = { expanded = true },
+            enabled = available,
+            modifier = Modifier.widthIn(max = 112.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                disabledContainerColor = Color.DarkGray,
+                disabledContentColor = Color.Gray
+            )
+        ) {
+            Text(value.replace(' ', '\n'), fontSize = 14.sp, lineHeight = 16.sp,
+                textAlign = TextAlign.Center)
+        }
+        DropdownMenu(
+            expanded = expanded && available,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 300.dp)
+        ) {
+            choices.forEach { (choice, name) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(name.replace(' ', '\n'), modifier = Modifier.fillMaxWidth(),
+                            color = if (isCompatible(choice)) LocalContentColor.current else Color.Gray,
+                            textAlign = TextAlign.Center, lineHeight = 18.sp)
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(choice)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun HdrSettingsSwitchRow(
     label: String,
     description: String? = null,
@@ -56,7 +110,7 @@ fun HdrSettingsSwitchRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(text = label, fontSize = 16.sp, color = Color.White)
             if (description != null) {
-                Text(text = description, fontSize = 12.sp, color = Color.Gray)
+                Text(text = description, fontSize = 12.sp, lineHeight = 12.sp, color = Color.Gray)
             }
         }
         Switch(

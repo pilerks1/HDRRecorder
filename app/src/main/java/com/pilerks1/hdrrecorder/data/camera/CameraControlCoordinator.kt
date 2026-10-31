@@ -127,8 +127,10 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     }
 
     fun update(state: DesiredCameraState, coalesce: Boolean = false) {
-        val previous = desired?.controls
-        if (previous != null && manualModes(previous) != manualModes(state.controls)) restartMetering()
+        val previous = desired
+        if (previous != null && (manualModes(previous.controls) != manualModes(state.controls) ||
+            focusMode(previous) != focusMode(state))
+        ) restartMetering()
         desired = state
         revision++
         immediate = immediate || !coalesce
@@ -138,6 +140,9 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     private fun manualModes(controls: CameraControlValues) = listOf(
         controls.isManualIso, controls.isManualSs, controls.isManualFocus, controls.isManualWb
     )
+
+    private fun focusMode(state: DesiredCameraState): Int? =
+        CameraRequestCompiler.focusMode(state.controls, state.settings, state.capabilities)
 
     private fun restartMetering() {
         if (meteringPoint == null) return
@@ -184,7 +189,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
         val attachment = backend ?: return
         if (attachment.generation != generation || cameraXControls == null) return
         val state = desired ?: return
-        val flags = meteringFlags(state.controls, state.capabilities)
+        val flags = meteringFlags(state.controls, state.capabilities, focusMode(state))
         if (flags == 0) {
             cancelMetering()
             return
@@ -218,7 +223,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
     private suspend fun reconcileMetering(attachment: CameraRequestBackend, state: DesiredCameraState) {
         val native = cameraXControls ?: return
         val current = _meteringState.value
-        val flags = if (current.mode == null) 0 else meteringFlags(state.controls, state.capabilities)
+        val flags = if (current.mode == null) 0 else meteringFlags(state.controls, state.capabilities, focusMode(state))
         if (current.mode != null && flags != current.eligibleFlags) {
             meteringMonitor = null
             meteringRevision++

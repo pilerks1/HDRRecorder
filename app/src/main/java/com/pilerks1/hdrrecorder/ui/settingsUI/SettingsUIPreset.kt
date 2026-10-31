@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.ui.settingsUI
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +22,6 @@ fun PresetSection(
     onDeleteAllPresets: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
-    var dropdownExpanded by remember { mutableStateOf(false) }
 
     // Dialog States
     var showAddDialog by remember { mutableStateOf(false) }
@@ -60,41 +58,11 @@ fun PresetSection(
             ) {
                 Text("Add")
             }
-            Box {
-                Button(
-                    onClick = { dropdownExpanded = true },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) {
-                    Text(text = currentPreset)
-                }
-                DropdownMenu(
-                    expanded = dropdownExpanded,
-                    onDismissRequest = { dropdownExpanded = false },
-                    modifier = Modifier
-                        .background(Color.DarkGray)
-                        .heightIn(max = 300.dp)
-                ) {
-                    if (presetsList.isEmpty()) {
-                        DropdownMenuItem(
-                            text = { Text("No Presets", color = Color.Gray) },
-                            onClick = { dropdownExpanded = false }
-                        )
-                    } else {
-                        presetsList.forEach { preset ->
-                            DropdownMenuItem(
-                                text = { Text(preset, color = Color.White) },
-                                onClick = {
-                                    onLoadPreset(preset)
-                                    dropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
+            SettingsChoiceDropdown(
+                value = if (presetsList.isEmpty()) "No Presets" else currentPreset,
+                choices = presetsList.map { it to it },
+                onSelect = onLoadPreset
+            )
         }
     }
 
