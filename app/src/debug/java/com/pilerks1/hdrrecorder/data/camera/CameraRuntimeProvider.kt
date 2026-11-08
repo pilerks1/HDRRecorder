@@ -6,8 +6,8 @@ import android.util.Rational
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
-import com.pilerks1.hdrrecorder.data.camera.core.RearLens
-import com.pilerks1.hdrrecorder.data.camera.core.RearLensInventory
+import com.pilerks1.hdrrecorder.data.camera.core.ZoomShortcut
+import com.pilerks1.hdrrecorder.data.camera.core.DefaultCameraInventory
 import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 
 /** Selects the optional UI testbed for debuggable builds. */
@@ -49,8 +49,8 @@ private class UiTestbedCameraRuntime : CameraRuntime {
             is CameraUiEvent.SetLinearZoom -> currentState.copy(zoomState = currentState.zoomState.let {
                 it.copy(ratio = ZoomMapping.ratio(event.progress, it.minRatio, it.maxRatio))
             })
-            is CameraUiEvent.SelectZoomLens -> currentState.zoomState.inventory?.buttonLenses
-                ?.firstOrNull { it.cameraId == event.cameraId }?.zoomRatio
+            is CameraUiEvent.SelectZoomLens -> currentState.zoomState.shortcuts
+                .firstOrNull { it.cameraId == event.cameraId }?.zoomRatio
                 ?.let { currentState.copy(zoomState = currentState.zoomState.copy(ratio = it)) }
             is CameraUiEvent.SetZoomRatio -> currentState.copy(zoomState = currentState.zoomState.let {
                 it.copy(ratio = event.ratio.coerceIn(it.minRatio, it.maxRatio))
@@ -119,9 +119,9 @@ private class UiTestbedCameraRuntime : CameraRuntime {
         private val testbedZoomState: CameraZoomState = run {
             val factors = listOf(0.5f, 1f, 3f)
             val lenses = factors.map { factor ->
-                RearLens("testbed-$factor", factor, setOf("testbed-main"), Range(0.5f, 10f), 10f, false)
+                ZoomShortcut("testbed-$factor", factor)
             }
-            CameraZoomState(RearLensInventory("testbed-main", lenses), 1f, 0.5f, 10f, true)
+            CameraZoomState(DefaultCameraInventory("testbed-main", lenses.map { it.cameraId }.toSet(), lenses), 1f, 0.5f, 10f, true)
         }
 
         private val allControlsCapabilities = CameraCapabilities(

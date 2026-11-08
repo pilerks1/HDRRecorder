@@ -201,7 +201,7 @@ object CameraRequestCompiler {
     private fun applyCamera2Modes(builder: CameraRequestOverrides.Builder, settings: Camera2Settings) {
         for (control in Camera2Control.entries) {
             if (control == Camera2Control.CONTROL_AF_MODE) continue // Focus policy owns this key.
-            // Settings source controls the choices; do not filter against the active lens.
+            // Choices are validated against the default camera, independent of physical sensor switching.
             settings.selectedMode(control)?.let { builder.set(control.requestKey, it) }
         }
     }

@@ -17,7 +17,7 @@ import com.pilerks1.hdrrecorder.data.camera.core.CameraFrameMetadata
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
 import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
-import com.pilerks1.hdrrecorder.data.camera.RearLensRepository
+import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.QualitySelector
@@ -51,7 +51,7 @@ class CameraManager(
     private var cameraProvider: ProcessCameraProvider? = null
     private var activeCameraGeneration: Long? = null
     private var currentBind: BindRequest? = null
-    private val rearLenses = RearLensRepository(context)
+    private val defaultBackCamera = DefaultBackCameraRepository(context)
     private val _zoomState = MutableStateFlow(CameraZoomState())
     val zoomState = _zoomState.asStateFlow()
     private val _recordingOptions = MutableStateFlow(RecordingOptions())
@@ -129,13 +129,12 @@ class CameraManager(
     }
 
     private fun bindUseCases(cameraProvider: ProcessCameraProvider, request: BindRequest) {
-        val inventory = try {
-            rearLenses.discover(cameraProvider)
+        val cameraInfo = try {
+            defaultBackCamera.cameraInfo(cameraProvider)
         } catch (error: Exception) {
-            Log.e("CameraManager", "Unable to discover rear lenses", error)
+            Log.e("CameraManager", "Unable to resolve the default back camera", error)
             return
         }
-        val cameraInfo = rearLenses.defaultCameraInfo(cameraProvider, inventory)
         val cameraSelector = cameraInfo.cameraSelector
         // Resolve preview preferences before tearing down the working session.
         val previewOptions: PreviewOptions
@@ -210,11 +209,11 @@ class CameraManager(
                 boundCamera.cameraInfo.isLowLightBoostSupported,
                 extendManualRanges = request.uiState.isExtendManualRangesEnabled
             ).copy(
-                camera2Modes = CameraCapabilitiesManager.extractCamera2Modes(CameraCatalog.get(context), inventory)
+                camera2Modes = CameraCapabilitiesManager.extractCamera2Modes(metadata)
             )
             val attachment = CameraXRequestBackend(cameraId, cameraGeneration, boundCamera.cameraControl)
             controls.attach(attachment, attachment)
-            observeZoom(boundCamera.cameraInfo, inventory)
+            observeZoom(boundCamera.cameraInfo, defaultBackCamera.zoomInventory(cameraInfo))
             val savedZoom = request.uiState.zoomState.ratio.coerceIn(_zoomState.value.minRatio, _zoomState.value.maxRatio)
             confirmedZoomRatio = _zoomState.value.ratio
             currentBind = request.copy(uiState = state.copy(zoomState = _zoomState.value.copy(ratio = savedZoom)))
@@ -247,7 +246,7 @@ class CameraManager(
         if (state.previewSettings.dynamicRange == null) return null
         val provider = cameraProvider ?: return "Camera capabilities are not available yet."
         return try {
-            val info = rearLenses.defaultCameraInfo(provider, rearLenses.discover(provider))
+            val info = defaultBackCamera.cameraInfo(provider)
             val candidate = PreviewConfiguration.build(state.previewSettings, 0, state.isStabilizationEnabled)
             if (supportsPreviewDynamicRange(info, candidate, buildVideoCapture(state, 0))) null
             else "Preview dynamic range is incompatible with the current recording configuration."
@@ -287,7 +286,7 @@ class CameraManager(
 
     private fun observeZoom(
         info: CameraInfo,
-        inventory: com.pilerks1.hdrrecorder.data.camera.core.RearLensInventory
+        inventory: com.pilerks1.hdrrecorder.data.camera.core.DefaultCameraInventory
     ) {
         val source = info.zoomState
         val observer = Observer<ZoomState> { state ->

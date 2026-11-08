@@ -58,7 +58,7 @@ object SliderScales {
         encode = Float::toDouble,
         format = { String.format(Locale.US, "%.2fx", it) },
         tickFormat = ::formatZoomFactor,
-        markers = state.inventory?.buttonLenses.orEmpty().mapNotNull { it.zoomRatio },
+        markers = state.shortcuts.map { it.zoomRatio },
         extraLabels = listOf("—")
     )
 

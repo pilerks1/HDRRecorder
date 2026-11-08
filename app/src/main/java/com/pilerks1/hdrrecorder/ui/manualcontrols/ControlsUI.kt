@@ -421,14 +421,14 @@ private fun ZoomPanel(
     axis: AxisSpec
 ) {
     val scale = remember(zoomState.minRatio, zoomState.maxRatio, zoomState.inventory) { SliderScales.zoom(zoomState) }
-    val lenses = zoomState.inventory?.buttonLenses.orEmpty()
+    val lenses = zoomState.shortcuts
     SliderPanelLayout(
         axis = axis,
         actionCount = lenses.size,
         modifier = Modifier.fillMaxSize(),
         actions = {
             lenses.forEach { lens ->
-                val lensRatio = checkNotNull(lens.zoomRatio)
+                val lensRatio = lens.zoomRatio
                 val selected = kotlin.math.abs(zoomState.ratio - lensRatio) < 0.005f
                 SliderActionButton(
                     text = SliderScales.formatZoomFactor(lensRatio),

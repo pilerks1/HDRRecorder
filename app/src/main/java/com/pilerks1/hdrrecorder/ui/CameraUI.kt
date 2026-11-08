@@ -238,7 +238,6 @@ internal fun CameraUI(
                 camera2Settings = uiState.camera2Settings,
                 camera2Capabilities = uiState.cameraCapabilities?.camera2Modes,
                 isManualFocus = uiState.manualControlsState.isManualFocus,
-                onCamera2CapabilitySourceChange = { actions.onEvent(CameraUiEvent.SetCamera2CapabilitySource(it)) },
                 onCamera2OverrideEnabledChange = { control, enabled ->
                     actions.onEvent(CameraUiEvent.SetCamera2OverrideEnabled(control, enabled))
                 },

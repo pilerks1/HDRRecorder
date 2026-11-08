@@ -26,12 +26,9 @@ enum class Camera2Control(
     SHADING_MODE(CaptureRequest.SHADING_MODE, CameraCharacteristics.SHADING_AVAILABLE_MODES)
 }
 
-enum class Camera2CapabilitySource { MAIN_CAMERA, COMMON_REAR_CAMERAS }
-
 data class Camera2ModeOverride(val enabled: Boolean = false, val mode: Int? = null)
 
 data class Camera2Settings(
-    val capabilitySource: Camera2CapabilitySource = Camera2CapabilitySource.MAIN_CAMERA,
     val overrides: Map<Camera2Control, Camera2ModeOverride> = emptyMap()
 ) {
     operator fun get(control: Camera2Control): Camera2ModeOverride = overrides[control] ?: Camera2ModeOverride()
@@ -41,10 +38,10 @@ data class Camera2Settings(
     fun withOverride(control: Camera2Control, value: Camera2ModeOverride): Camera2Settings =
         copy(overrides = overrides + (control to value))
 
-    /** Reconcile against the selected source, never against the currently active lens. */
+    /** Reconcile against the default camera, independently of physical sensor switching. */
     fun reconcile(capabilities: Camera2ModeCapabilities?): Camera2Settings {
         capabilities ?: return this // Preserve saved choices until discovery completes.
-        val available = capabilities.modes(capabilitySource)
+        val available = capabilities.modes
         return copy(overrides = Camera2Control.entries.associateWith { control ->
             val current = get(control)
             val modes = available[control].orEmpty()
@@ -55,11 +52,5 @@ data class Camera2Settings(
 }
 
 data class Camera2ModeCapabilities(
-    val mainCameraModes: Map<Camera2Control, List<Int>>,
-    val commonRearModes: Map<Camera2Control, List<Int>>
-) {
-    fun modes(source: Camera2CapabilitySource): Map<Camera2Control, List<Int>> = when (source) {
-        Camera2CapabilitySource.MAIN_CAMERA -> mainCameraModes
-        Camera2CapabilitySource.COMMON_REAR_CAMERAS -> commonRearModes
-    }
-}
+    val modes: Map<Camera2Control, List<Int>>
+)

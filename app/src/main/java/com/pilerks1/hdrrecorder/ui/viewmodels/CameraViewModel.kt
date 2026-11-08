@@ -266,9 +266,6 @@ internal class CameraViewModel(
             }
             is CameraUiEvent.SelectZoomLens -> selectZoomLens(event.cameraId)
 
-            is CameraUiEvent.SetCamera2CapabilitySource -> updateCamera2Settings {
-                it.copy(capabilitySource = event.source)
-            }
             is CameraUiEvent.SetCamera2OverrideEnabled -> {
                 if (event.control != Camera2Control.CONTROL_AF_MODE || !_uiState.value.manualControlsState.isManualFocus) {
                     updateCamera2Settings { settings ->
@@ -278,7 +275,7 @@ internal class CameraViewModel(
             }
             is CameraUiEvent.SetCamera2Mode -> {
                 val state = _uiState.value
-                val modes = state.cameraCapabilities?.camera2Modes?.modes(state.camera2Settings.capabilitySource)
+                val modes = state.cameraCapabilities?.camera2Modes?.modes
                     ?.get(event.control).orEmpty()
                 if (state.camera2Settings[event.control].enabled && event.mode in modes &&
                     (event.control != Camera2Control.CONTROL_AF_MODE || !state.manualControlsState.isManualFocus)
@@ -424,9 +421,9 @@ internal class CameraViewModel(
     }
 
     private fun selectZoomLens(cameraId: String) {
-        val lens = _uiState.value.zoomState.inventory?.buttonLenses
-            ?.firstOrNull { it.cameraId == cameraId } ?: return
-        lens.zoomRatio?.let(cameraManager::setZoomRatio)
+        val lens = _uiState.value.zoomState.shortcuts
+            .firstOrNull { it.cameraId == cameraId } ?: return
+        cameraManager.setZoomRatio(lens.zoomRatio)
     }
 
     fun updateManualControls(updater: (ManualControlsState) -> ManualControlsState) {

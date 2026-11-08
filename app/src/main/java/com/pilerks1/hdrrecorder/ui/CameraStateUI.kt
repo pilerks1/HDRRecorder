@@ -14,7 +14,6 @@ import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2CapabilitySource
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
 
@@ -181,7 +180,6 @@ sealed interface CameraUiEvent {
     data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent
 
     // Camera2 Events
-    data class SetCamera2CapabilitySource(val source: Camera2CapabilitySource) : CameraUiEvent
     data class SetCamera2OverrideEnabled(val control: Camera2Control, val enabled: Boolean) : CameraUiEvent
     data class SetCamera2Mode(val control: Camera2Control, val mode: Int) : CameraUiEvent
     data class SetExtendManualRanges(val enabled: Boolean) : CameraUiEvent

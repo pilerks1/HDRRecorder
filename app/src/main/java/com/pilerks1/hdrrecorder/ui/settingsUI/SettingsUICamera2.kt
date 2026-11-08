@@ -15,7 +15,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2CapabilitySource
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeCapabilities
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeOverride
@@ -26,7 +25,6 @@ fun Camera2Section(
     settings: Camera2Settings,
     capabilities: Camera2ModeCapabilities?,
     isManualFocus: Boolean,
-    onCapabilitySourceChange: (Camera2CapabilitySource) -> Unit,
     onOverrideEnabledChange: (Camera2Control, Boolean) -> Unit,
     onModeChange: (Camera2Control, Int) -> Unit,
     isExtendManualRangesEnabled: Boolean,
@@ -41,17 +39,7 @@ fun Camera2Section(
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(bottom = 8.dp)
     )
-    val sources = listOf(
-        Camera2CapabilitySource.MAIN_CAMERA to "Main",
-        Camera2CapabilitySource.COMMON_REAR_CAMERAS to "Common"
-    )
-    RecordingChoiceRow(
-        label = "Options From",
-        value = sources.first { it.first == settings.capabilitySource }.second,
-        choices = sources,
-        onSelect = onCapabilitySourceChange
-    )
-    val modes = capabilities?.modes(settings.capabilitySource).orEmpty()
+    val modes = capabilities?.modes.orEmpty()
     Camera2Control.entries.forEach { control ->
         Spacer(Modifier.height(12.dp))
         Camera2ModeRow(

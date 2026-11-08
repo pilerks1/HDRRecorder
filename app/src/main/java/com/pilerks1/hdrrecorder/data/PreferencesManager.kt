@@ -13,7 +13,6 @@ import com.pilerks1.hdrrecorder.model.GammaSettings
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import com.pilerks1.hdrrecorder.ui.CameraUiState
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2CapabilitySource
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeOverride
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
@@ -74,7 +73,6 @@ class PreferencesManager(context: Context) {
             put("gammaValue", state.gammaSettings.value.toDouble())
             put("gammaPreset", state.gammaSettings.preset.name)
             put("camera2", JSONObject().apply {
-                put("source", state.camera2Settings.capabilitySource.name)
                 Camera2Control.entries.forEach { control ->
                     val value = state.camera2Settings[control]
                     put(control.name, JSONObject().apply {
@@ -169,9 +167,8 @@ class PreferencesManager(context: Context) {
     private fun loadCamera2Settings(json: JSONObject?): Camera2Settings {
         // Older presets deliberately start with all overrides disabled; ignore legacy "nr".
         json ?: return Camera2Settings()
-        val source = Camera2CapabilitySource.entries.firstOrNull { it.name == json.optString("source") }
-            ?: Camera2CapabilitySource.MAIN_CAMERA
-        return Camera2Settings(source, Camera2Control.entries.associateWith { control ->
+        // Legacy camera2.source is ignored; all overrides use the default back camera.
+        return Camera2Settings(Camera2Control.entries.associateWith { control ->
             val value = json.optJSONObject(control.name)
             val mode = (value?.opt("mode") as? Number)?.toInt()
             Camera2ModeOverride(enabled = mode != null && value.optBoolean("enabled", false), mode = mode)

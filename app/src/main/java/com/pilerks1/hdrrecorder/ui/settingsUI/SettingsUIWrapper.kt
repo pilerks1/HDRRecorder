@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaMode
 import com.pilerks1.hdrrecorder.model.GammaSettings
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2CapabilitySource
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeCapabilities
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
@@ -75,7 +74,6 @@ fun SettingsUI(
     camera2Settings: Camera2Settings,
     camera2Capabilities: Camera2ModeCapabilities?,
     isManualFocus: Boolean,
-    onCamera2CapabilitySourceChange: (Camera2CapabilitySource) -> Unit,
     onCamera2OverrideEnabledChange: (Camera2Control, Boolean) -> Unit,
     onCamera2ModeChange: (Camera2Control, Int) -> Unit,
     isExtendManualRangesEnabled: Boolean,
@@ -171,7 +169,6 @@ fun SettingsUI(
             settings = camera2Settings,
             capabilities = camera2Capabilities,
             isManualFocus = isManualFocus,
-            onCapabilitySourceChange = onCamera2CapabilitySourceChange,
             onOverrideEnabledChange = onCamera2OverrideEnabledChange,
             onModeChange = onCamera2ModeChange,
             isExtendManualRangesEnabled = isExtendManualRangesEnabled,

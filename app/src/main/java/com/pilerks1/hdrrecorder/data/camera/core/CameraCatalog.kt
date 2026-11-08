@@ -23,14 +23,9 @@ class CameraMetadata(private val characteristics: CameraCharacteristics) {
 
 data class CameraDescriptor(
     val id: String,
-    val isDirectlyOpenable: Boolean,
-    val logicalParentIds: Set<String>,
     val metadata: Result<CameraMetadata>
 ) {
-    val lensFacing get() = metadata.getOrNull()?.get(CameraCharacteristics.LENS_FACING)
     val focalLengths get() = metadata.getOrNull()?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList()
-    val zoomRatioRange get() = metadata.getOrNull()?.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-    val maxDigitalZoom get() = metadata.getOrNull()?.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
     val physicalCameraIds get() = metadata.getOrNull()?.physicalCameraIds.orEmpty()
 
     /** Focal length per active sensor length: magnification, rather than a ratio of FoV angles. */
@@ -51,7 +46,7 @@ data class CameraDescriptor(
 /** Process-local catalog. Does not open cameras or change active sessions. */
 class CameraCatalog private constructor(private val application: Application) {
     private val manager = application.getSystemService(CameraManager::class.java)
-    private var cached: List<CameraDescriptor>? = null
+    private val cached = mutableMapOf<String, CameraDescriptor>()
     private var permission: Int? = null
 
     init {
@@ -64,39 +59,23 @@ class CameraCatalog private constructor(private val application: Application) {
     }
 
     @Synchronized
-    fun invalidate() { cached = null }
+    fun invalidate() { cached.clear() }
 
     @Synchronized
-    fun cameras(): List<CameraDescriptor> {
+    fun camera(id: String): CameraDescriptor {
         val currentPermission = application.checkSelfPermission(Manifest.permission.CAMERA)
-        if (permission != currentPermission) cached = null
+        if (permission != currentPermission) cached.clear()
         permission = currentPermission
-        cached?.let { return it }
-        val topLevel = manager.cameraIdList.toSet()
-        val metadata = linkedMapOf<String, Result<CameraMetadata>>()
-        val parents = mutableMapOf<String, MutableSet<String>>()
-        fun read(id: String) = metadata.getOrPut(id) {
-            runCatching { CameraMetadata(manager.getCameraCharacteristics(id)) }
+        return cached.getOrPut(id) {
+            CameraDescriptor(id, runCatching { CameraMetadata(manager.getCameraCharacteristics(id)) })
         }
-        topLevel.forEach { id ->
-            read(id).getOrNull()?.physicalCameraIds.orEmpty().forEach { physicalId ->
-                parents.getOrPut(physicalId) { linkedSetOf() }.add(id)
-                read(physicalId)
-            }
-        }
-        return metadata.map { (id, result) ->
-            CameraDescriptor(id, id in topLevel, parents[id].orEmpty().toSet(), result)
-        }.also { cached = it }
     }
-
-    fun camera(id: String): CameraDescriptor = cameras().firstOrNull { it.id == id }
-        ?: error("Camera $id is not reported by Android")
 
     fun lensZoomRatio(id: String, referenceId: String): Float? {
         if (id == referenceId) return 1f
         val reference = camera(referenceId).normalizedFocalLength() ?: return null
         val focalLength = camera(id).normalizedFocalLength() ?: return null
-        return ((focalLength / reference * 100f).roundToInt() / 100f).takeIf { it > 0f }
+        return ((focalLength / reference * 10f).roundToInt() / 10f).takeIf { it > 0f }
     }
 
     companion object {

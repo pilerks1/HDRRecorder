@@ -18,7 +18,7 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoCapabilities
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
-import com.pilerks1.hdrrecorder.data.camera.RearLensRepository
+import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.Resolution
 import android.media.CamcorderProfile
@@ -43,9 +43,8 @@ class CcManager(private val context: Context) {
      */
     private suspend fun initializeCamera() {
         cameraProvider = CameraProviderRepository.awaitProvider(context)
-        val repository = RearLensRepository(context)
-        val inventory = repository.discover(cameraProvider)
-        cameraInfo = repository.defaultCameraInfo(cameraProvider, inventory)
+        val repository = DefaultBackCameraRepository(context)
+        cameraInfo = repository.cameraInfo(cameraProvider)
         videoCapabilities = Recorder.getVideoCapabilities(cameraInfo)
     }
 

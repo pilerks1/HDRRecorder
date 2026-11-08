@@ -9,8 +9,6 @@ import com.pilerks1.hdrrecorder.data.camera.core.CameraMetadata as ReportedCamer
 import com.pilerks1.hdrrecorder.data.camera.core.DeviceCompatibilityChecker
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeCapabilities
-import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
-import com.pilerks1.hdrrecorder.data.camera.core.RearLensInventory
 
 /**
  * Data class representing the physical limits of the active camera hardware.
@@ -19,27 +17,17 @@ typealias CameraCapabilities = com.pilerks1.hdrrecorder.data.camera.core.CameraC
 
 object CameraCapabilitiesManager {
 
-    fun extractCamera2Modes(catalog: CameraCatalog, inventory: RearLensInventory): Camera2ModeCapabilities {
-        val ids = inventory.buttonLenses.map { it.cameraId } + inventory.defaultCameraId
-        val modesByCamera = ids.distinct().associateWith { id ->
-            val metadata = catalog.camera(id).metadata.getOrNull()
-            Camera2Control.entries.associateWith { control ->
-                if (metadata == null || control.requestKey !in metadata.requestKeys) emptyList()
-                else metadata[control.availableModesKey]?.filter { mode ->
-                    control != Camera2Control.CONTROL_AF_MODE || mode in listOf(
-                        CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
-                        CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
-                        CameraMetadata.CONTROL_AF_MODE_EDOF
-                    )
-                }?.distinct()?.sorted().orEmpty()
-            }
-        }
-        val common = Camera2Control.entries.associateWith { control ->
-            inventory.buttonLenses.map { modesByCamera.getValue(it.cameraId).getValue(control).toSet() }
-                .reduceOrNull { left, right -> left intersect right }?.sorted().orEmpty()
-        }
-        return Camera2ModeCapabilities(modesByCamera.getValue(inventory.defaultCameraId), common)
-    }
+    fun extractCamera2Modes(metadata: ReportedCameraMetadata): Camera2ModeCapabilities =
+        Camera2ModeCapabilities(Camera2Control.entries.associateWith { control ->
+            if (control.requestKey !in metadata.requestKeys) emptyList()
+            else metadata[control.availableModesKey]?.filter { mode ->
+                control != Camera2Control.CONTROL_AF_MODE || mode in listOf(
+                    CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
+                    CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                    CameraMetadata.CONTROL_AF_MODE_EDOF
+                )
+            }?.distinct()?.sorted().orEmpty()
+        })
 
     /**
      * Projects reported Camera2 metadata and separately supplied CameraX support into app controls.
