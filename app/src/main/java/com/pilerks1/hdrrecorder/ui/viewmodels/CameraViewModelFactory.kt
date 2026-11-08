@@ -10,6 +10,7 @@ import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.TelemetryStore
+import com.pilerks1.hdrrecorder.data.storage.StorageManager
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
 
@@ -29,13 +30,14 @@ internal class CameraViewModelFactory(
             "Unknown ViewModel class: ${modelClass.name}"
         }
         val telemetryStore = TelemetryStore()
-        val statsManager = StatsManager(application, telemetryStore)
+        val storageManager = StorageManager(application)
+        val statsManager = StatsManager(application, telemetryStore, storageManager.recordings)
         val resultReader = CameraResultReader()
         val telemetryCoordinator = TelemetryCoordinator(telemetryStore, statsManager, resultReader)
         val controlCoordinator = CameraControlCoordinator(resultReader)
         val preferencesManager = PreferencesManager(application)
         val cameraManager = CameraManager(application, telemetryCoordinator, controlCoordinator)
-        val recordingManager = RecordingManager(application, statsManager)
+        val recordingManager = RecordingManager(application, statsManager, storageManager.recordings)
 
         @Suppress("UNCHECKED_CAST")
         return CameraViewModel(
@@ -45,6 +47,7 @@ internal class CameraViewModelFactory(
             preferencesManager = preferencesManager,
             cameraManager = cameraManager,
             recordingManager = recordingManager,
+            recordingStorage = storageManager.recordings,
             controlCoordinator = controlCoordinator,
             cameraRuntime = cameraRuntime
         ) as T

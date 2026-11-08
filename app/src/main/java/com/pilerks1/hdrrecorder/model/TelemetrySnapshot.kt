@@ -65,5 +65,5 @@ data class StorageSample(
     val capturedAtElapsedNanos: Long = 0L,
     val storageGeneration: Long = 0L,
     val uri: String? = null,
-    val baselineAvailableBytes: Long = 0L
+    val baselineAvailableBytes: Long? = null
 )

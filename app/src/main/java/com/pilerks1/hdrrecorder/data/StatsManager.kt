@@ -1,10 +1,9 @@
 package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
-import android.os.StatFs
 import android.os.SystemClock
-import android.provider.DocumentsContract
-import androidx.core.net.toUri
+import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
+import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.StorageSample
 import com.pilerks1.hdrrecorder.model.TelemetrySnapshot
@@ -30,7 +29,8 @@ import kotlinx.coroutines.launch
  */
 class StatsManager(
     private val context: Context,
-    private val telemetryStore: TelemetryStore
+    private val telemetryStore: TelemetryStore,
+    private val recordingStorage: RecordingStorageManager
 ) {
     private val thermalManager = ThermalManager(context)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -51,7 +51,7 @@ class StatsManager(
     fun updateStorageUri(uri: String?) {
         val generation = storageGeneration.incrementAndGet()
         telemetryStore.updateStorage {
-            it.copy(storageGeneration = generation, uri = uri)
+            it.copy(storageGeneration = generation, uri = uri, baselineAvailableBytes = null)
         }
         requestStorageRefresh(generation, uri)
     }
@@ -122,12 +122,10 @@ class StatsManager(
 
         val refreshSlowDisplay = !recording.isRecording ||
             statsTick % SLOW_DISPLAY_TICKS == 0L ||
-            previous.storageRemainingFormatted == "N/A"
-        val availableBytes = if (recording.isRecording) {
-            (telemetry.storage.baselineAvailableBytes - recording.recordedBytes)
-                .coerceAtLeast(0L)
-        } else {
-            telemetry.storage.baselineAvailableBytes
+            previous.storageRemainingFormatted == "N/A" || telemetry.storage.baselineAvailableBytes == null
+        val availableBytes = telemetry.storage.baselineAvailableBytes?.let { baseline ->
+            if (recording.isRecording) (baseline - recording.recordedBytes).coerceAtLeast(0L)
+            else baseline
         }
         val storageData = if (refreshSlowDisplay) {
             formatStorageInfo(
@@ -206,7 +204,7 @@ class StatsManager(
         val current = telemetryStore.snapshot().storage
         val generation = storageGeneration.incrementAndGet()
         telemetryStore.updateStorage {
-            it.copy(storageGeneration = generation, uri = current.uri)
+            it.copy(storageGeneration = generation, uri = current.uri, baselineAvailableBytes = null)
         }
         requestStorageRefresh(generation, current.uri)
     }
@@ -214,7 +212,7 @@ class StatsManager(
     private fun requestStorageRefresh(generation: Long, uri: String?) {
         storageRefreshJob?.cancel()
         storageRefreshJob = scope.launch(Dispatchers.IO) {
-            val availableBytes = getPhysicalAvailableBytes(uri)
+            val availableBytes = recordingStorage.availableBytes(RecordingDestination.fromStorageUri(uri))
             if (storageGeneration.get() != generation) return@launch
             telemetryStore.updateStorage { current ->
                 if (current.storageGeneration != generation || current.uri != uri) {
@@ -231,49 +229,13 @@ class StatsManager(
         }
     }
 
-    private fun getPhysicalAvailableBytes(uriString: String?): Long {
-        if (uriString == null) return getInternalAvailableBytes()
-        return try {
-            val uri = uriString.toUri()
-            when (uri.scheme) {
-                "file" -> {
-                    val stat = StatFs(uri.path)
-                    stat.availableBlocksLong * stat.blockSizeLong
-                }
-                "content" -> {
-                    val rootId = DocumentsContract.getTreeDocumentId(uri).split(":")[0]
-                    val rootUri = DocumentsContract.buildRootUri(uri.authority, rootId)
-                    context.contentResolver.query(
-                        rootUri,
-                        arrayOf(DocumentsContract.Root.COLUMN_AVAILABLE_BYTES),
-                        null,
-                        null,
-                        null
-                    )?.use { cursor ->
-                        if (cursor.moveToFirst()) cursor.getLong(0)
-                        else getInternalAvailableBytes()
-                    } ?: getInternalAvailableBytes()
-                }
-                else -> getInternalAvailableBytes()
-            }
-        } catch (_: Exception) {
-            getInternalAvailableBytes()
-        }
-    }
-
-    private fun getInternalAvailableBytes(): Long = try {
-        val stat = StatFs(context.filesDir.absolutePath)
-        stat.availableBlocksLong * stat.blockSizeLong
-    } catch (_: Exception) {
-        0L
-    }
-
     private fun formatStorageInfo(
-        availableBytes: Long,
+        availableBytes: Long?,
         currentBitrate: Double,
         targetBitrate: Int,
         isRecording: Boolean
     ): Pair<String, String> {
+        if (availableBytes == null) return "N/A" to "N/A"
         val bitrateToUse =
             if (isRecording && currentBitrate > 0.0) currentBitrate else targetBitrate.toDouble()
         val bytesPerSecond = bitrateToUse * 1_000_000.0 / 8.0

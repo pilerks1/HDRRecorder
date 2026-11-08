@@ -1,7 +1,6 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
 import android.app.Application
-import android.content.Intent
 import android.util.Log
 import android.util.Range
 import android.widget.Toast
@@ -15,6 +14,8 @@ import com.pilerks1.hdrrecorder.data.Bitrate
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
+import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
+import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
 import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
 import com.pilerks1.hdrrecorder.data.camera.DesiredCameraState
 import com.pilerks1.hdrrecorder.data.camera.ExposureMode
@@ -46,8 +47,7 @@ import kotlin.math.roundToInt
 
 /**
  * Managers are constructor-injected (via CameraViewModelFactory in MainActivity) so the
- * ViewModel no longer news up its own Android dependencies. Application is retained only
- * for the content resolver used when persisting a storage URI permission.
+ * ViewModel no longer constructs its own Android dependencies.
  */
 internal class CameraViewModel(
     application: Application,
@@ -56,6 +56,7 @@ internal class CameraViewModel(
     private val preferencesManager: PreferencesManager,
     private val cameraManager: CameraManager,
     private val recordingManager: RecordingManager,
+    private val recordingStorage: RecordingStorageManager,
     private val controlCoordinator: CameraControlCoordinator,
     private val cameraRuntime: CameraRuntime
 ) : AndroidViewModel(application) {
@@ -332,8 +333,7 @@ internal class CameraViewModel(
             is CameraUiEvent.SetStorageUri -> {
                 try {
                     val uri = event.uri.toUri()
-                    val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    getApplication<Application>().contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    recordingStorage.takePersistablePermission(uri)
                 } catch (e: Exception) {
                     Log.e("CameraViewModel", "Failed to take persistable URI permission", e)
                 }
@@ -403,10 +403,13 @@ internal class CameraViewModel(
             if (!_uiState.value.isCameraReady || _uiState.value.isSettingsSheetVisible || pendingHardRebind) return
             val videoCapture = cameraManager.videoCapture ?: return
             val targetBitrate = (Bitrate.parse(_uiState.value.bitrate) ?: 0)
-            if (!recordingManager.startRecording(videoCapture, _uiState.value.storageUri)) return
+            val result = recordingManager.startRecording(
+                videoCapture, RecordingDestination.fromStorageUri(_uiState.value.storageUri)
+            )
+            if (result !is RecordingManager.StartResult.Started) return
             val requestedFps = requestedFpsForStats()
             telemetryCoordinator.startFpsCalculation()
-            statsManager.setRecordingState(true, requestedFps, targetBitrate, _uiState.value.storageUri)
+            statsManager.setRecordingState(true, requestedFps, targetBitrate, result.destination.toStorageUri())
         }
     }
 
