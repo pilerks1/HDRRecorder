@@ -19,9 +19,6 @@ import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededExceptio
 import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 import com.pilerks1.hdrrecorder.data.camera.RearLensRepository
 import androidx.camera.core.*
-import androidx.camera.core.resolutionselector.AspectRatioStrategy
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
@@ -37,9 +34,10 @@ import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.RecordingOptions
+import com.pilerks1.hdrrecorder.model.PreviewOptions
+import com.pilerks1.hdrrecorder.model.PreviewSettings
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -100,10 +98,9 @@ class CameraManager(
         onSurfaceRequest: (SurfaceRequest) -> Unit,
         uiState: CameraUiState,
         displayRotation: Int,
-        onCameraBound: (com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
+        onCameraBound: (com.pilerks1.hdrrecorder.data.camera.CameraCapabilities, PreviewOptions, PreviewSettings, String?) -> Unit
     ) {
         val request = BindRequest(lifecycleOwner, onSurfaceRequest, uiState, displayRotation, onCameraBound)
-        currentBind = request
         val readyProvider = cameraProvider
         if (readyProvider != null) {
             bindUseCases(readyProvider, request)
@@ -140,6 +137,39 @@ class CameraManager(
         }
         val cameraInfo = rearLenses.defaultCameraInfo(cameraProvider, inventory)
         val cameraSelector = cameraInfo.cameraSelector
+        // Resolve preview preferences before tearing down the working session.
+        val previewOptions: PreviewOptions
+        var state: CameraUiState
+        var previewError: String? = null
+        val newPreview: Preview
+        val newVideoCapture: VideoCapture<Recorder>
+        try {
+            previewOptions = PreviewConfiguration.queryOptions(cameraInfo)
+            state = request.uiState.copy(previewSettings = previewOptions.reconcile(request.uiState.previewSettings))
+            val options = RecordingConfiguration.queryOptions(cameraInfo)
+            _recordingOptions.value = options
+            RecordingConfiguration.validate(state, options)
+            newVideoCapture = buildVideoCapture(state, request.displayRotation)
+            var candidate = PreviewConfiguration.build(state.previewSettings, request.displayRotation, state.isStabilizationEnabled)
+            if (state.previewSettings.dynamicRange != null &&
+                !supportsPreviewDynamicRange(cameraInfo, candidate, newVideoCapture)
+            ) {
+                val previous = currentBind?.uiState?.previewSettings?.dynamicRange
+                    ?.takeIf { it in previewOptions.dynamicRanges }
+                state = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = previous))
+                candidate = PreviewConfiguration.build(state.previewSettings, request.displayRotation, state.isStabilizationEnabled)
+                if (previous != null && !supportsPreviewDynamicRange(cameraInfo, candidate, newVideoCapture)) {
+                    state = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = null))
+                    candidate = PreviewConfiguration.build(state.previewSettings, request.displayRotation, state.isStabilizationEnabled)
+                }
+                previewError = "Preview dynamic range is incompatible with the current recording configuration. " +
+                    "Restored ${state.previewSettings.dynamicRange?.displayName ?: "Auto"}."
+            }
+            newPreview = candidate
+        } catch (error: Exception) {
+            Log.e("CameraManager", "Unable to prepare camera configuration", error)
+            return
+        }
         invalidateAttachment()
         clearLowLightBoostObserver()
         cameraProvider.unbindAll()
@@ -147,64 +177,9 @@ class CameraManager(
         activeCameraGeneration = cameraGeneration
 
         try {
-            val options = RecordingConfiguration.queryOptions(cameraInfo)
-            _recordingOptions.value = options
-            RecordingConfiguration.validate(request.uiState, options)
-            // --- Dynamic Range Resolution ---
-            val dynamicRange = RecordingConfiguration.dynamicRange(request.uiState)
-            val requestedFrameRate = request.uiState.selectedFps
-                .takeUnless { request.uiState.manualControlsState.isManualFps }
-                ?.let { Range(it, it) }
-
-            // --- Preview Use Case Configuration ---
-            val previewResolutionSelector = ResolutionSelector.Builder()
-                .setAspectRatioStrategy(
-                    AspectRatioStrategy(
-                        request.uiState.selectedAspectRatio.cameraXValue,
-                        AspectRatioStrategy.FALLBACK_RULE_NONE
-                    )
-                )
-                .setResolutionStrategy(
-                    ResolutionStrategy(
-                        android.util.Size(
-                            1000,
-                            (1000f / request.uiState.selectedAspectRatio.landscapeRatio).roundToInt()
-                        ),
-                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
-                    )
-                )
-                .build()
-
-            val previewBuilder = Preview.Builder()
-                .setResolutionSelector(previewResolutionSelector)
-                .setTargetRotation(request.displayRotation)
-                .setDynamicRange(dynamicRange)
-                .setPreviewStabilizationEnabled(request.uiState.isStabilizationEnabled)
-                .apply { requestedFrameRate?.let(::setTargetFrameRate) }
-
-
-            val newPreview = previewBuilder.build().also {
-                it.setSurfaceProvider { surfaceRequest ->
-                    request.onSurfaceRequest(surfaceRequest)
-                }
+            newPreview.setSurfaceProvider { surfaceRequest ->
+                request.onSurfaceRequest(surfaceRequest)
             }
-
-            // --- Video Capture Use Case Configuration ---
-            val qualitySelector = QualitySelector.from(request.uiState.selectedResolution.toCameraXQuality())
-
-            val recorder = RecordingConfiguration.configure(Recorder.Builder()
-                .setExecutor(cameraExecutor)
-                .setQualitySelector(qualitySelector)
-                .setAspectRatio(request.uiState.selectedAspectRatio.cameraXValue), request.uiState)
-                .build()
-
-            val videoCaptureBuilder = VideoCapture.Builder(recorder)
-                .setVideoStabilizationEnabled(request.uiState.isStabilizationEnabled)
-                .setTargetRotation(request.displayRotation)
-                .setDynamicRange(dynamicRange)
-                .apply { requestedFrameRate?.let(::setTargetFrameRate) }
-
-            val newVideoCapture = videoCaptureBuilder.build()
 
             val boundCamera = cameraProvider.bindToLifecycle(
                 request.lifecycleOwner,
@@ -242,8 +217,8 @@ class CameraManager(
             observeZoom(boundCamera.cameraInfo, inventory)
             val savedZoom = request.uiState.zoomState.ratio.coerceIn(_zoomState.value.minRatio, _zoomState.value.maxRatio)
             confirmedZoomRatio = _zoomState.value.ratio
-            currentBind = request.copy(uiState = request.uiState.copy(zoomState = _zoomState.value.copy(ratio = savedZoom)))
-            request.onCameraBound(caps)
+            currentBind = request.copy(uiState = state.copy(zoomState = _zoomState.value.copy(ratio = savedZoom)))
+            request.onCameraBound(caps, previewOptions, state.previewSettings, previewError)
             setZoomRatio(savedZoom)
             if (observedLifecycle !== request.lifecycleOwner.lifecycle) {
                 observedLifecycle?.removeObserver(lifecycleObserver)
@@ -265,6 +240,49 @@ class CameraManager(
             Log.e("CameraManager", "Use case binding failed", exc)
             invalidateAttachment()
         }
+    }
+
+    /** Only explicit preview dynamic ranges need a compatibility preflight. */
+    fun previewDynamicRangeError(state: CameraUiState): String? {
+        if (state.previewSettings.dynamicRange == null) return null
+        val provider = cameraProvider ?: return "Camera capabilities are not available yet."
+        return try {
+            val info = rearLenses.defaultCameraInfo(provider, rearLenses.discover(provider))
+            val candidate = PreviewConfiguration.build(state.previewSettings, 0, state.isStabilizationEnabled)
+            if (supportsPreviewDynamicRange(info, candidate, buildVideoCapture(state, 0))) null
+            else "Preview dynamic range is incompatible with the current recording configuration."
+        } catch (error: Exception) {
+            Log.w("CameraManager", "Unable to check preview dynamic range", error)
+            "Unable to verify this preview dynamic range with the current recording configuration."
+        }
+    }
+
+    private fun supportsPreviewDynamicRange(info: CameraInfo, preview: Preview, video: VideoCapture<Recorder>): Boolean =
+        try {
+            info.isSessionConfigSupported(SessionConfig.Builder(listOf(preview, video)).build())
+        } catch (error: IllegalArgumentException) {
+            Log.w("CameraManager", "Conflicting preview and recording configuration", error)
+            false
+        }
+
+    private fun buildVideoCapture(state: CameraUiState, rotation: Int): VideoCapture<Recorder> {
+        val recorder = RecordingConfiguration.configure(
+            Recorder.Builder()
+                .setExecutor(cameraExecutor)
+                .setQualitySelector(QualitySelector.from(state.selectedResolution.toCameraXQuality()))
+                .setAspectRatio(state.selectedAspectRatio.cameraXValue),
+            state
+        ).build()
+        return VideoCapture.Builder(recorder)
+            .setVideoStabilizationEnabled(state.isStabilizationEnabled)
+            .setTargetRotation(rotation)
+            .setDynamicRange(RecordingConfiguration.dynamicRange(state))
+            .apply {
+                if (!state.manualControlsState.isManualFps) {
+                    setTargetFrameRate(Range(state.selectedFps, state.selectedFps))
+                }
+            }
+            .build()
     }
 
     private fun observeZoom(
@@ -378,6 +396,6 @@ class CameraManager(
         val onSurfaceRequest: (SurfaceRequest) -> Unit,
         val uiState: CameraUiState,
         val displayRotation: Int,
-        val onCameraBound: (com.pilerks1.hdrrecorder.data.camera.CameraCapabilities) -> Unit
+        val onCameraBound: (com.pilerks1.hdrrecorder.data.camera.CameraCapabilities, PreviewOptions, PreviewSettings, String?) -> Unit
     )
 }

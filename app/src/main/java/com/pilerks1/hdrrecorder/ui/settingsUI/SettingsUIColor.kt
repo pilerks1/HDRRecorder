@@ -27,8 +27,8 @@ fun ColorSection(
         modifier = Modifier.padding(bottom = 8.dp)
     )
 
-    RecordingChoiceRow("Bit Depth", bitDepth.toString(),
-        colors.map { it.bitDepth }.distinct().sorted().map { it to it.toString() }, onBitDepthChange,
+    RecordingChoiceRow("Bit Depth", "$bitDepth-bit",
+        colors.map { it.bitDepth }.distinct().sorted().map { it to "$it-bit" }, onBitDepthChange,
         isCompatible = { VideoColorOption(it, encoding) in compatibleColors })
     RecordingChoiceRow("Encoding", encoding.displayName,
         colors.map { it.encoding }.distinct().map { it to it.displayName }, onEncodingChange,

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ModeNight
@@ -87,6 +88,8 @@ internal fun CameraUI(
         right = displayCutout.getRight(density, layoutDirection).toFloat(),
         bottom = displayCutout.getBottom(density).toFloat()
     )
+    // When the entire layout is inset, its children must not apply the cutout insets again.
+    val contentCutoutInsets = if (uiState.isRespectDisplayCutoutsEnabled) EdgeInsets() else cutoutInsets
 
     Box(
         modifier = Modifier
@@ -98,7 +101,7 @@ internal fun CameraUI(
         CameraSlotsLayout(
             aspectRatio = uiState.selectedAspectRatio,
             secondaryButtonCount = controlPanels.size,
-            cutoutInsets = cutoutInsets,
+            cutoutInsets = contentCutoutInsets,
             panelThickness = { axis ->
                 PanelThicknessSpec(
                     activeThicknessPx = panelSizing.thicknessFor(
@@ -145,7 +148,7 @@ internal fun CameraUI(
                     uiState = uiState,
                     actions = actions,
                     axis = layoutSpec.axis,
-                    contentInsets = cutoutInsets,
+                    contentInsets = contentCutoutInsets,
                     modifier = Modifier.fillMaxSize()
                 )
             },
@@ -191,7 +194,9 @@ internal fun CameraUI(
                     }
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize().then(
+                if (uiState.isRespectDisplayCutoutsEnabled) Modifier.windowInsetsPadding(displayCutout) else Modifier
+            )
         )
 
         if (uiState.isSettingsSheetVisible) {
@@ -221,6 +226,14 @@ internal fun CameraUI(
                 isStabilizationEnabled = uiState.isStabilizationEnabled,
                 onStabilizationChange = { actions.onEvent(CameraUiEvent.SetStabilization(it)) },
                 isForceDisplaySdrEnabled = uiState.isForceDisplaySdrEnabled,
+                previewSettings = uiState.previewSettings,
+                previewOptions = uiState.previewOptions,
+                previewSettingsError = uiState.previewSettingsError,
+                isRecording = uiState.isRecording,
+                onPreviewFrameRateChange = { actions.onEvent(CameraUiEvent.SetPreviewFrameRate(it)) },
+                onPreviewDynamicRangeChange = { actions.onEvent(CameraUiEvent.SetPreviewDynamicRange(it)) },
+                isRespectDisplayCutoutsEnabled = uiState.isRespectDisplayCutoutsEnabled,
+                onRespectDisplayCutoutsChange = { actions.onEvent(CameraUiEvent.SetRespectDisplayCutouts(it)) },
                 onForceDisplaySdrChange = { actions.onEvent(CameraUiEvent.SetForceDisplaySdr(it)) },
                 camera2Settings = uiState.camera2Settings,
                 camera2Capabilities = uiState.cameraCapabilities?.camera2Modes,

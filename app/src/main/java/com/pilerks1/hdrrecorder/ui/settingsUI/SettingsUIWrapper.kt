@@ -7,6 +7,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import com.pilerks1.hdrrecorder.model.RecordingOptions
+import android.util.Range
+import com.pilerks1.hdrrecorder.model.PreviewSettings
+import com.pilerks1.hdrrecorder.model.PreviewOptions
+import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -55,7 +59,15 @@ fun SettingsUI(
     gammaModes: List<GammaMode>,
     onGammaSettingsChange: (GammaSettings) -> Unit,
 
-    // SDR Hacks
+    // Preview
+    previewSettings: PreviewSettings,
+    previewOptions: PreviewOptions,
+    previewSettingsError: String?,
+    isRecording: Boolean,
+    onPreviewFrameRateChange: (Range<Int>?) -> Unit,
+    onPreviewDynamicRangeChange: (PreviewDynamicRange?) -> Unit,
+    isRespectDisplayCutoutsEnabled: Boolean,
+    onRespectDisplayCutoutsChange: (Boolean) -> Unit,
     isForceDisplaySdrEnabled: Boolean,
     onForceDisplaySdrChange: (Boolean) -> Unit,
 
@@ -140,7 +152,15 @@ fun SettingsUI(
 
         SectionDivider()
 
-        SdrSection(
+        PreviewSection(
+            settings = previewSettings,
+            options = previewOptions,
+            error = previewSettingsError,
+            enabled = !isRecording,
+            onFrameRateChange = onPreviewFrameRateChange,
+            onDynamicRangeChange = onPreviewDynamicRangeChange,
+            isRespectDisplayCutoutsEnabled = isRespectDisplayCutoutsEnabled,
+            onRespectDisplayCutoutsChange = onRespectDisplayCutoutsChange,
             isForceDisplaySdrEnabled = isForceDisplaySdrEnabled,
             onForceDisplaySdrChange = onForceDisplaySdrChange
         )

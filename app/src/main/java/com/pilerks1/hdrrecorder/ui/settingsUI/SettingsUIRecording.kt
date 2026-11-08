@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.data.Bitrate
 
@@ -24,13 +25,15 @@ fun <T> RecordingChoiceRow(
     choices: List<Pair<T, String>>,
     onSelect: (T) -> Unit,
     isCompatible: (T) -> Boolean = { true },
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    textMaxWidth: Dp = SettingsDropdownTextMaxWidth
 ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp,
             color = if (enabled) Color.White else Color.Gray)
-        SettingsChoiceDropdown(value, choices, onSelect, enabled = enabled, isCompatible = isCompatible)
+        SettingsChoiceDropdown(value, choices, onSelect, enabled = enabled,
+            isCompatible = isCompatible, textMaxWidth = textMaxWidth)
     }
 }
 

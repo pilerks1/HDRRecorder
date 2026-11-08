@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.util.Log
 import android.util.Range
+import android.widget.Toast
 import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
@@ -299,7 +300,33 @@ internal class CameraViewModel(
                 it.copy(isWaitToLockAeEnabled = event.enabled)
             }
 
-            // SDR Hacks (auto-saved)
+            is CameraUiEvent.SetPreviewFrameRate -> {
+                if (event.range == null || event.range in _uiState.value.previewOptions.frameRates) {
+                    updateSettingsAndSave(requiresHardRebind = true) {
+                        it.copy(previewSettings = it.previewSettings.copy(frameRate = event.range), previewSettingsError = null)
+                    }
+                }
+            }
+            is CameraUiEvent.SetPreviewDynamicRange -> {
+                if (recordingManager.isRecording.value) return
+                val state = _uiState.value
+                if (event.dynamicRange != null && event.dynamicRange !in state.previewOptions.dynamicRanges) return
+                val requested = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = event.dynamicRange))
+                val error = if (cameraRuntime.usesCameraHardware) cameraManager.previewDynamicRangeError(requested) else null
+                if (error != null) {
+                    _uiState.update { it.copy(previewSettingsError = error) }
+                } else {
+                    updateSettingsAndSave(requiresHardRebind = true) { requested.copy(previewSettingsError = null) }
+                }
+            }
+
+            is CameraUiEvent.SetRespectDisplayCutouts -> {
+                if (!recordingManager.isRecording.value) {
+                    _uiState.update { it.copy(isRespectDisplayCutoutsEnabled = event.enabled) }
+                }
+            }
+
+            // Display headroom
             is CameraUiEvent.SetForceDisplaySdr -> updateSettingsAndSave(requiresHardRebind = false) {
                 it.copy(isForceDisplaySdrEnabled = event.enabled)
             }
@@ -548,10 +575,13 @@ internal class CameraViewModel(
                 onSurfaceRequest = { request -> _surfaceRequest.value = request },
                 uiState = _uiState.value,
                 displayRotation = lastDisplayRotation,
-                onCameraBound = { caps ->
+                onCameraBound = { caps, previewOptions, previewSettings, previewError ->
                     _uiState.update {
                         it.copy(
                             cameraCapabilities = caps,
+                            previewOptions = previewOptions,
+                            previewSettings = previewSettings,
+                            previewSettingsError = previewError,
                             camera2Settings = it.camera2Settings.reconcile(caps.camera2Modes),
                             manualControlsState = ManualControlStateUpdater.adaptToCapabilities(
                                 it.manualControlsState,
@@ -560,6 +590,7 @@ internal class CameraViewModel(
                             isCameraReady = true
                         )
                     }
+                    if (previewError != null) Toast.makeText(getApplication(), previewError, Toast.LENGTH_LONG).show()
                     applyInterop()
                     applyLowLightBoostPreference()
                 }

@@ -2,6 +2,9 @@ package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Range
+import com.pilerks1.hdrrecorder.model.PreviewSettings
+import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
 import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.GammaMode
@@ -83,6 +86,14 @@ class PreferencesManager(context: Context) {
             put("bitrate", state.bitrate)
             put("stab", state.isStabilizationEnabled)
             put("forceSdr", state.isForceDisplaySdrEnabled)
+            put("respectDisplayCutouts", state.isRespectDisplayCutoutsEnabled)
+            put("preview", JSONObject().apply {
+                state.previewSettings.frameRate?.let {
+                    put("fpsLower", it.lower)
+                    put("fpsUpper", it.upper)
+                }
+                state.previewSettings.dynamicRange?.let { put("dynamicRange", it.storageId) }
+            })
             put("extendManualRanges", state.isExtendManualRangesEnabled)
             put("waitToLockAe", state.isWaitToLockAeEnabled)
             // Note: Storage URI remains global, so we don't bake it into individual presets.
@@ -133,6 +144,9 @@ class PreferencesManager(context: Context) {
                 bitrate = json.optString("bitrate", ""),
                 isStabilizationEnabled = json.optBoolean("stab", defaultState.isStabilizationEnabled),
                 isForceDisplaySdrEnabled = json.optBoolean("forceSdr", defaultState.isForceDisplaySdrEnabled),
+                isRespectDisplayCutoutsEnabled = json.optBoolean("respectDisplayCutouts", false),
+                previewSettings = loadPreviewSettings(json.optJSONObject("preview")),
+                previewSettingsError = null,
                 isExtendManualRangesEnabled = json.optBoolean("extendManualRanges", false),
                 isWaitToLockAeEnabled = json.optBoolean("waitToLockAe", true),
                 currentPresetName = name
@@ -140,6 +154,16 @@ class PreferencesManager(context: Context) {
         } catch (e: Exception) {
             defaultState
         }
+    }
+
+    private fun loadPreviewSettings(json: JSONObject?): PreviewSettings {
+        json ?: return PreviewSettings()
+        val lower = json.optInt("fpsLower", 0)
+        val upper = json.optInt("fpsUpper", 0)
+        return PreviewSettings(
+            frameRate = if (lower > 0 && upper >= lower) Range(lower, upper) else null,
+            dynamicRange = PreviewDynamicRange.fromStorageId(json.optString("dynamicRange"))
+        )
     }
 
     private fun loadCamera2Settings(json: JSONObject?): Camera2Settings {

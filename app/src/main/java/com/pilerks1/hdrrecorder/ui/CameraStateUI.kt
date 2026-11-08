@@ -5,6 +5,9 @@ import com.pilerks1.hdrrecorder.data.camera.core.MeteringAnchor
 import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
 import com.pilerks1.hdrrecorder.data.camera.core.RegionalMeteringState
 import com.pilerks1.hdrrecorder.model.RecordingOptions
+import com.pilerks1.hdrrecorder.model.PreviewSettings
+import com.pilerks1.hdrrecorder.model.PreviewOptions
+import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
 import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaSettings
 import com.pilerks1.hdrrecorder.model.Resolution
@@ -120,7 +123,11 @@ data class CameraUiState(
     val audioBitrate: String = "",
     val isStabilizationEnabled: Boolean = true,
 
-    // SDR Hacks
+    // Preview
+    val previewSettings: PreviewSettings = PreviewSettings(),
+    val previewOptions: PreviewOptions = PreviewOptions(),
+    val previewSettingsError: String? = null,
+    val isRespectDisplayCutoutsEnabled: Boolean = false,
     val isForceDisplaySdrEnabled: Boolean = false,
 
     // Camera2
@@ -167,7 +174,10 @@ sealed interface CameraUiEvent {
     data class SetBitrate(val bitrate: String) : CameraUiEvent
     data class SetStabilization(val enabled: Boolean) : CameraUiEvent
 
-    // SDR Hack Events
+    // Preview Events
+    data class SetPreviewFrameRate(val range: Range<Int>?) : CameraUiEvent
+    data class SetPreviewDynamicRange(val dynamicRange: PreviewDynamicRange?) : CameraUiEvent
+    data class SetRespectDisplayCutouts(val enabled: Boolean) : CameraUiEvent
     data class SetForceDisplaySdr(val enabled: Boolean) : CameraUiEvent
 
     // Camera2 Events
