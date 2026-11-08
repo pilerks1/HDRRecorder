@@ -134,7 +134,7 @@ fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(PrimaryActionSizes.RECORD_BUTTON_DP.dp)
-            .clickable(enabled = uiState.isCameraReady && uiState.isCameraHardwareEnabled) {
+            .clickable(enabled = uiState.isCameraReady && uiState.isCameraHardwareEnabled && uiState.arePresetsInitialized && !uiState.isPresetBusy) {
                 if (!uiState.isSettingsSheetVisible) {
                     onEvent(CameraUiEvent.ToggleRecording)
                 }

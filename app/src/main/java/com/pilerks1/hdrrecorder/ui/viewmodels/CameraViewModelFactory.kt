@@ -6,6 +6,7 @@ import com.pilerks1.hdrrecorder.data.camera.core.CameraResultReader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.pilerks1.hdrrecorder.data.CameraManager
+import com.pilerks1.hdrrecorder.data.PresetManager
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
@@ -45,6 +46,7 @@ internal class CameraViewModelFactory(
             statsManager = statsManager,
             telemetryCoordinator = telemetryCoordinator,
             preferencesManager = preferencesManager,
+            presetManager = PresetManager(storageManager.presets),
             cameraManager = cameraManager,
             recordingManager = recordingManager,
             recordingStorage = storageManager.recordings,

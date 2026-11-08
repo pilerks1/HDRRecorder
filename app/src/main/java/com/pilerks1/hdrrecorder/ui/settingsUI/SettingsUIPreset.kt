@@ -16,7 +16,16 @@ import androidx.compose.ui.unit.sp
 fun PresetSection(
     currentPreset: String,
     presetsList: List<String>,
-    onSavePreset: (String) -> Unit,
+    onAddPreset: (String) -> Unit,
+    onSavePreset: () -> Unit,
+    saveRecordingOptions: Boolean,
+    onSaveRecordingOptionsChange: (Boolean) -> Unit,
+    saveStorageLocation: Boolean,
+    onSaveStorageLocationChange: (Boolean) -> Unit,
+    presetsEnabled: Boolean,
+    presetBusy: Boolean,
+    presetError: String?,
+    onRetryPresets: () -> Unit,
     onLoadPreset: (String) -> Unit,
     onDeletePreset: (String) -> Unit,
     onDeleteAllPresets: () -> Unit
@@ -37,6 +46,13 @@ fun PresetSection(
         modifier = Modifier.padding(bottom = 8.dp)
     )
 
+    val enabled = presetsEnabled && !presetBusy
+    if (presetBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    presetError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+    if (!presetsEnabled && !presetBusy) {
+        TextButton(onClick = onRetryPresets) { Text("Retry loading presets") }
+    }
+
     // Current Preset Dropdown
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -50,6 +66,7 @@ fun PresetSection(
         ) {
             Button(
                 onClick = { showAddDialog = true },
+                enabled = enabled,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -61,6 +78,7 @@ fun PresetSection(
             SettingsChoiceDropdown(
                 value = if (presetsList.isEmpty()) "No Presets" else currentPreset,
                 choices = presetsList.map { it to it },
+                enabled = enabled,
                 onSelect = onLoadPreset
             )
         }
@@ -74,7 +92,8 @@ fun PresetSection(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Button(
-            onClick = { onSavePreset(currentPreset) },
+            onClick = onSavePreset,
+            enabled = enabled && presetsList.isNotEmpty(),
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -85,7 +104,8 @@ fun PresetSection(
             Text("Save", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
         }
         Button(
-            onClick = { if (presetsList.size > 1) showDeleteCurrentDialog = true },
+            onClick = { showDeleteCurrentDialog = true },
+            enabled = enabled && presetsList.isNotEmpty(),
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -96,7 +116,8 @@ fun PresetSection(
             Text("Delete Current", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
         }
         Button(
-            onClick = { if (presetsList.isNotEmpty()) showDeleteAllDialog = true },
+            onClick = { showDeleteAllDialog = true },
+            enabled = enabled && presetsList.isNotEmpty(),
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -110,31 +131,32 @@ fun PresetSection(
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    // NOTE: these two toggles are UI for features not yet wired to state/persistence.
-    // Kept as local state for now; they reuse the shared HdrSettingsSwitchRow styling.
-    var saveRecordingOptionsEnabled by remember { mutableStateOf(false) }
-
     HdrSettingsSwitchRow(
         label = "Save Recording Options",
-        description = "Save options modified on the main camera screen to the current preset automatically.",
-        checked = saveRecordingOptionsEnabled,
-        onCheckedChange = { saveRecordingOptionsEnabled = it }
+        description = "Include main camera controls, manual values, and zoom when saving this preset.",
+        checked = saveRecordingOptions,
+        enabled = enabled,
+        onCheckedChange = onSaveRecordingOptionsChange
     )
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    var saveStorageLocationEnabled by remember { mutableStateOf(false) }
-
     HdrSettingsSwitchRow(
         label = "Save Storage Location",
         description = "Include the currently selected storage folder when saving this preset.",
-        checked = saveStorageLocationEnabled,
-        onCheckedChange = { saveStorageLocationEnabled = it }
+        checked = saveStorageLocation,
+        enabled = enabled,
+        onCheckedChange = onSaveStorageLocationChange
     )
 
     // --- Dialogs ---
 
     if (showAddDialog) {
+        val nameError = when {
+            newPresetName.isBlank() -> "Enter a preset name"
+            presetsList.any { it.equals(newPresetName.trim(), ignoreCase = true) } -> "A preset with that name already exists"
+            else -> null
+        }
         AlertDialog(
             onDismissRequest = {
                 showAddDialog = false
@@ -148,6 +170,8 @@ fun PresetSection(
                     onValueChange = { newPresetName = it },
                     label = { Text("Preset Name", color = Color.LightGray) },
                     singleLine = true,
+                    isError = nameError != null,
+                    supportingText = { nameError?.let { Text(it) } },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = Color.Gray,
@@ -158,10 +182,8 @@ fun PresetSection(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (newPresetName.isNotBlank()) {
-                        onSavePreset(newPresetName)
-                    }
+                TextButton(enabled = enabled && nameError == null, onClick = {
+                    onAddPreset(newPresetName.trim())
                     showAddDialog = false
                     newPresetName = ""
                     focusManager.clearFocus()

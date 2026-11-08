@@ -199,11 +199,24 @@ internal fun CameraUI(
             )
         )
 
+        if (uiState.isPresetBusy && !uiState.isSettingsSheetVisible) {
+            androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        }
+
         if (uiState.isSettingsSheetVisible) {
             SettingsUI(
                 currentPreset = uiState.currentPresetName,
                 presetsList = uiState.presetsList,
-                onSavePreset = { actions.onEvent(CameraUiEvent.SavePreset(it)) },
+                onAddPreset = { actions.onEvent(CameraUiEvent.AddPreset(it)) },
+                onSavePreset = { actions.onEvent(CameraUiEvent.SavePreset) },
+                saveRecordingOptions = uiState.saveRecordingOptions,
+                onSaveRecordingOptionsChange = { actions.onEvent(CameraUiEvent.SetSaveRecordingOptions(it)) },
+                saveStorageLocation = uiState.saveStorageLocation,
+                onSaveStorageLocationChange = { actions.onEvent(CameraUiEvent.SetSaveStorageLocation(it)) },
+                presetsEnabled = uiState.arePresetsInitialized && !uiState.isRecording,
+                presetBusy = uiState.isPresetBusy,
+                presetError = uiState.presetError,
+                onRetryPresets = { actions.onEvent(CameraUiEvent.RetryPresets) },
                 onLoadPreset = { actions.onEvent(CameraUiEvent.LoadPreset(it)) },
                 onDeletePreset = { actions.onEvent(CameraUiEvent.DeletePreset(it)) },
                 onDeleteAllPresets = { actions.onEvent(CameraUiEvent.DeleteAllPresets) },

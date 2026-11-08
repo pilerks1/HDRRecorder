@@ -28,6 +28,25 @@ class RecordingStorageManager(private val context: Context) {
         )
     }
 
+    /** A saved destination must still have a writable directory and persisted grant. */
+    suspend fun isUsablePresetDestination(value: String): Boolean =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val uri = Uri.parse(value)
+                if (!DocumentsContract.isTreeUri(uri) || resolver.persistedUriPermissions.none {
+                        it.uri == uri && it.isReadPermission && it.isWritePermission
+                    }) return@withContext false
+                val document = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                resolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { cursor ->
+                    cursor.moveToFirst() && cursor.getString(0) == DocumentsContract.Document.MIME_TYPE_DIR &&
+                        cursor.getInt(1) and DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE != 0
+                } ?: false
+            } catch (_: Exception) {
+                false
+            }
+        }
+
     /** Custom-folder setup retains the existing fallback to primary MediaStore storage. */
     fun createOutput(destination: RecordingDestination, fileName: String): RecordingOutput {
         if (destination is RecordingDestination.DocumentTree) {

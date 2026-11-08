@@ -11,6 +11,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.core.net.toUri
 import com.pilerks1.hdrrecorder.data.CameraManager
 import com.pilerks1.hdrrecorder.data.Bitrate
+import com.pilerks1.hdrrecorder.data.PresetManager
+import com.pilerks1.hdrrecorder.model.CameraPreset
+import com.pilerks1.hdrrecorder.model.PresetSettings
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.StatsManager
@@ -54,6 +57,7 @@ internal class CameraViewModel(
     private val statsManager: StatsManager,
     private val telemetryCoordinator: TelemetryCoordinator,
     private val preferencesManager: PreferencesManager,
+    private val presetManager: PresetManager,
     private val cameraManager: CameraManager,
     private val recordingManager: RecordingManager,
     private val recordingStorage: RecordingStorageManager,
@@ -81,28 +85,13 @@ internal class CameraViewModel(
     val recordingDurationNanos = telemetryCoordinator.recordingDurationNanos
     val sliderTelemetry = telemetryCoordinator.sliderTelemetry
 
+    private var presetDocuments: List<CameraPreset> = emptyList()
+
     init {
-        val initialState = cameraRuntime.initialUiState()
-        if (initialState != null) {
-            _uiState.value = initialState
-        } else {
-            val globalStorageUri = preferencesManager.storageUri
-            if (!preferencesManager.hasPreset("Default")) {
-                preferencesManager.savePreset("Default", _uiState.value)
-            }
-
-            val names = preferencesManager.getPresetNames().toList()
-            val currentPreset = if (names.contains(preferencesManager.currentPresetName)) {
-                preferencesManager.currentPresetName
-            } else {
-                "Default"
-            }
-            val loadedState = preferencesManager.loadPreset(currentPreset, _uiState.value)
-
-            _uiState.update {
-                loadedState.copy(presetsList = names, storageUri = globalStorageUri)
-            }
-        }
+        _uiState.value = (cameraRuntime.initialUiState() ?: CameraUiState()).copy(
+            storageUri = preferencesManager.storageUri
+        )
+        initializePresets()
 
         collectRecordingState()
         collectLowLightBoostState()
@@ -125,7 +114,7 @@ internal class CameraViewModel(
      * Helper to automatically apply state whenever a setting changes.
      * Defer camera rebinds if the Settings UI is currently open.
      */
-    private fun updateSettingsAndSave(requiresHardRebind: Boolean = false, update: (CameraUiState) -> CameraUiState) {
+    private fun updateSettings(requiresHardRebind: Boolean = false, update: (CameraUiState) -> CameraUiState) {
         if (recordingManager.isRecording.value) return
         _uiState.update { oldState -> update(oldState) }
         if (!cameraRuntime.usesCameraHardware) return
@@ -143,8 +132,13 @@ internal class CameraViewModel(
     }
 
     fun onEvent(event: CameraUiEvent) {
+        if (_uiState.value.isPresetBusy) return
+        if (!_uiState.value.arePresetsInitialized && event != CameraUiEvent.RetryPresets &&
+            event != CameraUiEvent.OpenSettings && event != CameraUiEvent.CloseSettings) return
         // isRecording stays true until Finalize, including after stop was requested.
         if (recordingManager.isRecording.value && when (event) {
+            is CameraUiEvent.AddPreset, CameraUiEvent.SavePreset,
+            is CameraUiEvent.SetSaveRecordingOptions, is CameraUiEvent.SetSaveStorageLocation,
             is CameraUiEvent.LoadPreset, is CameraUiEvent.DeletePreset,
             CameraUiEvent.DeleteAllPresets, CameraUiEvent.OpenSettings,
             is CameraUiEvent.SetStorageUri -> true
@@ -159,47 +153,52 @@ internal class CameraViewModel(
         }
 
         when (event) {
-            // Preset Management
-            is CameraUiEvent.SavePreset -> {
-                preferencesManager.savePreset(event.name, _uiState.value.copy(currentPresetName = event.name))
-                preferencesManager.currentPresetName = event.name
-                _uiState.update { it.copy(presetsList = preferencesManager.getPresetNames().toList(), currentPresetName = event.name) }
+            // All document operations share a single busy gate, including recording startup.
+            CameraUiEvent.RetryPresets -> if (!_uiState.value.arePresetsInitialized) initializePresets()
+            is CameraUiEvent.AddPreset -> runPresetOperation {
+                val name = event.name.trim()
+                require(name.isNotEmpty()) { "Enter a preset name" }
+                require(presetDocuments.none { it.name.equals(name, ignoreCase = true) }) { "A preset with that name already exists" }
+                val preset = _uiState.value.toPreset(PresetManager.newId(), name)
+                presetManager.save(preset, create = true)
+                refreshPresets()
+                selectSavedPreset(preset)
             }
-            is CameraUiEvent.LoadPreset -> {
-                val loadedState = preferencesManager.loadPreset(event.name, _uiState.value)
-                preferencesManager.currentPresetName = event.name
-                _uiState.update { loadedState.copy(presetsList = preferencesManager.getPresetNames().toList()) }
-                triggerRebindForPresets()
+            CameraUiEvent.SavePreset -> runPresetOperation {
+                val state = _uiState.value
+                val preset = state.toPreset(requireNotNull(state.currentPresetId), state.currentPresetName)
+                presetManager.save(preset)
+                refreshPresets()
+                selectSavedPreset(preset)
             }
-            is CameraUiEvent.DeletePreset -> {
-                preferencesManager.deletePreset(event.name)
-                val names = preferencesManager.getPresetNames().toList()
-                val nextPreset = if (names.contains("Default")) "Default" else names.firstOrNull() ?: "Default"
-
-                if (_uiState.value.currentPresetName == event.name) {
-                    val loadedState = preferencesManager.loadPreset(nextPreset, _uiState.value)
-                    preferencesManager.currentPresetName = nextPreset
-                    _uiState.update { loadedState.copy(presetsList = names) }
-                    triggerRebindForPresets()
-                } else _uiState.update { it.copy(presetsList = names) }
+            is CameraUiEvent.LoadPreset -> runPresetOperation {
+                val id = presetDocuments.first { it.name == event.name }.id
+                val preset = presetManager.read(id)
+                applyPreset(preset)
+                selectSavedPreset(preset)
             }
-            is CameraUiEvent.DeleteAllPresets -> {
-                preferencesManager.deleteAllPresets()
-                val loadedState = preferencesManager.loadPreset("Default", CameraUiState(recordingOptions = _uiState.value.recordingOptions))
-                preferencesManager.savePreset("Default", loadedState)
-                preferencesManager.currentPresetName = "Default"
-                _uiState.update { loadedState.copy(presetsList = listOf("Default")) }
-                triggerRebindForPresets()
+            is CameraUiEvent.DeletePreset -> runPresetOperation {
+                val id = presetDocuments.first { it.name == event.name }.id
+                presetManager.delete(id)
+                refreshPresets()
+                selectAfterDeletion()
             }
+            CameraUiEvent.DeleteAllPresets -> runPresetOperation {
+                for (preset in presetDocuments) presetManager.delete(preset.id)
+                refreshPresets()
+                selectAfterDeletion()
+            }
+            is CameraUiEvent.SetSaveRecordingOptions -> _uiState.update { it.copy(saveRecordingOptions = event.enabled) }
+            is CameraUiEvent.SetSaveStorageLocation -> _uiState.update { it.copy(saveStorageLocation = event.enabled) }
 
             // Camera Toggles
             is CameraUiEvent.ToggleRecording -> toggleRecording()
             is CameraUiEvent.TogglePause -> togglePause()
 
-            // Settings modifications (auto-saved)
+            // Draft settings modifications (saved only by Add/Save)
             is CameraUiEvent.CycleFps -> {
                 var disabledLowLightBoost = false
-                updateSettingsAndSave(requiresHardRebind = true) { state ->
+                updateSettings(requiresHardRebind = true) { state ->
                     val newFps = when (state.selectedFps) { 24 -> 30; 30 -> 60; else -> 24 }
                     disabledLowLightBoost =
                         state.manualControlsState.isLowLightBoostEnabled &&
@@ -216,12 +215,12 @@ internal class CameraViewModel(
                 if (disabledLowLightBoost) applyLowLightBoostPreference()
             }
             is CameraUiEvent.CycleResolution -> {
-                updateSettingsAndSave(requiresHardRebind = true) { state ->
+                updateSettings(requiresHardRebind = true) { state ->
                     state.copy(selectedResolution = state.selectedResolution.next())
                 }
             }
             is CameraUiEvent.CycleAspectRatio -> {
-                updateSettingsAndSave(requiresHardRebind = true) { state ->
+                updateSettings(requiresHardRebind = true) { state ->
                     state.copy(selectedAspectRatio = state.selectedAspectRatio.next())
                 }
             }
@@ -235,27 +234,27 @@ internal class CameraViewModel(
                 RecordingSetting.CODEC, _uiState.value.copy(videoCodec = event.mimeType))
             is CameraUiEvent.SetAudioCodec -> {
                 if (event.mimeType == null || event.mimeType in _uiState.value.recordingOptions.audioCodecs) {
-                    updateSettingsAndSave(requiresHardRebind = true) { it.copy(audioCodec = event.mimeType) }
+                    updateSettings(requiresHardRebind = true) { it.copy(audioCodec = event.mimeType) }
                 }
             }
             is CameraUiEvent.SetAudioBitrate -> if (event.bitrate.isEmpty() || Bitrate.parseAudio(event.bitrate) != null) {
-                updateSettingsAndSave(requiresHardRebind = true) { it.copy(audioBitrate = event.bitrate) }
+                updateSettings(requiresHardRebind = true) { it.copy(audioBitrate = event.bitrate) }
             }
             is CameraUiEvent.SetGammaSettings -> if (_uiState.value.encoding.supportsGammaCurveSelection &&
                 event.settings.mode in _uiState.value.cameraCapabilities?.gammaModes.orEmpty()) {
-                updateSettingsAndSave(requiresHardRebind = false) { state ->
+                updateSettings(requiresHardRebind = false) { state ->
                     state.copy(gammaSettings = event.settings)
                 }
             }
 
             is CameraUiEvent.SetBitrate -> {
                 if (event.bitrate.isEmpty() || Bitrate.parse(event.bitrate) != null) {
-                    updateSettingsAndSave(requiresHardRebind = true) {
+                    updateSettings(requiresHardRebind = true) {
                         it.copy(bitrate = event.bitrate)
                     }
                 }
             }
-            is CameraUiEvent.SetStabilization -> updateSettingsAndSave(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
+            is CameraUiEvent.SetStabilization -> updateSettings(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
             is CameraUiEvent.SetLowLightBoost -> setLowLightBoostRequested(event.enabled)
             is CameraUiEvent.SetLinearZoom -> {
                 if (cameraRuntime.usesCameraHardware) {
@@ -287,20 +286,20 @@ internal class CameraViewModel(
                 }
             }
 
-            is CameraUiEvent.SetExtendManualRanges -> updateSettingsAndSave(requiresHardRebind = true) {
+            is CameraUiEvent.SetExtendManualRanges -> updateSettings(requiresHardRebind = true) {
                 it.copy(
                     isExtendManualRangesEnabled = event.enabled,
                     manualControlsState = it.manualControlsState.resetManualSlidersToAuto()
                 )
             }
 
-            is CameraUiEvent.SetWaitToLockAe -> updateSettingsAndSave {
+            is CameraUiEvent.SetWaitToLockAe -> updateSettings {
                 it.copy(isWaitToLockAeEnabled = event.enabled)
             }
 
             is CameraUiEvent.SetPreviewFrameRate -> {
                 if (event.range == null || event.range in _uiState.value.previewOptions.frameRates) {
-                    updateSettingsAndSave(requiresHardRebind = true) {
+                    updateSettings(requiresHardRebind = true) {
                         it.copy(previewSettings = it.previewSettings.copy(frameRate = event.range), previewSettingsError = null)
                     }
                 }
@@ -314,7 +313,7 @@ internal class CameraViewModel(
                 if (error != null) {
                     _uiState.update { it.copy(previewSettingsError = error) }
                 } else {
-                    updateSettingsAndSave(requiresHardRebind = true) { requested.copy(previewSettingsError = null) }
+                    updateSettings(requiresHardRebind = true) { requested.copy(previewSettingsError = null) }
                 }
             }
 
@@ -325,17 +324,18 @@ internal class CameraViewModel(
             }
 
             // Display headroom
-            is CameraUiEvent.SetForceDisplaySdr -> updateSettingsAndSave(requiresHardRebind = false) {
+            is CameraUiEvent.SetForceDisplaySdr -> updateSettings(requiresHardRebind = false) {
                 it.copy(isForceDisplaySdrEnabled = event.enabled)
             }
 
-            // Storage (Maintained globally out of the presets)
+            // Active recording destination remains global; presets may optionally restore it.
             is CameraUiEvent.SetStorageUri -> {
                 try {
                     val uri = event.uri.toUri()
                     recordingStorage.takePersistablePermission(uri)
                 } catch (e: Exception) {
-                    Log.e("CameraViewModel", "Failed to take persistable URI permission", e)
+                    showPresetError("Could not access the selected recording folder")
+                    return
                 }
 
                 preferencesManager.storageUri = event.uri
@@ -364,6 +364,126 @@ internal class CameraViewModel(
                 pendingSoftRebind = false
             }
         }
+    }
+
+    private fun showPresetError(message: String) {
+        _uiState.update { it.copy(presetError = message) }
+        Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun runPresetOperation(operation: suspend () -> Unit) {
+        if (_uiState.value.isPresetBusy || recordingManager.isRecording.value) return
+        _uiState.update { it.copy(isPresetBusy = true, presetError = null) }
+        viewModelScope.launch {
+            try {
+                operation()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e("CameraViewModel", "Preset operation failed", error)
+                // A bulk deletion may have removed some files before failing.
+                try {
+                    refreshPresets()
+                    if (_uiState.value.arePresetsInitialized) selectAfterDeletion()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (refreshError: Exception) {
+                    Log.e("CameraViewModel", "Could not refresh presets", refreshError)
+                }
+                showPresetError(error.message ?: "Preset operation failed")
+            } finally {
+                _uiState.update { it.copy(isPresetBusy = false) }
+            }
+        }
+    }
+
+    private fun initializePresets() {
+        _uiState.update { it.copy(isPresetBusy = false) }
+        runPresetOperation {
+            refreshPresets()
+            if (presetDocuments.isEmpty()) createDefaultPreset()
+            val preset = presetDocuments.firstOrNull { it.id == preferencesManager.selectedPresetId }
+                ?: presetDocuments.first()
+            applyPreset(preset)
+            selectSavedPreset(preset)
+            _uiState.update { it.copy(arePresetsInitialized = true) }
+            scheduleCameraRebind(debounce = false)
+        }
+    }
+
+    private suspend fun refreshPresets() {
+        val listing = presetManager.list()
+        presetDocuments = listing.presets
+        _uiState.update { it.copy(presetsList = listing.presets.map { preset -> preset.name }) }
+        if (listing.errors.isNotEmpty()) showPresetError(listing.errors.joinToString("\n"))
+    }
+
+    private fun selectSavedPreset(preset: CameraPreset) {
+        preferencesManager.selectedPresetId = preset.id
+        _uiState.update { it.copy(currentPresetId = preset.id, currentPresetName = preset.name) }
+    }
+
+    private suspend fun createDefaultPreset(): CameraPreset {
+        val preset = CameraPreset(PresetManager.newId(), "Default", PresetSettings())
+        presetManager.save(preset, create = true)
+        refreshPresets()
+        return preset
+    }
+
+    private suspend fun selectAfterDeletion() {
+        if (presetDocuments.any { it.id == _uiState.value.currentPresetId }) return
+        val reset = presetDocuments.isEmpty()
+        val preset = if (reset) createDefaultPreset() else
+            presetDocuments.firstOrNull { it.name == "Default" } ?: presetDocuments.first()
+        if (reset) {
+            _uiState.update { it.copy(
+                selectedFps = 30,
+                selectedResolution = com.pilerks1.hdrrecorder.model.Resolution.FHD,
+                selectedAspectRatio = com.pilerks1.hdrrecorder.model.RecordingAspectRatio.FOUR_THREE,
+                manualControlsState = ManualControlsState()
+            ) }
+            _uiState.update { it.copy(zoomState = it.zoomState.copy(ratio = 1f)) }
+        }
+        applyPreset(preset)
+        selectSavedPreset(preset)
+    }
+
+    private suspend fun applyPreset(preset: CameraPreset) {
+        var destination = _uiState.value.storageUri
+        if (preset.saveStorageLocation) {
+            val saved = preset.storageUri
+            if (saved == null || recordingStorage.isUsablePresetDestination(saved)) destination = saved
+            else showPresetError("Preset recording folder is unavailable. Kept the current recording folder.")
+        }
+        exposureTransitionJob?.cancel()
+        exposureTransitionGeneration++
+        _uiState.update { it.withPreset(preset).copy(storageUri = destination, isExposureTransitioning = false) }
+        preferencesManager.storageUri = destination
+        statsManager.updateStorageUri(destination)
+        reconcilePresetControls()
+        if (!cameraRuntime.usesCameraHardware) {
+            _uiState.update { it.copy(zoomState = it.zoomState.let { zoom ->
+                zoom.copy(ratio = zoom.ratio.coerceIn(zoom.minRatio, zoom.maxRatio))
+            }) }
+        }
+        triggerRebindForPresets()
+    }
+
+    private fun reconcilePresetControls() {
+        val state = _uiState.value
+        val caps = state.cameraCapabilities ?: return
+        val adapted = ManualControlStateUpdater.adaptToCapabilities(state.manualControlsState, caps)
+        val calculated = ManualControlStateUpdater.calculateNextState(
+            ManualControlsState(), caps,
+            ManualControlStateUpdater.ExposureDefaults(adapted.isoValue, adapted.ssValueNanos,
+                adapted.postRawSensitivityBoost ?: 100)
+        ) { adapted }.first
+        val controls = if (calculated.isLowLightBoostEnabled &&
+            ((if (calculated.isManualFps) calculated.fpsRange?.upper ?: state.selectedFps else state.selectedFps) > LOW_LIGHT_BOOST_MAX_FPS ||
+                calculated.isManualIso || calculated.isManualSs)) {
+            calculated.copy(isLowLightBoostEnabled = false)
+        } else calculated
+        _uiState.update { it.copy(manualControlsState = controls) }
     }
 
     private fun triggerRebindForPresets() {
@@ -431,7 +551,7 @@ internal class CameraViewModel(
 
     fun updateManualControls(updater: (ManualControlsState) -> ManualControlsState) {
         val currentUi = _uiState.value
-        if (currentUi.isExposureTransitioning) return
+        if (currentUi.isExposureTransitioning || currentUi.isPresetBusy || !currentUi.arePresetsInitialized) return
         val caps = currentUi.cameraCapabilities
         val telemetry = telemetryCoordinator.currentCameraTelemetry()
         val oldControls = currentUi.manualControlsState
@@ -560,7 +680,7 @@ internal class CameraViewModel(
      * startup time. CameraManager binds only after the ProcessCameraProvider is actually ready.
      */
     private fun scheduleCameraRebind(debounce: Boolean) {
-        if (!cameraRuntime.usesCameraHardware) return
+        if (!cameraRuntime.usesCameraHardware || !_uiState.value.arePresetsInitialized) return
         val lifecycleOwner = cameraLifecycleOwner ?: return
         cameraRebindJob?.cancel()
         exposureTransitionJob?.cancel()
@@ -591,6 +711,7 @@ internal class CameraViewModel(
                         )
                     }
                     if (previewError != null) Toast.makeText(getApplication(), previewError, Toast.LENGTH_LONG).show()
+                    reconcilePresetControls()
                     applyInterop()
                     applyLowLightBoostPreference()
                 }
@@ -787,7 +908,7 @@ internal class CameraViewModel(
                 .thenBy { matches(it, remaining[1]) }
         ) ?: return
         recordingPriority = listOf(touched) + remaining
-        updateSettingsAndSave(requiresHardRebind = true) {
+        updateSettings(requiresHardRebind = true) {
             it.copy(
                 videoCodec = selected.first,
                 videoBitDepth = selected.second.bitDepth,

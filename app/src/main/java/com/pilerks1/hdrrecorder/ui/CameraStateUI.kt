@@ -87,8 +87,14 @@ internal fun ManualControlsState.resetManualSlidersToAuto(): ManualControlsState
  */
 data class CameraUiState(
     // Presets
+    val currentPresetId: String? = null,
+    val isPresetBusy: Boolean = true,
+    val arePresetsInitialized: Boolean = false,
+    val presetError: String? = null,
+    val saveRecordingOptions: Boolean = false,
+    val saveStorageLocation: Boolean = false,
     val currentPresetName: String = "Default",
-    val presetsList: List<String> = listOf("Default"),
+    val presetsList: List<String> = emptyList(),
 
     // Camera Status
     val isCameraReady: Boolean = false,
@@ -147,7 +153,11 @@ data class CameraUiState(
  */
 sealed interface CameraUiEvent {
     // Preset Events
-    data class SavePreset(val name: String) : CameraUiEvent
+    data object RetryPresets : CameraUiEvent
+    data class AddPreset(val name: String) : CameraUiEvent
+    data object SavePreset : CameraUiEvent
+    data class SetSaveRecordingOptions(val enabled: Boolean) : CameraUiEvent
+    data class SetSaveStorageLocation(val enabled: Boolean) : CameraUiEvent
     data class LoadPreset(val name: String) : CameraUiEvent
     data class DeletePreset(val name: String) : CameraUiEvent
     data object DeleteAllPresets : CameraUiEvent

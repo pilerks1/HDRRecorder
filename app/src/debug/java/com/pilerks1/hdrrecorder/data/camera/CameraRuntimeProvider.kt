@@ -23,29 +23,18 @@ internal object CameraRuntimeProvider {
 }
 
 /**
- * Ephemeral, no-camera runtime used to exercise the real UI with simulated capabilities.
+ * No-camera runtime used to exercise the real UI with simulated capabilities.
  */
 private class UiTestbedCameraRuntime : CameraRuntime {
     override val usesCameraHardware: Boolean = false
 
-    private val presets = linkedMapOf<String, CameraUiState>()
-
-    override fun initialUiState(): CameraUiState {
-        val initialState = newTestbedState()
-        presets["Default"] = initialState
-        return initialState
-    }
+    override fun initialUiState(): CameraUiState = newTestbedState()
 
     override fun handleEvent(
         event: CameraUiEvent,
         currentState: CameraUiState
     ): CameraRuntimeEventResult {
         val replacement = when (event) {
-            is CameraUiEvent.SavePreset -> savePreset(event.name, currentState)
-            is CameraUiEvent.LoadPreset -> loadPreset(event.name, currentState)
-            is CameraUiEvent.DeletePreset -> deletePreset(event.name, currentState)
-            is CameraUiEvent.DeleteAllPresets -> resetPresets(currentState)
-            is CameraUiEvent.SetStorageUri -> currentState.copy(storageUri = event.uri)
             is CameraUiEvent.SetLinearZoom -> currentState.copy(zoomState = currentState.zoomState.let {
                 it.copy(ratio = ZoomMapping.ratio(event.progress, it.minRatio, it.maxRatio))
             })
@@ -63,49 +52,6 @@ private class UiTestbedCameraRuntime : CameraRuntime {
             else -> return CameraRuntimeEventResult.NotHandled
         }
         return CameraRuntimeEventResult.Handled(replacement)
-    }
-
-    private fun savePreset(name: String, currentState: CameraUiState): CameraUiState {
-        presets[name] = currentState.copy(
-            currentPresetName = name,
-            isSettingsSheetVisible = false
-        )
-        return currentState.copy(
-            presetsList = presets.keys.toList(),
-            currentPresetName = name
-        )
-    }
-
-    private fun loadPreset(name: String, currentState: CameraUiState): CameraUiState =
-        presets[name]?.copy(
-            currentPresetName = name,
-            presetsList = presets.keys.toList(),
-            isSettingsSheetVisible = currentState.isSettingsSheetVisible
-        ) ?: currentState
-
-    private fun deletePreset(name: String, currentState: CameraUiState): CameraUiState {
-        presets.remove(name)
-        if (presets.isEmpty()) presets["Default"] = newTestbedState()
-
-        if (currentState.currentPresetName != name) {
-            return currentState.copy(presetsList = presets.keys.toList())
-        }
-
-        val nextName = presets.keys.first()
-        return presets.getValue(nextName).copy(
-            currentPresetName = nextName,
-            presetsList = presets.keys.toList(),
-            isSettingsSheetVisible = currentState.isSettingsSheetVisible
-        )
-    }
-
-    private fun resetPresets(currentState: CameraUiState): CameraUiState {
-        val defaultState = newTestbedState()
-        presets.clear()
-        presets["Default"] = defaultState
-        return defaultState.copy(
-            isSettingsSheetVisible = currentState.isSettingsSheetVisible
-        )
     }
 
     private fun newTestbedState(): CameraUiState = CameraUiState(
