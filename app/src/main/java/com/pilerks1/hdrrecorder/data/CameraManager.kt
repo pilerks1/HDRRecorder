@@ -3,7 +3,6 @@ package com.pilerks1.hdrrecorder.data
 import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
-import android.util.Range
 import androidx.camera.camera2.interop.camera2Interop
 import androidx.camera.camera2.interop.cameraId
 import android.hardware.camera2.CameraCaptureSession
@@ -20,7 +19,6 @@ import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
@@ -32,7 +30,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
-import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.model.RecordingOptions
 import com.pilerks1.hdrrecorder.model.PreviewOptions
 import com.pilerks1.hdrrecorder.model.PreviewSettings
@@ -149,17 +146,17 @@ class CameraManager(
             _recordingOptions.value = options
             RecordingConfiguration.validate(state, options)
             newVideoCapture = buildVideoCapture(state, request.displayRotation)
-            var candidate = PreviewConfiguration.build(state.previewSettings, request.displayRotation, state.isStabilizationEnabled)
+            var candidate = RecordingSessionConfiguration.preview(state, request.displayRotation)
             if (state.previewSettings.dynamicRange != null &&
                 !supportsPreviewDynamicRange(cameraInfo, candidate, newVideoCapture)
             ) {
                 val previous = currentBind?.uiState?.previewSettings?.dynamicRange
                     ?.takeIf { it in previewOptions.dynamicRanges }
                 state = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = previous))
-                candidate = PreviewConfiguration.build(state.previewSettings, request.displayRotation, state.isStabilizationEnabled)
+                candidate = RecordingSessionConfiguration.preview(state, request.displayRotation)
                 if (previous != null && !supportsPreviewDynamicRange(cameraInfo, candidate, newVideoCapture)) {
                     state = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = null))
-                    candidate = PreviewConfiguration.build(state.previewSettings, request.displayRotation, state.isStabilizationEnabled)
+                    candidate = RecordingSessionConfiguration.preview(state, request.displayRotation)
                 }
                 previewError = "Preview dynamic range is incompatible with the current recording configuration. " +
                     "Restored ${state.previewSettings.dynamicRange?.displayName ?: "Auto"}."
@@ -247,7 +244,7 @@ class CameraManager(
         val provider = cameraProvider ?: return "Camera capabilities are not available yet."
         return try {
             val info = defaultBackCamera.cameraInfo(provider)
-            val candidate = PreviewConfiguration.build(state.previewSettings, 0, state.isStabilizationEnabled)
+            val candidate = RecordingSessionConfiguration.preview(state, 0)
             if (supportsPreviewDynamicRange(info, candidate, buildVideoCapture(state, 0))) null
             else "Preview dynamic range is incompatible with the current recording configuration."
         } catch (error: Exception) {
@@ -265,23 +262,7 @@ class CameraManager(
         }
 
     private fun buildVideoCapture(state: CameraUiState, rotation: Int): VideoCapture<Recorder> {
-        val recorder = RecordingConfiguration.configure(
-            Recorder.Builder()
-                .setExecutor(cameraExecutor)
-                .setQualitySelector(QualitySelector.from(state.selectedResolution.toCameraXQuality()))
-                .setAspectRatio(state.selectedAspectRatio.cameraXValue),
-            state
-        ).build()
-        return VideoCapture.Builder(recorder)
-            .setVideoStabilizationEnabled(state.isStabilizationEnabled)
-            .setTargetRotation(rotation)
-            .setDynamicRange(RecordingConfiguration.dynamicRange(state))
-            .apply {
-                if (!state.manualControlsState.isManualFps) {
-                    setTargetFrameRate(Range(state.selectedFps, state.selectedFps))
-                }
-            }
-            .build()
+        return RecordingSessionConfiguration.video(state, rotation, cameraExecutor)
     }
 
     private fun observeZoom(

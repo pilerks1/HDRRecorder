@@ -47,6 +47,8 @@ data class CameraDescriptor(
 class CameraCatalog private constructor(private val application: Application) {
     private val manager = application.getSystemService(CameraManager::class.java)
     private val cached = mutableMapOf<String, CameraDescriptor>()
+    private val cacheLock = Any()
+    private var revision = 0L
     private var permission: Int? = null
 
     init {
@@ -58,16 +60,28 @@ class CameraCatalog private constructor(private val application: Application) {
         })
     }
 
-    @Synchronized
-    fun invalidate() { cached.clear() }
+    fun invalidate() = synchronized(cacheLock) {
+        cached.clear()
+        revision++
+        Unit
+    }
 
-    @Synchronized
     fun camera(id: String): CameraDescriptor {
+        // Never hold the catalog lock while calling Android: availability callbacks can
+        // arrive under the camera service's own lock and invalidate this cache.
         val currentPermission = application.checkSelfPermission(Manifest.permission.CAMERA)
-        if (permission != currentPermission) cached.clear()
-        permission = currentPermission
-        return cached.getOrPut(id) {
-            CameraDescriptor(id, runCatching { CameraMetadata(manager.getCameraCharacteristics(id)) })
+        val queryRevision = synchronized(cacheLock) {
+            if (permission != currentPermission) {
+                cached.clear()
+                revision++
+                permission = currentPermission
+            }
+            cached[id]?.let { return it }
+            revision
+        }
+        val descriptor = CameraDescriptor(id, runCatching { CameraMetadata(manager.getCameraCharacteristics(id)) })
+        return synchronized(cacheLock) {
+            if (revision == queryRevision) cached.getOrPut(id) { descriptor } else descriptor
         }
     }
 

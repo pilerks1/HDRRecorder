@@ -5,6 +5,7 @@ import androidx.camera.core.CameraInfo
 import androidx.camera.core.DynamicRange
 import androidx.camera.video.ExperimentalMimeTypeApi
 import androidx.camera.video.Recorder
+import androidx.camera.video.VideoCapabilities
 import com.pilerks1.hdrrecorder.model.RecordingOptions
 import com.pilerks1.hdrrecorder.model.VideoColorOption
 import com.pilerks1.hdrrecorder.model.VideoEncoding
@@ -19,17 +20,21 @@ object RecordingConfiguration {
         val colors = (listOf<String?>(null) + video).associateWith { mime ->
             val capabilities = if (mime == null) Recorder.getVideoCapabilities(cameraInfo)
                 else Recorder.getVideoCapabilities(cameraInfo, mime)
-            val reported = capabilities?.supportedDynamicRanges.orEmpty().mapNotNull { range ->
-                VideoEncoding.entries.firstOrNull { encodingValue(it) == range.encoding }
-                    ?.let { VideoColorOption(range.bitDepth, it) }
-            }.filter { it.bitDepth == 8 || it.bitDepth == 10 }.distinct()
-            reported + reported.map { VideoColorOption(it.bitDepth, VideoEncoding.UNSPECIFIED) }.distinct()
+            colors(capabilities)
         }
         return RecordingOptions(
             video.filter { colors[it].orEmpty().isNotEmpty() },
             audio,
             colors.filterValues { it.isNotEmpty() }
         )
+    }
+
+    fun colors(capabilities: VideoCapabilities?): List<VideoColorOption> {
+        val reported = capabilities?.supportedDynamicRanges.orEmpty().mapNotNull { range ->
+            VideoEncoding.entries.firstOrNull { encodingValue(it) == range.encoding }
+                ?.let { VideoColorOption(range.bitDepth, it) }
+        }.filter { it.bitDepth == 8 || it.bitDepth == 10 }.distinct()
+        return reported + reported.map { VideoColorOption(it.bitDepth, VideoEncoding.UNSPECIFIED) }.distinct()
     }
 
     fun dynamicRange(state: CameraUiState): DynamicRange = when (state.videoBitDepth) {

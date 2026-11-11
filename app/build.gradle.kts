@@ -14,6 +14,7 @@ configure<com.android.build.api.dsl.ApplicationExtension> {
         targetSdk = 37
         versionCode = 1
         versionName = "Alpha 1.0"
+        buildConfigField("String", "CAMERAX_VERSION", "\"${libs.versions.cameraX.get()}\"")
 
     }
 
@@ -43,6 +44,7 @@ configure<com.android.build.api.dsl.ApplicationExtension> {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
