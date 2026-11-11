@@ -6,8 +6,10 @@ import org.json.JSONObject
 
 /** The feature owns the document format; storage only owns atomic file operations. */
 internal object CompatibilityReportJson {
+    private const val SCHEMA_VERSION = 1
+
     fun encode(report: CompatibilityReport): String = JSONObject().apply {
-        put("schemaVersion", report.schemaVersion)
+        put("schemaVersion", SCHEMA_VERSION)
         put("environment", report.environment)
         put("cameraId", report.cameraId)
         put("startedAt", report.startedAt)
@@ -20,7 +22,6 @@ internal object CompatibilityReportJson {
         } }))
         put("cameraX", tables(report.cameraX))
         put("camera2", tables(report.camera2))
-        put("diagnostics", JSONArray(report.diagnostics))
         put("combinations", JSONArray(report.combinations.map { result -> JSONObject().apply {
             val config = result.configuration
             put("configuration", JSONObject().apply {
@@ -29,14 +30,12 @@ internal object CompatibilityReportJson {
                 put("encoding", config.encoding); put("depth", config.depth); put("fps", config.fps)
             })
             put("status", result.status.name); put("boostStatus", result.boostStatus.name)
-            put("fpsRanges", JSONArray(result.fpsRanges)); put("evidence", JSONArray(result.evidence))
-            put("diagnostics", JSONArray(result.diagnostics))
         } }))
     }.toString()
 
     fun decode(json: String): CompatibilityReport {
         val root = JSONObject(json)
-        require(root.getInt("schemaVersion") == CompatibilityReport.SCHEMA_VERSION)
+        require(root.getInt("schemaVersion") == SCHEMA_VERSION)
         return CompatibilityReport(
             environment = root.getString("environment"), cameraId = root.getString("cameraId"),
             startedAt = root.getLong("startedAt"),
@@ -47,8 +46,7 @@ internal object CompatibilityReportJson {
                 CompatibilityColor(it.getString("encoding"), it.getInt("depth"), it.getString("label"))
             },
             cameraX = readTables(root.getJSONArray("cameraX")),
-            camera2 = readTables(root.getJSONArray("camera2")).map(::hardwareColumns),
-            diagnostics = root.getJSONArray("diagnostics").strings(),
+            camera2 = readTables(root.getJSONArray("camera2")),
             combinations = root.getJSONArray("combinations").objects().map { item ->
                 val config = item.getJSONObject("configuration")
                 CompatibilityCombination(
@@ -59,9 +57,7 @@ internal object CompatibilityReportJson {
                         config.getString("encoding"), config.getInt("depth"), config.getInt("fps")
                     ),
                     CompatibilityStatus.valueOf(item.getString("status")),
-                    CompatibilityStatus.valueOf(item.getString("boostStatus")),
-                    item.getJSONArray("fpsRanges").strings(), item.getJSONArray("evidence").strings(),
-                    item.getJSONArray("diagnostics").strings()
+                    CompatibilityStatus.valueOf(item.getString("boostStatus"))
                 )
             }
         ).also { report ->
@@ -69,11 +65,11 @@ internal object CompatibilityReportJson {
             require(report.colors.distinct().size == report.colors.size)
             require(report.colors.all { it.depth in listOf(8, 10) && VideoEncoding.fromStorageId(it.encoding) != null })
             require(report.total == RecordingAspectRatio.entries.size * (report.videoCodecs.size + 1) *
-                2 * Resolution.entries.size * report.colors.size * 3)
+                2 * Resolution.entries.size * report.colors.size * CompatibilityConfiguration.SCAN_FPS.size)
             require(report.combinations.all { result ->
                 val config = result.configuration
                 RecordingAspectRatio.fromStorageId(config.aspectRatio) != null &&
-                    Resolution.fromStorageId(config.resolution) != null && config.fps in listOf(24, 30, 60) &&
+                    Resolution.fromStorageId(config.resolution) != null && config.fps in CompatibilityConfiguration.SCAN_FPS &&
                     (config.codec == null || config.codec in report.videoCodecs) &&
                     report.colors.any { it.encoding == config.encoding && it.depth == config.depth }
             })
@@ -98,18 +94,4 @@ internal object CompatibilityReportJson {
 
     private fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }
     private fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
-
-    /** Project existing saved reports without forcing another startup scan. */
-    private fun hardwareColumns(table: CompatibilityTable): CompatibilityTable {
-        val statusColumn = table.columns.indexOf("Status")
-        val retained = table.columns.indices.filter { table.columns[it] !in setOf("Status", "App range", "App modes") }
-        val rows = table.rows.filter { row ->
-            (table.title != "Exposure" || statusColumn < 0 || row[statusColumn] == CompatibilityStatus.SUPPORTED.label) &&
-                (table.title != "Processing" || row.first() !in setOf("Gamma value", "Contrast curves", "Gamma presets"))
-        }
-        return table.copy(
-            columns = retained.map { if (table.title == "Metering" && table.columns[it] == "Maximum") "Max regions" else table.columns[it] },
-            rows = rows.map { row -> retained.map { row[it] } }
-        )
-    }
 }

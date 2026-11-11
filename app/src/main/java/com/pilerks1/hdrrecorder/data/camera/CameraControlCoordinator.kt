@@ -13,13 +13,14 @@ import com.pilerks1.hdrrecorder.data.camera.camerax.CameraXRequestBackend
 import com.pilerks1.hdrrecorder.data.camera.core.CameraControlValues
 import com.pilerks1.hdrrecorder.data.camera.core.CameraFrameMetadata
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestCompiler
-import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestBackend
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestOverrides
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
 import com.pilerks1.hdrrecorder.data.camera.core.CameraResultReader
 import com.pilerks1.hdrrecorder.data.camera.core.InteropSettings
+import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -48,27 +49,18 @@ data class DesiredCameraState(
     val selectedFps: Int
 )
 
-enum class ExposureMode { AUTO, SHUTTER_PRIORITY, SENSITIVITY_PRIORITY, FULL_MANUAL }
-
-data class ExposureTransitionResult(
-    val controls: CameraControlValues,
-    val usedUnlockedHandoff: Boolean = false
-)
-
 /** Serializes submissions, native CameraX controls and result-driven exposure handoffs. */
 class CameraControlCoordinator(private val results: CameraResultReader, private val reporter: ErrorReporter) {
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private val mutex = Mutex()
     private val signal = Channel<Unit>(Channel.CONFLATED)
-    private var backend: CameraRequestBackend? = null
-    private var cameraXControls: CameraXRequestBackend? = null
+    private var backend: CameraXRequestBackend? = null
     private var desired: DesiredCameraState? = null
     private var revision = 0L
     private var immediate = false
     private var lastSubmissionMs = 0L
     private var transitionVersion = 0L
     private var transitioning = false
-    private val contributions = linkedMapOf<String, CameraRequestOverrides>()
     private val _meteringState = MutableStateFlow(RegionalMeteringState())
     val meteringState = _meteringState.asStateFlow()
     private var meteringPoint: MeteringPoint? = null
@@ -76,15 +68,23 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
     private var appliedMeteringRevision = 0L
     private var nextMeteringId = 0L
     private var meteringMonitor: TemporaryMeteringMonitor? = null
-
-    init {
-        scope.launch {
-            results.latest.filterNotNull().collect { frame ->
-                if (!transitioning && frame.generation == backend?.generation &&
-                    meteringMonitor?.shouldCancel(frame) == true
-                ) cancelMetering()
+        set(value) {
+            field = value
+            monitorJob?.cancel()
+            // Frames are only examined on Main while a temporary metering monitor is active.
+            monitorJob = value?.let { monitor ->
+                scope.launch {
+                    results.latest.filterNotNull().collect { frame ->
+                        if (!transitioning && frame.generation == backend?.generation && monitor.shouldCancel(frame)) {
+                            cancelMetering()
+                        }
+                    }
+                }
             }
         }
+    private var monitorJob: Job? = null
+
+    init {
         scope.launch {
             for (ignored in signal) {
                 if (!immediate) delay((lastSubmissionMs + 33L - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
@@ -107,10 +107,9 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         }
     }
 
-    fun attach(attachment: CameraRequestBackend, nativeControls: CameraXRequestBackend? = null) {
+    fun attach(attachment: CameraXRequestBackend) {
         detach()
         backend = attachment
-        cameraXControls = nativeControls
         _meteringState.value = RegionalMeteringState(generation = attachment.generation)
         // The owner supplies a capability-adapted desired state after binding.
     }
@@ -125,7 +124,6 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         transitioning = false
         backend?.detach()
         backend = null
-        cameraXControls = null
     }
 
     fun update(state: DesiredCameraState, coalesce: Boolean = false) {
@@ -152,17 +150,9 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         meteringRevision++
     }
 
-    /** Future features use typed snapshots; ownership conflicts fail at composition. */
-    fun contribute(owner: String, overrides: CameraRequestOverrides) {
-        require(owner != "controls") { "The controls owner is reserved" }
-        contributions[owner] = overrides
-        revision++
-        signal.trySend(Unit)
-    }
-
     suspend fun setLowLightBoost(enabled: Boolean) = mutex.withLock {
         try {
-            cameraXControls?.setLowLightBoost(enabled)
+            backend?.setLowLightBoost(enabled)
         } catch (_: CameraRequestSupersededException) {
             // Rebinding reapplies the current preference.
         }
@@ -171,25 +161,16 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
     // Native zoom supersedes earlier zoom requests without waiting for exposure submissions.
     fun setZoomRatio(ratio: Float): com.google.common.util.concurrent.ListenableFuture<Void>? {
         onZoomChanged()
-        return cameraXControls?.setZoomRatio(ratio)
+        return backend?.setZoomRatio(ratio)
     }
 
-    fun setLinearZoom(progress: Float): com.google.common.util.concurrent.ListenableFuture<Void>? {
-        onZoomChanged()
-        return cameraXControls?.setLinearZoom(progress)
-    }
-
-    fun onZoomChanged() {
+    private fun onZoomChanged() {
         if (_meteringState.value.mode == MeteringMode.TEMPORARY) cancelMetering()
-    }
-
-    suspend fun flush() = mutex.withLock {
-        if (!transitioning) desired?.let { state -> backend?.let { submit(it, state) } }
     }
 
     fun startMetering(point: MeteringPoint, anchor: MeteringAnchor, mode: MeteringMode, generation: Long) {
         val attachment = backend ?: return
-        if (attachment.generation != generation || cameraXControls == null) return
+        if (attachment.generation != generation) return
         val state = desired ?: return
         val flags = meteringFlags(state.controls, state.capabilities, focusMode(state))
         if (flags == 0) {
@@ -222,8 +203,8 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         signal.trySend(Unit)
     }
 
-    private suspend fun reconcileMetering(attachment: CameraRequestBackend, state: DesiredCameraState) {
-        val native = cameraXControls ?: return
+    private suspend fun reconcileMetering(attachment: CameraXRequestBackend, state: DesiredCameraState) {
+        val native = attachment
         val current = _meteringState.value
         val flags = if (current.mode == null) 0 else meteringFlags(state.controls, state.capabilities, focusMode(state))
         if (current.mode != null && flags != current.eligibleFlags) {
@@ -272,33 +253,21 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         }
     }
 
-    private fun snapshot(state: DesiredCameraState, lock: Boolean? = null): CameraRequestOverrides {
-        val builder = CameraRequestOverrides.Builder().add(
-            CameraRequestCompiler.compile(state.controls, state.settings, state.capabilities, lock), "controls"
-        )
-        contributions.forEach { (owner, overrides) -> builder.add(overrides, owner) }
-        return builder.build()
-    }
+    private fun snapshot(state: DesiredCameraState, lock: Boolean? = null): CameraRequestOverrides =
+        CameraRequestCompiler.compile(state.controls, state.settings, state.capabilities, lock)
 
-    private suspend fun submit(attachment: CameraRequestBackend, state: DesiredCameraState, lock: Boolean? = null) {
+    private suspend fun submit(attachment: CameraXRequestBackend, state: DesiredCameraState, lock: Boolean? = null) {
         ensureCurrent(attachment)
         attachment.apply(snapshot(state, lock))
         ensureCurrent(attachment)
         lastSubmissionMs = SystemClock.elapsedRealtime()
     }
 
-    fun exposureMode(controls: CameraControlValues, caps: CameraCapabilities): ExposureMode = when {
-        controls.isManualIso && controls.isManualSs && caps.supportsFullManualExposure -> ExposureMode.FULL_MANUAL
-        controls.isManualIso && caps.supportsIsoPriorityAe -> ExposureMode.SENSITIVITY_PRIORITY
-        controls.isManualSs && caps.supportsShutterPriorityAe -> ExposureMode.SHUTTER_PRIORITY
-        else -> ExposureMode.AUTO
-    }
-
     suspend fun transition(
         previous: CameraControlValues,
         target: DesiredCameraState,
-        waitToLockAe: Boolean = true
-    ): ExposureTransitionResult {
+        waitToLockAe: Boolean
+    ): CameraControlValues {
         restartMetering()
         val version = ++transitionVersion
         transitioning = true
@@ -307,8 +276,8 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                 val attachment = backend ?: throw CameraRequestSupersededException()
                 val caps = target.capabilities ?: error("Camera capabilities unavailable")
                 val startRevision = revision
-                val oldMode = exposureMode(previous, caps)
-                val newMode = exposureMode(target.controls, caps)
+                val oldMode = ExposureMode.resolve(previous, caps)
+                val newMode = ExposureMode.resolve(target.controls, caps)
                 fun checkCurrent() {
                     ensureCurrent(attachment)
                     if (version != transitionVersion) throw CameraRequestSupersededException()
@@ -320,7 +289,6 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                         var resolved = if (newMode == ExposureMode.FULL_MANUAL) {
                             target.controls.copy(isManualEv = false, evValueIndex = 0)
                         } else target.controls
-                        var unlocked = false
                         if (newMode != ExposureMode.AUTO) {
                             val held = if (waitToLockAe && oldMode != ExposureMode.FULL_MANUAL && caps.supportsAeLock) {
                                 val source = target.copy(controls = previous)
@@ -331,7 +299,6 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                                     matchesExposure(it, lockedOverrides, oldMode, locked = true)
                                 }
                             } else {
-                                unlocked = oldMode != ExposureMode.FULL_MANUAL
                                 results.latest.value?.takeIf { it.generation == attachment.generation }
                                     ?: error("No current exposure result available")
                             }
@@ -355,13 +322,10 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                                 val heldDuration = held[CaptureResult.SENSOR_FRAME_DURATION]
                                     ?: error("No reported frame duration")
                                 // Establish continuity before applying an explicit user target.
-                                val overrides = CameraRequestOverrides.Builder().add(
-                                    snapshot(target.copy(controls = handoff), lock = false), "handoff"
-                                ).apply {
-                                    if (newMode == ExposureMode.FULL_MANUAL) {
-                                        set(CaptureRequest.SENSOR_FRAME_DURATION, maxOf(heldDuration, heldShutter), "handoff")
-                                    }
-                                }.build()
+                                val handoffOverrides = snapshot(target.copy(controls = handoff), lock = false)
+                                val overrides = if (newMode == ExposureMode.FULL_MANUAL) {
+                                    handoffOverrides.plus(CaptureRequest.SENSOR_FRAME_DURATION, maxOf(heldDuration, heldShutter))
+                                } else handoffOverrides
                                 val before = results.latest.value?.frameNumber ?: -1L
                                 attachment.apply(overrides)
                                 awaitFrame(attachment, before) { frame -> matchesExposure(frame, overrides, newMode) }
@@ -399,18 +363,15 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                                 latest.copy(controls = latest.controls.withExposure(resolved))
                             }
                         }
-                        ExposureTransitionResult(resolved, usedUnlockedHandoff = unlocked)
+                        resolved
                     }
                 } catch (failure: Exception) {
                     // Rebind/cancellation must never restore old settings onto a new camera.
                     checkCurrent()
                     if (failure is CameraRequestSupersededException) throw failure
                     if (failure is CancellationException && failure !is kotlinx.coroutines.TimeoutCancellationException) throw failure
-                    val auto = target.controls.copy(
-                        isManualIso = false, isoValue = null, isManualSs = false, ssValueNanos = null,
-                        isManualPostRawSensitivity = false, postRawSensitivityBoost = null,
-                        isManualEv = previous.isManualEv, evValueIndex = previous.evValueIndex
-                    )
+                    val auto = target.controls.withAutoExposure()
+                        .copy(isManualEv = previous.isManualEv, evValueIndex = previous.evValueIndex)
                     val recovery = target.copy(controls = auto)
                     val recovered = try {
                         withTimeout(2_000L) {
@@ -433,7 +394,7 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                     }
                     reporter.report(IssueCode.CAMERA_CONTROL, "exposureHandoff", failure,
                         mapOf("recovery" to if (recovered) "Auto restored" else "Auto recovery unconfirmed"))
-                    ExposureTransitionResult(auto)
+                    auto
                 }
             }
         } finally {
@@ -443,7 +404,7 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
     }
 
     private suspend fun awaitFrame(
-        attachment: CameraRequestBackend,
+        attachment: CameraXRequestBackend,
         after: Long,
         predicate: (CameraFrameMetadata) -> Boolean
     ): CameraFrameMetadata = results.latest.filterNotNull().first {
@@ -451,7 +412,7 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         it.generation == attachment.generation && it.frameNumber > after && predicate(it)
     }
 
-    private fun ensureCurrent(attachment: CameraRequestBackend) {
+    private fun ensureCurrent(attachment: CameraXRequestBackend) {
         if (backend !== attachment) throw CameraRequestSupersededException()
     }
 

@@ -44,7 +44,6 @@ internal class CameraViewModelFactory(
 
         @Suppress("UNCHECKED_CAST")
         return CameraViewModel(
-            application = application,
             statsManager = statsManager,
             telemetryCoordinator = telemetryCoordinator,
             preferencesManager = preferencesManager,

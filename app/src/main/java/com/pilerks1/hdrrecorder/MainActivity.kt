@@ -55,7 +55,10 @@ class MainActivity : ComponentActivity() {
                 var hasPermissions by remember {
                     mutableStateOf(!cameraRuntime.usesCameraHardware || permissionsGranted())
                 }
-                var currentScreen by rememberSaveable { mutableStateOf<Screen>(Screen.Camera) }
+                var currentScreen by rememberSaveable { mutableStateOf(Screen.Camera) }
+                // Diagnostics history visibility is screen state, shared by every screen that opens it.
+                var showDiagnostics by rememberSaveable { mutableStateOf(false) }
+                val openDiagnostics = { showDiagnostics = true }
                 val compatibilityViewModel: CcViewModel = viewModel()
                 val compatibilityState by compatibilityViewModel.state.collectAsStateWithLifecycle()
                 SideEffect {
@@ -87,18 +90,21 @@ class MainActivity : ComponentActivity() {
                                 onNavigateBack = {},
                                 onRetry = compatibilityViewModel::retry,
                                 onRefresh = compatibilityViewModel::refresh,
+                                onShowDiagnostics = openDiagnostics,
                                 mandatory = true
                             )
                         } else when (currentScreen) {
-                            is Screen.Camera -> CameraUI(
+                            Screen.Camera -> CameraUI(
                                 cameraRuntime = cameraRuntime,
-                                onNavigateToCompatibility = { currentScreen = Screen.Compatibility }
+                                onNavigateToCompatibility = { currentScreen = Screen.Compatibility },
+                                onShowDiagnostics = openDiagnostics
                             )
-                            is Screen.Compatibility -> CompatibilityScreen(
+                            Screen.Compatibility -> CompatibilityScreen(
                                 state = compatibilityState,
                                 onNavigateBack = { currentScreen = Screen.Camera },
                                 onRetry = compatibilityViewModel::retry,
                                 onRefresh = compatibilityViewModel::refresh,
+                                onShowDiagnostics = openDiagnostics,
                                 hardwareEnabled = cameraRuntime.usesCameraHardware
                             )
                         }
@@ -112,13 +118,17 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Please grant camera and audio permissions to use the app.", color = Color.White)
-                                TextButton(onClick = { errorReporter.showHistory(true) }) {
+                                TextButton(onClick = openDiagnostics) {
                                     Text(stringResource(R.string.diagnostics_title))
                                 }
                             }
                         }
                     }
-                    ErrorReportingHost(errorReporter)
+                    ErrorReportingHost(
+                        reporter = errorReporter,
+                        showHistory = showDiagnostics,
+                        onShowHistoryChange = { showDiagnostics = it }
+                    )
                 }
             }
         }

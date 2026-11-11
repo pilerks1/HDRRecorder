@@ -59,8 +59,7 @@ enum class IssueCode(
     COMPATIBILITY_CACHE(R.string.issue_compatibility_cache, IssueSeverity.WARNING),
     CAPABILITY_QUERY(R.string.issue_capability_query, IssueSeverity.WARNING),
     TELEMETRY(R.string.issue_telemetry, IssueSeverity.WARNING),
-    CRASH(R.string.issue_crash, IssueSeverity.INFO),
-    COPY_FAILED(R.string.issue_copy_failed)
+    CRASH(R.string.issue_crash, IssueSeverity.INFO)
 }
 
 data class IssueRecord(
@@ -76,8 +75,7 @@ data class IssueRecord(
 data class ErrorReportState(
     val history: List<IssueRecord> = emptyList(),
     val pending: List<String> = emptyList(),
-    val persistenceAvailable: Boolean = true,
-    val showHistory: Boolean = false
+    val persistenceAvailable: Boolean = true
 )
 
 /** Local, bounded diagnostics. No polling, network, or camera-frame work. */
@@ -123,7 +121,7 @@ class ErrorReporter(context: Context) {
                 val match = recent[key]
                 val previous = current.history.firstOrNull { it.id == match?.id }
                 if (match != null && now - match.elapsed < 5_000 && previous != null) {
-                    val updated = previous.copy(occurrences = if (previous.occurrences == Int.MAX_VALUE) Int.MAX_VALUE else previous.occurrences + 1)
+                    val updated = previous.copy(occurrences = previous.occurrences + 1)
                     mutableState.value = current.copy(history = current.history.map { if (it.id == updated.id) updated else it })
                 } else {
                     val issue = newRecord(code, operation, error, context)
@@ -143,10 +141,6 @@ class ErrorReporter(context: Context) {
 
     fun acknowledge(id: String) = synchronized(lock) {
         mutableState.value = mutableState.value.copy(pending = mutableState.value.pending - id)
-    }
-
-    fun showHistory(show: Boolean) = synchronized(lock) {
-        mutableState.value = mutableState.value.copy(showHistory = show)
     }
 
     fun clearHistory() = synchronized(lock) {
@@ -199,11 +193,7 @@ class ErrorReporter(context: Context) {
             } catch (_: Exception) {
                 // Low memory, full storage and abrupt termination can prevent crash capture.
             } finally {
-                if (previous != null) previous.uncaughtException(thread, error)
-                else {
-                    android.os.Process.killProcess(android.os.Process.myPid())
-                    kotlin.system.exitProcess(10)
-                }
+                previous?.uncaughtException(thread, error) ?: kotlin.system.exitProcess(10)
             }
         }
     }
@@ -220,15 +210,16 @@ class ErrorReporter(context: Context) {
             snapshot.toSortedMap().forEach { (key, value) ->
                 appendLine("$key: $value")
             }
-            // Omit exception messages: platform/provider messages can contain user paths or names.
+            // Messages are kept, but URIs and filesystem paths (which can name the user's files) are redacted.
             var cause = error
             val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
             var depth = 0
             while (cause != null && depth++ < 5 && seen.add(cause)) {
-                appendLine(cause.javaClass.name)
+                appendLine(cause.javaClass.name + cause.message?.let { ": " + redact(it).take(300) }.orEmpty())
                 cause.stackTrace.take(40).forEach { appendLine("  at $it") }
                 cause.suppressed.take(3).forEach { suppressed ->
-                    appendLine("  Suppressed: ${suppressed.javaClass.name}")
+                    appendLine("  Suppressed: ${suppressed.javaClass.name}" +
+                        suppressed.message?.let { ": " + redact(it).take(300) }.orEmpty())
                     suppressed.stackTrace.take(8).forEach { appendLine("    at $it") }
                 }
                 cause = cause.cause
@@ -314,7 +305,9 @@ class ErrorReporter(context: Context) {
         put("id", issue.id); put("code", issue.code.name); put("time", issue.timestamp)
         put("operation", issue.operation); put("details", issue.details); put("count", issue.occurrences)
         put("settings", JSONObject(issue.settings))
-    }.also { require(it.toString().toByteArray(Charsets.UTF_8).size <= MAX_RECORD_BYTES) }
+    }
+
+    private fun redact(message: String): String = SENSITIVE_TEXT.replace(message, "<redacted>")
 
     private fun decode(json: JSONObject) = IssueRecord(
         json.getString("id").take(100), IssueCode.valueOf(json.getString("code")), json.getLong("time"),
@@ -326,7 +319,10 @@ class ErrorReporter(context: Context) {
 
     private companion object {
         const val MAX_REPORTS = 50
+        // Records are bounded by construction (details are capped at 4,000 characters); this
+        // limit only rejects corrupt files on load.
         const val MAX_RECORD_BYTES = 32 * 1024
+        val SENSITIVE_TEXT = Regex("""(content|file)://\S+|/(storage|sdcard|data|mnt)/\S*""")
         val CONTEXT_KEYS = setOf("cameraId", "fps", "resolution", "encoding", "bitDepth", "videoCodec",
             "recording", "platformCode", "recovery", "destination", "previewRange", "query", "stabilization")
         val SETTINGS_KEYS = setOf("resolution", "fps", "bitDepth", "encoding", "videoCodec", "stabilization")

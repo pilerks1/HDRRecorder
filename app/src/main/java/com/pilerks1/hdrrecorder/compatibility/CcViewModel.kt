@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.compatibility
 
-import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
 import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 
 import com.pilerks1.hdrrecorder.errorReporter

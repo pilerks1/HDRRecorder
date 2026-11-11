@@ -6,99 +6,30 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import com.pilerks1.hdrrecorder.model.RecordingOptions
-import android.util.Range
-import com.pilerks1.hdrrecorder.model.PreviewSettings
-import com.pilerks1.hdrrecorder.model.PreviewOptions
-import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
-import com.pilerks1.hdrrecorder.errorReporter
 import com.pilerks1.hdrrecorder.R
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.pilerks1.hdrrecorder.model.VideoEncoding
-import com.pilerks1.hdrrecorder.model.GammaMode
-import com.pilerks1.hdrrecorder.model.GammaSettings
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2ModeCapabilities
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
+import com.pilerks1.hdrrecorder.model.VideoColorOption
+import com.pilerks1.hdrrecorder.ui.CameraUiEvent
+import com.pilerks1.hdrrecorder.ui.CameraUiState
 
 /**
  * Settings UI overlay.
- * Full screen black background style with modular sections.
+ * Full screen black background style with modular sections. Settings cannot open while
+ * recording, so every section is editable here.
  */
 @Composable
-fun SettingsUI(
-    // Presets
-    currentPreset: String,
-    presetsList: List<String>,
-    onAddPreset: (String) -> Unit,
-    onSavePreset: () -> Unit,
-    saveRecordingOptions: Boolean,
-    onSaveRecordingOptionsChange: (Boolean) -> Unit,
-    saveStorageLocation: Boolean,
-    onSaveStorageLocationChange: (Boolean) -> Unit,
-    presetsEnabled: Boolean,
-    presetBusy: Boolean,
-    onRetryPresets: () -> Unit,
-    onLoadPreset: (String) -> Unit,
-    onDeletePreset: (String) -> Unit,
-    onDeleteAllPresets: () -> Unit,
-
-    videoCodec: String?,
-    onVideoCodecChange: (String?) -> Unit,
-    audioCodec: String?,
-    onAudioCodecChange: (String?) -> Unit,
-    audioBitrate: String,
-    onAudioBitrateChange: (String) -> Unit,
-    recordingOptions: RecordingOptions,
-    bitDepth: Int,
-    onBitDepthChange: (Int) -> Unit,
-    // Video Settings
-    bitrate: String,
-    onBitrateChange: (String) -> Unit,
-    isStabilizationEnabled: Boolean,
-    onStabilizationChange: (Boolean) -> Unit,
-
-    // Color Settings
-    encoding: VideoEncoding,
-    onEncodingChange: (VideoEncoding) -> Unit,
-    gammaSettings: GammaSettings,
-    gammaModes: List<GammaMode>,
-    onGammaSettingsChange: (GammaSettings) -> Unit,
-
-    // Preview
-    previewSettings: PreviewSettings,
-    previewOptions: PreviewOptions,
-    isRecording: Boolean,
-    onPreviewFrameRateChange: (Range<Int>?) -> Unit,
-    onPreviewDynamicRangeChange: (PreviewDynamicRange?) -> Unit,
-    isRespectDisplayCutoutsEnabled: Boolean,
-    onRespectDisplayCutoutsChange: (Boolean) -> Unit,
-    isForceDisplaySdrEnabled: Boolean,
-    onForceDisplaySdrChange: (Boolean) -> Unit,
-
-    // Camera2
-    camera2Settings: Camera2Settings,
-    camera2Capabilities: Camera2ModeCapabilities?,
-    isManualFocus: Boolean,
-    onCamera2OverrideEnabledChange: (Camera2Control, Boolean) -> Unit,
-    onCamera2ModeChange: (Camera2Control, Int) -> Unit,
-    isExtendManualRangesEnabled: Boolean,
-    onExtendManualRangesChange: (Boolean) -> Unit,
-    isWaitToLockAeEnabled: Boolean,
-    onWaitToLockAeChange: (Boolean) -> Unit,
-
-    // Storage
-    storageUri: String?,
-    onStorageUriSelected: (String) -> Unit,
-
+internal fun SettingsUI(
+    state: CameraUiState,
+    onEvent: (CameraUiEvent) -> Unit,
     onNavigateToCompatibility: () -> Unit,
-    onClose: () -> Unit
+    onShowDiagnostics: () -> Unit
 ) {
+    val onClose = { onEvent(CameraUiEvent.CloseSettings) }
+    val options = state.recordingOptions
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -108,99 +39,101 @@ fun SettingsUI(
             .verticalScroll(rememberScrollState())
     ) {
         SettingsHeader(onClose = onClose)
-        val reporter = LocalContext.current.errorReporter
 
         PresetSection(
-            currentPreset = currentPreset,
-            presetsList = presetsList,
-            onAddPreset = onAddPreset,
-            onSavePreset = onSavePreset,
-            saveRecordingOptions = saveRecordingOptions,
-            onSaveRecordingOptionsChange = onSaveRecordingOptionsChange,
-            saveStorageLocation = saveStorageLocation,
-            onSaveStorageLocationChange = onSaveStorageLocationChange,
-            presetsEnabled = presetsEnabled,
-            presetBusy = presetBusy,
-            onRetryPresets = onRetryPresets,
-            onLoadPreset = onLoadPreset,
-            onDeletePreset = onDeletePreset,
-            onDeleteAllPresets = onDeleteAllPresets
+            currentPreset = state.currentPresetName,
+            presetsList = state.presetsList,
+            onAddPreset = { onEvent(CameraUiEvent.AddPreset(it)) },
+            onSavePreset = { onEvent(CameraUiEvent.SavePreset) },
+            saveRecordingOptions = state.saveRecordingOptions,
+            onSaveRecordingOptionsChange = { onEvent(CameraUiEvent.SetSaveRecordingOptions(it)) },
+            saveStorageLocation = state.saveStorageLocation,
+            onSaveStorageLocationChange = { onEvent(CameraUiEvent.SetSaveStorageLocation(it)) },
+            presetsEnabled = state.arePresetsInitialized,
+            presetBusy = state.isPresetBusy,
+            onRetryPresets = { onEvent(CameraUiEvent.RetryPresets) },
+            onLoadPreset = { onEvent(CameraUiEvent.LoadPreset(it)) },
+            onDeletePreset = { onEvent(CameraUiEvent.DeletePreset(it)) },
+            onDeleteAllPresets = { onEvent(CameraUiEvent.DeleteAllPresets) }
         )
 
         SectionDivider()
 
         VideoSection(
-            videoCodec = videoCodec,
-            videoCodecs = recordingOptions.videoCodecs,
-            onVideoCodecChange = onVideoCodecChange,
-            compatibleVideoCodecs = recordingOptions.colorsByVideoCodec.filterValues {
-                com.pilerks1.hdrrecorder.model.VideoColorOption(bitDepth, encoding) in it
+            videoCodec = state.videoCodec,
+            videoCodecs = options.videoCodecs,
+            onVideoCodecChange = { onEvent(CameraUiEvent.SetVideoCodec(it)) },
+            compatibleVideoCodecs = options.colorsByVideoCodec.filterValues {
+                VideoColorOption(state.videoBitDepth, state.encoding) in it
             }.keys,
-            bitrate = bitrate,
-            onBitrateChange = onBitrateChange,
-            isStabilizationEnabled = isStabilizationEnabled,
-            onStabilizationChange = onStabilizationChange
+            bitrate = state.bitrate,
+            onBitrateChange = { onEvent(CameraUiEvent.SetBitrate(it)) },
+            isStabilizationEnabled = state.isStabilizationEnabled,
+            onStabilizationChange = { onEvent(CameraUiEvent.SetStabilization(it)) }
         )
 
         SectionDivider()
 
         ColorSection(
-            bitDepth = bitDepth,
-            colors = recordingOptions.allColors(),
-            compatibleColors = recordingOptions.colors(videoCodec),
-            onBitDepthChange = onBitDepthChange,
-            encoding = encoding,
-            onEncodingChange = onEncodingChange
+            bitDepth = state.videoBitDepth,
+            colors = options.allColors(),
+            compatibleColors = options.colors(state.videoCodec),
+            onBitDepthChange = { onEvent(CameraUiEvent.SetVideoBitDepth(it)) },
+            encoding = state.encoding,
+            onEncodingChange = { onEvent(CameraUiEvent.SetEncoding(it)) }
         )
 
-        if (encoding.supportsGammaCurveSelection) {
+        if (state.encoding.supportsGammaCurveSelection) {
             SectionDivider()
-            GammaSection(gammaSettings, gammaModes, onGammaSettingsChange)
+            GammaSection(state.gammaSettings, state.cameraCapabilities?.gammaModes.orEmpty()) {
+                onEvent(CameraUiEvent.SetGammaSettings(it))
+            }
         }
 
         SectionDivider()
 
         AudioSection(
-            codec = audioCodec,
-            codecs = recordingOptions.audioCodecs,
-            onCodecChange = onAudioCodecChange,
-            bitrate = audioBitrate,
-            onBitrateChange = onAudioBitrateChange
+            codec = state.audioCodec,
+            codecs = options.audioCodecs,
+            onCodecChange = { onEvent(CameraUiEvent.SetAudioCodec(it)) },
+            bitrate = state.audioBitrate,
+            onBitrateChange = { onEvent(CameraUiEvent.SetAudioBitrate(it)) }
         )
 
         SectionDivider()
 
         PreviewSection(
-            settings = previewSettings,
-            options = previewOptions,
-            enabled = !isRecording,
-            onFrameRateChange = onPreviewFrameRateChange,
-            onDynamicRangeChange = onPreviewDynamicRangeChange,
-            isRespectDisplayCutoutsEnabled = isRespectDisplayCutoutsEnabled,
-            onRespectDisplayCutoutsChange = onRespectDisplayCutoutsChange,
-            isForceDisplaySdrEnabled = isForceDisplaySdrEnabled,
-            onForceDisplaySdrChange = onForceDisplaySdrChange
+            settings = state.previewSettings,
+            options = state.previewOptions,
+            onFrameRateChange = { onEvent(CameraUiEvent.SetPreviewFrameRate(it)) },
+            onDynamicRangeChange = { onEvent(CameraUiEvent.SetPreviewDynamicRange(it)) },
+            isRespectDisplayCutoutsEnabled = state.isRespectDisplayCutoutsEnabled,
+            onRespectDisplayCutoutsChange = { onEvent(CameraUiEvent.SetRespectDisplayCutouts(it)) },
+            isForceDisplaySdrEnabled = state.isForceDisplaySdrEnabled,
+            onForceDisplaySdrChange = { onEvent(CameraUiEvent.SetForceDisplaySdr(it)) }
         )
 
         SectionDivider()
 
         Camera2Section(
-            settings = camera2Settings,
-            capabilities = camera2Capabilities,
-            isManualFocus = isManualFocus,
-            onOverrideEnabledChange = onCamera2OverrideEnabledChange,
-            onModeChange = onCamera2ModeChange,
-            isExtendManualRangesEnabled = isExtendManualRangesEnabled,
-            onExtendManualRangesChange = onExtendManualRangesChange,
-            isWaitToLockAeEnabled = isWaitToLockAeEnabled,
-            onWaitToLockAeChange = onWaitToLockAeChange
+            settings = state.camera2Settings,
+            capabilities = state.cameraCapabilities?.camera2Modes,
+            isManualFocus = state.manualControlsState.isManualFocus,
+            onOverrideEnabledChange = { control, enabled ->
+                onEvent(CameraUiEvent.SetCamera2OverrideEnabled(control, enabled))
+            },
+            onModeChange = { control, mode -> onEvent(CameraUiEvent.SetCamera2Mode(control, mode)) },
+            isExtendManualRangesEnabled = state.isExtendManualRangesEnabled,
+            onExtendManualRangesChange = { onEvent(CameraUiEvent.SetExtendManualRanges(it)) },
+            isWaitToLockAeEnabled = state.isWaitToLockAeEnabled,
+            onWaitToLockAeChange = { onEvent(CameraUiEvent.SetWaitToLockAe(it)) }
         )
 
         SectionDivider()
 
         StorageSection(
-            storageUri = storageUri,
-            onStorageUriSelected = onStorageUriSelected
+            storageUri = state.storageUri,
+            onStorageUriSelected = { onEvent(CameraUiEvent.SetStorageUri(it)) }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -213,7 +146,7 @@ fun SettingsUI(
             Text("Check Device Compatibility")
         }
         OutlinedButton(
-            onClick = { onClose(); reporter.showHistory(true) },
+            onClick = { onClose(); onShowDiagnostics() },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
         ) {

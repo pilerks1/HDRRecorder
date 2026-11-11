@@ -1,6 +1,7 @@
 package com.pilerks1.hdrrecorder.data.camera.core
 
 import android.util.Range
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
 import kotlin.math.abs
 import kotlin.math.floor
 
@@ -39,6 +40,4 @@ object FixedFrameRates {
                 .thenByDescending { fps -> fps }
         )
     }
-
-    private const val NANOS_PER_SECOND = 1_000_000_000L
 }

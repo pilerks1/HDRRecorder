@@ -13,26 +13,17 @@ enum class VideoEncoding(val storageId: String, val displayName: String) {
         get() = this == UNSPECIFIED
 
     companion object {
-        /** Accepts both stable IDs and the labels written by older app versions. */
-        fun fromStorageId(value: String?): VideoEncoding? = when (value) {
-            "dolby_vision_84", "DB 8.4" -> DOLBY_VISION
-            "unspecified_10_bit", "Unspec" -> UNSPECIFIED
-            else -> entries.firstOrNull { it.storageId == value || it.displayName == value }
-        }
+        fun fromStorageId(value: String?): VideoEncoding? = entries.firstOrNull { it.storageId == value }
     }
 }
 
 /** Stable gamma-curve identifiers for UI state and persisted presets. */
 enum class GammaCurve(val storageId: String, val displayName: String) {
-    AUTO("auto", "Auto"),
     HLG("hlg", "HLG"),
     PQ("pq", "PQ"),
     CUSTOM("custom", "Custom");
 
     companion object {
-        /** Accepts both stable IDs and the labels written by older app versions. */
-        fun fromStorageId(value: String?): GammaCurve? = entries.firstOrNull {
-            it.storageId == value || it.displayName == value
-        }
+        fun fromStorageId(value: String?): GammaCurve? = entries.firstOrNull { it.storageId == value }
     }
 }

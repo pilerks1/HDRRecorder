@@ -34,54 +34,62 @@ internal fun meteringFlags(controls: CameraControlValues, caps: CameraCapabiliti
 
 /** Only post-application frames participate; absent state reporting never becomes a timeout. */
 internal class TemporaryMeteringMonitor(private val flags: Int, private val afterFrame: Long) {
-    private val stableSince = mutableMapOf<Int, Long>()
-    private val searchingSince = mutableMapOf<Int, Long>()
+    private class Component(
+        val flag: Int,
+        val key: CaptureResult.Key<Int>,
+        val stableStates: Set<Int>,
+        val searchingState: Int
+    )
+
+    // Per-component timestamps, indexed like COMPONENTS; NONE means not currently in that state.
+    private val stableSince = LongArray(COMPONENTS.size) { NONE }
+    private val searchingSince = LongArray(COMPONENTS.size) { NONE }
     private var armed = false
 
     fun shouldCancel(frame: CameraFrameMetadata): Boolean {
         if (frame.frameNumber <= afterFrame) return false
         val now = frame.receivedAtElapsedNanos
-        val states = listOf(
-            Triple(FocusMeteringAction.FLAG_AE, frame[CaptureResult.CONTROL_AE_STATE],
-                setOf(CaptureResult.CONTROL_AE_STATE_CONVERGED, CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED)),
-            Triple(FocusMeteringAction.FLAG_AWB, frame[CaptureResult.CONTROL_AWB_STATE],
-                setOf(CaptureResult.CONTROL_AWB_STATE_CONVERGED)),
-            Triple(FocusMeteringAction.FLAG_AF, frame[CaptureResult.CONTROL_AF_STATE],
-                setOf(CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED))
-        ).filter { (flag, state, _) -> flags and flag != 0 && state != null }
-        if (states.isEmpty()) {
-            stableSince.clear()
-            searchingSince.clear()
-            return false
-        }
-        if (!armed) {
-            stableSince.keys.retainAll(states.map { it.first }.toSet())
-            for ((flag, state, stable) in states) {
-                if (state in stable) stableSince.putIfAbsent(flag, now) else stableSince.remove(flag)
-            }
-            // A component with no reporting does not prevent other components from arming.
-            armed = states.all { (flag, _, _) ->
-                stableSince[flag]?.let { now - it >= INTERVAL_NANOS } == true
-            }
-            return false
-        }
+        var anyReported = false
+        var allStable = true
         var cancel = false
-        for (flag in listOf(FocusMeteringAction.FLAG_AE, FocusMeteringAction.FLAG_AWB, FocusMeteringAction.FLAG_AF)) {
-            val state = states.firstOrNull { it.first == flag }?.second
-            val searching = when (flag) {
-                FocusMeteringAction.FLAG_AF -> state == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN
-                FocusMeteringAction.FLAG_AE -> state == CaptureResult.CONTROL_AE_STATE_SEARCHING
-                else -> state == CaptureResult.CONTROL_AWB_STATE_SEARCHING
+        COMPONENTS.forEachIndexed { index, component ->
+            val state = if (flags and component.flag != 0) frame[component.key] else null
+            if (state == null) {
+                stableSince[index] = NONE
+                searchingSince[index] = NONE
+                return@forEachIndexed
             }
-            if (searching) {
-                val since = searchingSince.getOrPut(flag) { now }
-                cancel = cancel || now - since >= INTERVAL_NANOS
-            } else searchingSince.remove(flag)
+            anyReported = true
+            if (!armed) {
+                if (state in component.stableStates) {
+                    if (stableSince[index] == NONE) stableSince[index] = now
+                } else stableSince[index] = NONE
+                // A component with no reporting does not prevent other components from arming.
+                allStable = allStable && stableSince[index] != NONE && now - stableSince[index] >= INTERVAL_NANOS
+            } else if (state == component.searchingState) {
+                if (searchingSince[index] == NONE) searchingSince[index] = now
+                cancel = cancel || now - searchingSince[index] >= INTERVAL_NANOS
+            } else searchingSince[index] = NONE
+        }
+        if (!anyReported) return false
+        if (!armed) {
+            armed = allStable
+            return false
         }
         return cancel
     }
 
     private companion object {
         const val INTERVAL_NANOS = 250_000_000L
+        const val NONE = -1L
+        val COMPONENTS = listOf(
+            Component(FocusMeteringAction.FLAG_AE, CaptureResult.CONTROL_AE_STATE,
+                setOf(CaptureResult.CONTROL_AE_STATE_CONVERGED, CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED),
+                CaptureResult.CONTROL_AE_STATE_SEARCHING),
+            Component(FocusMeteringAction.FLAG_AWB, CaptureResult.CONTROL_AWB_STATE,
+                setOf(CaptureResult.CONTROL_AWB_STATE_CONVERGED), CaptureResult.CONTROL_AWB_STATE_SEARCHING),
+            Component(FocusMeteringAction.FLAG_AF, CaptureResult.CONTROL_AF_STATE,
+                setOf(CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED), CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN)
+        )
     }
 }

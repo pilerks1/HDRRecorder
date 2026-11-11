@@ -1,7 +1,7 @@
 package com.pilerks1.hdrrecorder.model
 
-import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
+import com.pilerks1.hdrrecorder.data.camera.core.CameraControlValues
 
 /** Persisted configuration only; excludes runtime and UI visibility. */
 data class CameraPreset(
@@ -11,8 +11,7 @@ data class CameraPreset(
     val saveRecordingOptions: Boolean = false,
     val saveStorageLocation: Boolean = false,
     val recording: PresetRecordingControls? = null,
-    val storageUri: String? = null,
-    val schemaVersion: Int = 1
+    val storageUri: String? = null
 )
 
 data class PresetSettings(
@@ -37,20 +36,12 @@ data class PresetRecordingControls(
     val selectedResolution: Resolution = Resolution.FHD,
     val selectedAspectRatio: RecordingAspectRatio = RecordingAspectRatio.FOUR_THREE,
     val zoomRatio: Float = 1f,
-    val isManualIso: Boolean = false,
-    val isoValue: Int? = null,
-    val isManualPostRawSensitivity: Boolean = false,
-    val postRawSensitivityBoost: Int? = null,
-    val isManualSs: Boolean = false,
-    val ssValueNanos: Long? = null,
-    val isManualEv: Boolean = false,
-    val evValueIndex: Int = 0,
-    val isLowLightBoostEnabled: Boolean = false,
-    val isManualFocus: Boolean = false,
-    val focusDistanceDiopters: Float? = null,
-    val isManualWb: Boolean = false,
-    val wbTemp: Int? = null,
-    val wbTint: Int? = null,
-    val isManualFps: Boolean = false,
-    val fpsRange: Range<Int>? = null
+    val controls: CameraControlValues = CameraControlValues()
 )
+
+/** The authoritative preset-name rule; returns a user-facing error, or null when valid. */
+fun presetNameError(name: String, existingNames: List<String> = emptyList()): String? = when {
+    name.isBlank() -> "Enter a preset name"
+    existingNames.any { it.equals(name.trim(), ignoreCase = true) } -> "A preset with that name already exists"
+    else -> null
+}

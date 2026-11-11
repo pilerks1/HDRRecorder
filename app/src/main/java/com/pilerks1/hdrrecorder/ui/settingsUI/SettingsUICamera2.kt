@@ -2,9 +2,7 @@ package com.pilerks1.hdrrecorder.ui.settingsUI
 
 import android.hardware.camera2.CaptureRequest
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -12,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
@@ -32,13 +29,7 @@ fun Camera2Section(
     isWaitToLockAeEnabled: Boolean,
     onWaitToLockAeChange: (Boolean) -> Unit
 ) {
-    Text(
-        text = "Camera2",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
+    SectionTitle("Camera2")
     val modes = capabilities?.modes.orEmpty()
     Camera2Control.entries.forEach { control ->
         Spacer(Modifier.height(12.dp))
@@ -95,13 +86,7 @@ private fun Camera2ModeRow(
             onCheckedChange = onEnabledChange,
             enabled = available,
             modifier = Modifier.semantics { contentDescription = "$title override" },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                uncheckedThumbColor = Color.LightGray,
-                uncheckedTrackColor = Color.DarkGray,
-                uncheckedBorderColor = Color.LightGray
-            )
+            colors = settingsSwitchColors()
         )
         SettingsChoiceDropdown(
             value = value.mode?.let(control::modeName) ?: "—",
@@ -112,17 +97,6 @@ private fun Camera2ModeRow(
         )
     }
 }
-
-private val Camera2Control.title: String
-    get() = when (this) {
-        Camera2Control.COLOR_CORRECTION_ABERRATION_MODE -> "Aberration"
-        Camera2Control.CONTROL_AF_MODE -> "Control AF"
-        Camera2Control.DISTORTION_CORRECTION_MODE -> "Distortion"
-        Camera2Control.EDGE_MODE -> "Sharpening"
-        Camera2Control.HOT_PIXEL_MODE -> "Hot Pixel"
-        Camera2Control.NOISE_REDUCTION_MODE -> "Noise"
-        Camera2Control.SHADING_MODE -> "Shading"
-    }
 
 private val Camera2Control.description: String?
     get() = when (this) {

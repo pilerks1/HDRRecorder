@@ -1,12 +1,9 @@
 package com.pilerks1.hdrrecorder.ui.settingsUI
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 @Composable
 fun VideoSection(
     videoCodec: String?,
@@ -18,13 +15,7 @@ fun VideoSection(
     isStabilizationEnabled: Boolean,
     onStabilizationChange: (Boolean) -> Unit
 ) {
-    Text(
-        text = "Video",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
+    SectionTitle("Video")
 
     CodecRow("Video Codec", videoCodec, videoCodecs, onVideoCodecChange,
         isCompatible = { it in compatibleVideoCodecs })

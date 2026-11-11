@@ -11,7 +11,7 @@ import kotlin.math.abs
 
 /** One recognizer owns tap, hold, and pinch so multi-touch cannot also dispatch a tap. */
 internal suspend fun PointerInputScope.detectPreviewGestures(
-    excludedBounds: LayoutRect?,
+    excludedBounds: () -> LayoutRect?,
     zoomRatio: () -> Float,
     zoomLimits: () -> ClosedFloatingPointRange<Float>,
     onZoom: (Float) -> Unit,
@@ -19,7 +19,7 @@ internal suspend fun PointerInputScope.detectPreviewGestures(
     onHold: (Offset) -> Unit
 ) = awaitEachGesture {
     val down = awaitFirstDown()
-    if (excludedBounds?.contains(down.position.x, down.position.y) == true) return@awaitEachGesture
+    if (excludedBounds()?.contains(down.position.x, down.position.y) == true) return@awaitEachGesture
     var ratio = zoomRatio()
     var accumulatedZoom = 1f
     var multiplePointers = false
@@ -41,7 +41,7 @@ internal suspend fun PointerInputScope.detectPreviewGestures(
         }
         if (event.changes.any { it.isConsumed }) break
         val pressed = event.changes.filter { it.pressed }
-        if (pressed.any { excludedBounds?.contains(it.position.x, it.position.y) == true }) break
+        if (pressed.any { excludedBounds()?.contains(it.position.x, it.position.y) == true }) break
         if (pressed.size >= 2) {
             multiplePointers = true
             val scale = event.calculateZoom()

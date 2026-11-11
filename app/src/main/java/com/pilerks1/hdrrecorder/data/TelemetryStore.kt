@@ -18,15 +18,10 @@ class TelemetryStore {
 
     fun snapshot(): TelemetrySnapshot = bank.get()
 
-    fun beginCameraGeneration(): Long {
-        while (true) {
-            val current = bank.get()
-            val generation = current.cameraGeneration + 1L
-            val updated = current.copy(
-                camera = CameraSample(cameraGeneration = generation),
-                cameraGeneration = generation
-            )
-            if (bank.compareAndSet(current, updated)) return generation
+    /** Generations are issued by [com.pilerks1.hdrrecorder.data.camera.core.CameraResultReader]. */
+    fun beginCameraGeneration(generation: Long) {
+        update { current ->
+            current.copy(camera = CameraSample(cameraGeneration = generation), cameraGeneration = generation)
         }
     }
 

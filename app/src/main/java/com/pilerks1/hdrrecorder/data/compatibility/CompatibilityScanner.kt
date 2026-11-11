@@ -9,36 +9,38 @@ import android.util.Range
 import androidx.camera.camera2.interop.cameraId
 import androidx.camera.core.Preview
 import androidx.camera.core.SessionConfig
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.ExperimentalMimeTypeApi
 import androidx.camera.video.Recorder
 import com.pilerks1.hdrrecorder.BuildConfig
+import com.pilerks1.hdrrecorder.data.CaptureConfiguration
 import com.pilerks1.hdrrecorder.data.PreviewConfiguration
 import com.pilerks1.hdrrecorder.data.RecordingConfiguration
 import com.pilerks1.hdrrecorder.data.RecordingSessionConfiguration
-import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
 import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
-import com.pilerks1.hdrrecorder.data.storage.CompatibilityReportRepository
+import com.pilerks1.hdrrecorder.data.storage.PrivateDocumentStore
+import com.pilerks1.hdrrecorder.data.storage.StorageManager.Companion.COMPATIBILITY_REPORT_ID
 import com.pilerks1.hdrrecorder.model.*
 import com.pilerks1.hdrrecorder.model.CompatibilityStatus as S
-import com.pilerks1.hdrrecorder.ui.CameraUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 
 /** Capability queries only. Constructing a use case never attaches it to a camera. */
 class CompatibilityScanner(
     private val context: Context,
-    private val repository: CompatibilityReportRepository,
+    private val store: PrivateDocumentStore,
     private val reporter: ErrorReporter
 ) {
     val environment: String = listOf(Build.MANUFACTURER, Build.MODEL, Build.FINGERPRINT,
         Build.VERSION.SDK_INT, BuildConfig.VERSION_CODE, BuildConfig.CAMERAX_VERSION).joinToString("|")
 
     suspend fun read(): CompatibilityReport? {
-        val json = repository.read() ?: return null
+        val json = store.read(COMPATIBILITY_REPORT_ID) ?: return null
         return try { CompatibilityReportJson.decode(json) } catch (error: Exception) {
             reporter.report(IssueCode.COMPATIBILITY_CACHE, "readCompatibilityReport", error, notify = false)
             null
@@ -48,13 +50,11 @@ class CompatibilityScanner(
     @androidx.annotation.OptIn(ExperimentalMimeTypeApi::class)
     suspend fun scan(previous: CompatibilityReport?, onProgress: (CompatibilityReport) -> Unit): CompatibilityReport =
         withContext(Dispatchers.Default) {
-            val provider = CameraProviderRepository.awaitProvider(context)
-            val info = DefaultBackCameraRepository(context, reporter).cameraInfo(provider)
+            val provider = ProcessCameraProvider.getInstance(context).await()
+            val info = DefaultBackCameraRepository(context).cameraInfo(provider)
             val cameraId = info.cameraId
-            val diagnostics = mutableListOf<String>()
             fun <T> query(source: String, block: () -> T): T? = try { block() } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                diagnostics += "$source: ${error.javaClass.simpleName}"
                 reporter.report(IssueCode.CAPABILITY_QUERY, "compatibilityQuery", error,
                     mapOf("query" to source), notify = false)
                 null
@@ -65,9 +65,7 @@ class CompatibilityScanner(
             val unsupportedCodecs = mutableSetOf<String?>()
             val capabilities = codecs.associateWith { codec ->
                 query("Recorder.getVideoCapabilities(${codec ?: "Auto"})") {
-                    val caps = if (codec == null) Recorder.getVideoCapabilities(info) else Recorder.getVideoCapabilities(info, codec)
-                    if (caps == null) unsupportedCodecs += codec
-                    caps
+                    RecordingConfiguration.videoCapabilities(info, codec).also { if (it == null) unsupportedCodecs += codec }
                 }
             }
             val colorsByCodec = codecs.associateWith { codec ->
@@ -81,8 +79,8 @@ class CompatibilityScanner(
             val colors = colorsByCodec.values.filterNotNull().flatten().distinct()
                 .sortedWith(compareBy({ it.depth }, { it.encoding }))
             check(colors.isNotEmpty()) { "No recording capabilities" }
-            val videoStabilization = query("VideoCapabilities.isStabilizationSupported") {
-                Recorder.getVideoCapabilities(info).isStabilizationSupported
+            val videoStabilization = capabilities[null]?.let { caps ->
+                query("VideoCapabilities.isStabilizationSupported") { caps.isStabilizationSupported }
             }
             val previewStabilization = query("PreviewCapabilities.isStabilizationSupported") {
                 Preview.getPreviewCapabilities(info).isStabilizationSupported
@@ -95,7 +93,6 @@ class CompatibilityScanner(
                 listOf("General FPS", preview?.frameRates?.joinToString { "[${it.lower}, ${it.upper}]" } ?: S.UNKNOWN.label),
                 listOf("Stabilization", support(previewStabilization))
             ))
-            diagnostics += collector.diagnostics
             val cameraX = listOf(
                 CompatibilityTable("Capabilities", listOf("Field", "Value"), listOf(
                     listOf("Video stabilization", support(videoStabilization)),
@@ -113,7 +110,7 @@ class CompatibilityScanner(
             val candidates = buildList {
                 for (ratio in RecordingAspectRatio.entries) for (codec in codecs)
                     for (stabilization in listOf(false, true)) for (resolution in Resolution.entries)
-                        for (color in colors) for (fps in listOf(24, 30, 60)) {
+                        for (color in colors) for (fps in CompatibilityConfiguration.SCAN_FPS) {
                             add(CompatibilityConfiguration(ratio.storageId, codec, stabilization,
                                 resolution.storageId, color.encoding, color.depth, fps))
                         }
@@ -127,10 +124,9 @@ class CompatibilityScanner(
             var report = CompatibilityReport(environment = environment, cameraId = cameraId,
                 startedAt = resumable?.startedAt ?: System.currentTimeMillis(), total = candidates.size,
                 videoCodecs = videoCodecs, audioCodecs = audioCodecs, colors = colors,
-                cameraX = cameraX, camera2 = camera2, combinations = resumable?.combinations.orEmpty(),
-                diagnostics = (resumable?.diagnostics.orEmpty() + diagnostics).distinct())
+                cameraX = cameraX, camera2 = camera2, combinations = resumable?.combinations.orEmpty())
             suspend fun checkpoint() {
-                repository.write(CompatibilityReportJson.encode(report))
+                store.write(COMPATIBILITY_REPORT_ID, CompatibilityReportJson.encode(report))
                 onProgress(report)
             }
             checkpoint()
@@ -140,14 +136,13 @@ class CompatibilityScanner(
             for (config in candidates) {
                 currentCoroutineContext().ensureActive()
                 if (config.key in completed) continue
-                val evidence = mutableListOf("Recorder.getVideoCapabilities", "VideoCapabilities.getSupportedDynamicRanges")
-                val errors = mutableListOf<String>()
                 val color = colors.first { it.encoding == config.encoding && it.depth == config.depth }
-                val state = CameraUiState(
-                    selectedAspectRatio = RecordingAspectRatio.fromStorageId(config.aspectRatio)!!,
-                    selectedResolution = Resolution.fromStorageId(config.resolution)!!,
+                val capture = CaptureConfiguration(
+                    fps = config.fps,
+                    aspectRatio = RecordingAspectRatio.fromStorageId(config.aspectRatio)!!,
+                    resolution = Resolution.fromStorageId(config.resolution)!!,
                     videoCodec = config.codec, encoding = VideoEncoding.fromStorageId(config.encoding)!!,
-                    videoBitDepth = config.depth, selectedFps = config.fps,
+                    bitDepth = config.depth,
                     isStabilizationEnabled = config.stabilization
                 )
                 val caps = capabilities[config.codec]
@@ -158,44 +153,32 @@ class CompatibilityScanner(
                     color !in supportedColors -> S.UNSUPPORTED
                     else -> S.SUPPORTED
                 }
-                if (status == S.SUPPORTED) {
+                if (caps != null && status == S.SUPPORTED) {
                     val qualityKey = "${config.codec}|${config.resolution}|${config.encoding}|${config.depth}"
-                    val qualityApi = if (state.selectedResolution == Resolution.HIGHEST || state.encoding == VideoEncoding.UNSPECIFIED)
-                        "VideoCapabilities.isQualitySupported" else "VideoCapabilities.getSupportedQualities"
-                    evidence += qualityApi
                     if (!qualitySupport.containsKey(qualityKey)) {
-                        qualitySupport[qualityKey] = query("$qualityApi($qualityKey)") {
-                            RecordingConfiguration.isResolutionSupported(caps!!, state)
+                        qualitySupport[qualityKey] = query("VideoCapabilities quality($qualityKey)") {
+                            RecordingConfiguration.isResolutionSupported(caps, capture)
                         }
                     }
                     status = when (qualitySupport[qualityKey]) { true -> S.SUPPORTED; false -> S.UNSUPPORTED; null -> S.UNKNOWN }
                 }
                 if (config.stabilization) {
-                    evidence += "VideoCapabilities.isStabilizationSupported"
-                    evidence += "PreviewCapabilities.isStabilizationSupported"
                     if (videoStabilization == false || previewStabilization == false) status = S.UNSUPPORTED
                     else if ((videoStabilization == null || previewStabilization == null) && status != S.UNSUPPORTED) status = S.UNKNOWN
                 }
-                var fpsRanges = emptyList<String>()
                 if (status == S.SUPPORTED) {
                     try {
-                        val session = SessionConfig.Builder(listOf(
-                            RecordingSessionConfiguration.preview(state, 0),
-                            RecordingSessionConfiguration.video(state, 0)
-                        )).build()
                         // Feature groups cannot coexist with the explicit production use-case options.
-                        evidence += "CameraInfo.isSessionConfigSupported"
-                        if (!info.isSessionConfigSupported(session)) status = S.UNSUPPORTED
-                        else {
-                            evidence += "CameraInfo.getSupportedFrameRateRanges(SessionConfig)"
-                            val ranges = info.getSupportedFrameRateRanges(session)
-                            fpsRanges = ranges.sortedWith(compareBy({ it.lower }, { it.upper })).map { "[${it.lower}, ${it.upper}]" }
-                            if (Range(config.fps, config.fps) !in ranges) status = S.UNSUPPORTED
-                        }
+                        val session = SessionConfig.Builder(listOf(
+                            RecordingSessionConfiguration.preview(capture, 0),
+                            RecordingSessionConfiguration.video(capture, 0)
+                        )).build()
+                        if (!info.isSessionConfigSupported(session) ||
+                            Range(config.fps, config.fps) !in info.getSupportedFrameRateRanges(session)
+                        ) status = S.UNSUPPORTED
                     } catch (error: Exception) {
                         if (error is CancellationException) throw error
                         status = S.UNKNOWN
-                        errors += error.javaClass.simpleName
                         reporter.report(IssueCode.CAPABILITY_QUERY, "compatibilitySession", error, notify = false)
                     }
                 }
@@ -204,10 +187,8 @@ class CompatibilityScanner(
                     status == S.UNKNOWN || boost == null -> S.UNKNOWN
                     else -> S.CONDITIONAL
                 }
-                results += CompatibilityCombination(config, status, boostStatus, fpsRanges,
-                    evidence.distinct(), errors)
-                report = report.copy(combinations = results.toList(),
-                    diagnostics = (resumable?.diagnostics.orEmpty() + diagnostics).distinct())
+                results += CompatibilityCombination(config, status, boostStatus)
+                report = report.copy(combinations = results.toList())
                 if (results.size % 24 == 0) checkpoint() else onProgress(report)
             }
             report = report.copy(completedAt = System.currentTimeMillis())

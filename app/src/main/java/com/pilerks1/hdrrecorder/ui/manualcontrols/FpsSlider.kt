@@ -1,6 +1,5 @@
 package com.pilerks1.hdrrecorder.ui.manualcontrols
 
-import android.util.Range
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -21,7 +20,15 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import com.pilerks1.hdrrecorder.data.camera.core.FixedFrameRates
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -190,9 +197,6 @@ private fun RotatingRangeSlider(
     val currentValue by rememberUpdatedState(value)
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnFinished by rememberUpdatedState(onValueChangeFinished)
-    var draggedThumb by remember { mutableStateOf<RangeThumb?>(null) }
-    var gestureStartRange by remember { mutableStateOf(value) }
-    var latestGestureRange by remember { mutableStateOf(value) }
     val density = LocalDensity.current
     val resolvedAxisReservation = SliderAxisReservation(
         start = maxOf(axisReservation.start, SliderPaneStyle.actionEdgePadding),
@@ -268,6 +272,23 @@ private fun RotatingRangeSlider(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .semantics {
+                    contentDescription = "Frame rate"
+                    stateDescription = if (value.start == value.endInclusive) "${value.endInclusive.roundToInt()} FPS"
+                        else "${value.start.roundToInt()}–${value.endInclusive.roundToInt()} FPS"
+                    progressBarRangeInfo = ProgressBarRangeInfo(value.endInclusive, valueRange)
+                    if (enabled) {
+                        // Accessibility adjusts the upper bound, matching the single-thumb slider.
+                        setProgress { target ->
+                            val startingRange = currentValue
+                            val released = rangeWithValue(startingRange, RangeThumb.END, target.coerceIn(valueRange))
+                            currentOnValueChange(released)
+                            currentOnFinished?.invoke(released, startingRange, FpsRangeBound.UPPER,
+                                released.endInclusive - startingRange.endInclusive)
+                            true
+                        }
+                    } else disabled()
+                }
                 .pointerInput(
                     enabled,
                     singleThumb,
@@ -327,6 +348,10 @@ private fun RotatingRangeSlider(
                     thumbHalfWidthPx
                 ) {
                     if (!enabled) return@pointerInput
+                    // Gesture-local; composition never reads these.
+                    var draggedThumb: RangeThumb? = null
+                    var gestureStartRange = currentValue
+                    var latestGestureRange = currentValue
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
                             gestureStartRange = currentValue
@@ -480,27 +505,26 @@ fun FpsSlider(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val validRanges = caps?.fpsRanges ?: emptyList<Range<Int>>()
+    val validRanges = caps?.fpsRanges.orEmpty()
+    // Without reported ranges the slider is shown for layout only and cannot be edited.
     val minFps = validRanges.minOfOrNull { it.lower }?.toFloat() ?: 15f
     val maxFps = validRanges.maxOfOrNull { it.upper }?.toFloat() ?: 60f
+    val canEdit = enabled && validRanges.isNotEmpty() && (!isRecording || isManualFps)
     val ticks = remember(caps?.fpsRanges) {
         validRanges
             .flatMap { listOf(it.lower.toFloat(), it.upper.toFloat()) }
             .distinct()
             .sorted()
-            .map { fps ->
-                val fraction = if (maxFps == minFps) 0.5f else (fps - minFps) / (maxFps - minFps)
-                SliderTick(fraction, fps.roundToInt().toString())
-            }
+            .map { fps -> SliderTick(valueFraction(fps, minFps..maxFps), fps.roundToInt().toString()) }
     }
     var localRange by remember(currentRange) { mutableStateOf(currentRange) }
 
     if (isExposureFullyManual) {
         val legalFrameRates = remember(caps?.fpsRanges) {
-            FpsRangeMath.fixedFrameRates(validRanges)
+            FixedFrameRates.fixedFrameRates(validRanges)
         }
         val requestedFps = currentRange.endInclusive.roundToInt()
-        val initialFps = FpsRangeMath.nearestFixedFrameRate(
+        val initialFps = FixedFrameRates.nearestFixedFrameRate(
             requestedFps = requestedFps,
             validRanges = validRanges
         ) ?: requestedFps
@@ -513,33 +537,19 @@ fun FpsSlider(
         var manualRange by remember(initialFps, legalFrameRates) {
             mutableStateOf(initialFps.toFloat()..initialFps.toFloat())
         }
+        fun snapped(range: ClosedFloatingPointRange<Float>): ClosedFloatingPointRange<Float>? =
+            FixedFrameRates.nearestFixedFrameRate(range.endInclusive.roundToInt(), validRanges)
+                ?.toFloat()?.let { it..it }
 
         RotatingRangeSlider(
             value = manualRange,
             onValueChange = { draggedRange ->
-                if ((!isRecording || isManualFps) && enabled) {
-                    val snappedFps = FpsRangeMath.nearestFixedFrameRate(
-                        requestedFps = draggedRange.endInclusive.roundToInt(),
-                        validRanges = validRanges
-                    )
-                    if (snappedFps != null) {
-                        val snapped = snappedFps.toFloat()
-                        manualRange = snapped..snapped
-                    }
-                }
+                if (canEdit) snapped(draggedRange)?.let { manualRange = it }
             },
             onValueChangeFinished = { releasedRange, _, _, _ ->
-                if ((!isRecording || isManualFps) && enabled) {
-                    val snappedFps = FpsRangeMath.nearestFixedFrameRate(
-                        requestedFps = releasedRange.endInclusive.roundToInt(),
-                        validRanges = validRanges
-                    )
-                    if (snappedFps != null) {
-                        val snapped = snappedFps.toFloat()
-                        manualRange = snapped..snapped
-                        localRange = manualRange
-                        onValueChange(manualRange)
-                    }
+                if (canEdit) snapped(releasedRange)?.let {
+                    manualRange = it
+                    onValueChange(it)
                 }
             },
             valueRange = minFps..maxFps,
@@ -547,9 +557,7 @@ fun FpsSlider(
             ticks = manualTicks,
             isActive = isManualFps,
             singleThumb = true,
-            enabled = enabled &&
-                legalFrameRates.isNotEmpty() &&
-                (!isRecording || isManualFps),
+            enabled = canEdit && legalFrameRates.isNotEmpty(),
             axisReservation = axisReservation,
             modifier = modifier.fillMaxSize()
         )
@@ -559,12 +567,10 @@ fun FpsSlider(
     RotatingRangeSlider(
         value = localRange,
         onValueChange = { newRange ->
-            if ((!isRecording || isManualFps) && enabled) {
-                localRange = newRange
-            }
+            if (canEdit) localRange = newRange
         },
         onValueChangeFinished = { releasedRange, startingRange, draggedBound, dragDirection ->
-            if ((!isRecording || isManualFps) && enabled) {
+            if (canEdit) {
                 val clamped = FpsRangeMath.clampToSupportedRange(
                     newRange = releasedRange,
                     oldRange = startingRange,
@@ -580,7 +586,7 @@ fun FpsSlider(
         axis = axis,
         ticks = ticks,
         isActive = isManualFps,
-        enabled = enabled && (!isRecording || isManualFps),
+        enabled = canEdit,
         axisReservation = axisReservation,
         modifier = modifier.fillMaxSize()
     )

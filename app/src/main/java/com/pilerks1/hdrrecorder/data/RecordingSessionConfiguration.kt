@@ -6,30 +6,26 @@ import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
-import com.pilerks1.hdrrecorder.ui.CameraUiState
-import java.util.concurrent.Executor
 
 /** Builds unbound use cases shared by recording and capability queries. */
 object RecordingSessionConfiguration {
-    fun preview(state: CameraUiState, rotation: Int): Preview =
-        PreviewConfiguration.build(state.previewSettings, rotation, state.isStabilizationEnabled)
+    fun preview(config: CaptureConfiguration, rotation: Int): Preview =
+        PreviewConfiguration.build(config.previewSettings, rotation, config.isStabilizationEnabled)
 
-    fun video(state: CameraUiState, rotation: Int, executor: Executor? = null): VideoCapture<Recorder> {
+    /** The Recorder keeps CameraX's default executor, separate from capture-result processing. */
+    fun video(config: CaptureConfiguration, rotation: Int): VideoCapture<Recorder> {
         val recorder = RecordingConfiguration.configure(
             Recorder.Builder()
-                .apply { executor?.let(::setExecutor) }
-                .setQualitySelector(QualitySelector.from(state.selectedResolution.toCameraXQuality()))
-                .setAspectRatio(state.selectedAspectRatio.cameraXValue),
-            state
+                .setQualitySelector(QualitySelector.from(config.resolution.toCameraXQuality()))
+                .setAspectRatio(config.aspectRatio.cameraXValue),
+            config
         ).build()
         return VideoCapture.Builder(recorder)
-            .setVideoStabilizationEnabled(state.isStabilizationEnabled)
+            .setVideoStabilizationEnabled(config.isStabilizationEnabled)
             .setTargetRotation(rotation)
-            .setDynamicRange(RecordingConfiguration.dynamicRange(state))
+            .setDynamicRange(RecordingConfiguration.dynamicRange(config))
             .apply {
-                if (!state.manualControlsState.isManualFps) {
-                    setTargetFrameRate(Range(state.selectedFps, state.selectedFps))
-                }
+                if (config.manualFpsRange == null) setTargetFrameRate(Range(config.fps, config.fps))
             }.build()
     }
 }

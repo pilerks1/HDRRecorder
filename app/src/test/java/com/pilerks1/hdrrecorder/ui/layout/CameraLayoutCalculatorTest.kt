@@ -57,7 +57,6 @@ class CameraLayoutCalculatorTest {
         val rail = spec.actionRail
 
         assertEquals(54f, rail.buttonSize, 0.01f)
-        assertEquals(rail.buttonSize, rail.requiredThickness, 0.01f)
     }
 
     @Test
@@ -124,9 +123,7 @@ class CameraLayoutCalculatorTest {
         assertEquals(0f, closed.expandedPanel.width, 0.01f)
         assertEquals(80f, narrow.expandedPanel.width, 0.01f)
         assertEquals(140f, wide.expandedPanel.width, 0.01f)
-        assertEquals(160f, narrow.maximumPanelReservation.width, 0.01f)
         assertEquals(narrow.secondaryControls.left, narrow.expandedPanel.right, 0.01f)
-        assertEquals(narrow.secondaryControls.left, narrow.maximumPanelReservation.right, 0.01f)
     }
 
     @Test

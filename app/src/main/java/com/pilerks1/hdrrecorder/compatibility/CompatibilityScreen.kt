@@ -1,8 +1,6 @@
 package com.pilerks1.hdrrecorder.compatibility
 
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import com.pilerks1.hdrrecorder.errorReporter
 import com.pilerks1.hdrrecorder.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -40,10 +38,10 @@ fun CompatibilityScreen(
     onNavigateBack: () -> Unit,
     onRetry: () -> Unit,
     onRefresh: () -> Unit,
+    onShowDiagnostics: () -> Unit,
     hardwareEnabled: Boolean = true,
     mandatory: Boolean = false
 ) {
-    val reporter = LocalContext.current.errorReporter
     SystemUiManagement()
     val blocked = hardwareEnabled && (mandatory || state.loading || state.scanning)
     BackHandler(enabled = blocked) { }
@@ -65,7 +63,7 @@ fun CompatibilityScreen(
                 !hardwareEnabled -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Not reported") }
                 state.failed -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center) {
-                    TextButton(onClick = { reporter.showHistory(true) }) { Text(stringResource(R.string.diagnostics_open)) }
+                    TextButton(onClick = onShowDiagnostics) { Text(stringResource(R.string.diagnostics_open)) }
                     Button(onClick = onRetry) { Text("Retry") }
                 }
                 state.loading || state.scanning -> Column(Modifier.fillMaxSize().padding(24.dp),
@@ -105,8 +103,9 @@ private fun CameraXReport(report: CompatibilityReport) {
     var stabilization by rememberSaveable { mutableStateOf(true) }
     var boost by rememberSaveable { mutableStateOf(false) }
     val index = remember(report) { report.combinations.associateBy { it.configuration.key } }
-    val headers = listOf("Color", "24 FPS", "30 FPS", "60 FPS")
-    val widths = columnWidths(headers, report.colors.map { listOf(it.label, "✓", "✓", "✓") })
+    val scanFps = CompatibilityConfiguration.SCAN_FPS
+    val headers = listOf("Color") + scanFps.map { "$it FPS" }
+    val widths = columnWidths(headers, report.colors.map { listOf(it.label) + scanFps.map { "✓" } })
     val scroll = rememberScrollState()
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -127,7 +126,7 @@ private fun CameraXReport(report: CompatibilityReport) {
             items(report.colors, key = { "${resolution.storageId}|${it.encoding}|${it.depth}" }) { color ->
                 Row(Modifier.horizontalScroll(scroll).height(IntrinsicSize.Min)) {
                     Cell(color.label, widths[0])
-                    for ((column, fps) in listOf(24, 30, 60).withIndex()) {
+                    for ((column, fps) in scanFps.withIndex()) {
                         val key = CompatibilityConfiguration(ratio, codec, stabilization, resolution.storageId,
                             color.encoding, color.depth, fps).key
                         val combination = index[key]

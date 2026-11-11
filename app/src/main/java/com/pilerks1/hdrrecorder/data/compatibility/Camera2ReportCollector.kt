@@ -13,12 +13,11 @@ import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.CameraMetadata
 import com.pilerks1.hdrrecorder.model.CompatibilityStatus as S
 import com.pilerks1.hdrrecorder.model.CompatibilityTable
-import java.util.Locale
+import com.pilerks1.hdrrecorder.model.formatShutterNanos
+import com.pilerks1.hdrrecorder.model.trimmedDecimal
 
 internal class Camera2ReportCollector(private val metadata: CameraMetadata, private val reporter: ErrorReporter) {
-    val diagnostics = mutableListOf<String>()
     private fun <T> read(key: C.Key<T>): T? = try { metadata[key] } catch (error: Exception) {
-        diagnostics += "${key.name}: ${error.javaClass.simpleName}"
         reporter.report(IssueCode.CAPABILITY_QUERY, "camera2Metadata", error, mapOf("query" to key.name), notify = false)
         null
     }
@@ -45,12 +44,9 @@ internal class Camera2ReportCollector(private val metadata: CameraMetadata, priv
         val manualKeys = CaptureRequest.SENSOR_SENSITIVITY in requestKeys &&
             CaptureRequest.SENSOR_EXPOSURE_TIME in requestKeys && CaptureRequest.CONTROL_AE_MODE in requestKeys
         val fullManual = caps.supportsFullManualExposure && aeModes?.contains(M.CONTROL_AE_MODE_OFF) == true && manualKeys
-        val priorityModes = if (Build.VERSION.SDK_INT >= 36) read(C.CONTROL_AE_AVAILABLE_PRIORITY_MODES) else null
-        val isoPriority = Build.VERSION.SDK_INT >= 36 &&
-            priorityModes?.contains(M.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY) == true &&
+        val isoPriority = Build.VERSION.SDK_INT >= 36 && caps.supportsIsoPriorityAe &&
             CaptureRequest.CONTROL_AE_PRIORITY_MODE in requestKeys && CaptureRequest.SENSOR_SENSITIVITY in requestKeys
-        val shutterPriority = Build.VERSION.SDK_INT >= 36 &&
-            priorityModes?.contains(M.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY) == true &&
+        val shutterPriority = Build.VERSION.SDK_INT >= 36 && caps.supportsShutterPriorityAe &&
             CaptureRequest.CONTROL_AE_PRIORITY_MODE in requestKeys && CaptureRequest.SENSOR_EXPOSURE_TIME in requestKeys
         val exposure = buildList {
             if (aeModes?.contains(M.CONTROL_AE_MODE_ON) == true) add(listOf("Auto", "Auto", "Auto"))
@@ -73,12 +69,12 @@ internal class Camera2ReportCollector(private val metadata: CameraMetadata, priv
             listOf("Focus", focus?.let { "0…$it D" +
                 (if (it > 0f) " · ∞…${decimal(1.0 / it)} m" else "") } ?: S.NOT_REPORTED.label),
             listOf("Manual AE FPS", caps.fpsRanges.joinToString { "[${it.lower}, ${it.upper}]" }.ifEmpty { S.NOT_REPORTED.label }),
-            listOf("Frame duration", caps.maxFrameDurationNanos?.let(::time) ?: S.NOT_REPORTED.label),
+            listOf("Frame duration", caps.maxFrameDurationNanos?.let(::formatShutterNanos) ?: S.NOT_REPORTED.label),
             listOf("CCT", range(caps.cctTemperatureRange, "K")),
             listOf("Tint", S.NOT_REPORTED.label)
         )
         val processing = Camera2Control.entries.map { control ->
-            listOf(controlName(control), modeNames(modePrefix(control), read(control.availableModesKey)))
+            listOf(control.title, modeNames("${control.name}_", read(control.availableModesKey)))
         }.toMutableList()
         processing += listOf("White balance", modeNames("CONTROL_AWB_MODE_", read(C.CONTROL_AWB_AVAILABLE_MODES)))
         processing += listOf("Tonemapping", modeNames("TONEMAP_MODE_", read(C.TONEMAP_AVAILABLE_TONE_MAP_MODES)))
@@ -95,26 +91,6 @@ internal class Camera2ReportCollector(private val metadata: CameraMetadata, priv
         )
     }
 
-    private fun modePrefix(control: Camera2Control): String = when (control) {
-        Camera2Control.COLOR_CORRECTION_ABERRATION_MODE -> "COLOR_CORRECTION_ABERRATION_MODE_"
-        Camera2Control.CONTROL_AF_MODE -> "CONTROL_AF_MODE_"
-        Camera2Control.DISTORTION_CORRECTION_MODE -> "DISTORTION_CORRECTION_MODE_"
-        Camera2Control.EDGE_MODE -> "EDGE_MODE_"
-        Camera2Control.HOT_PIXEL_MODE -> "HOT_PIXEL_MODE_"
-        Camera2Control.NOISE_REDUCTION_MODE -> "NOISE_REDUCTION_MODE_"
-        Camera2Control.SHADING_MODE -> "SHADING_MODE_"
-    }
-
-    private fun controlName(control: Camera2Control): String = when (control) {
-        Camera2Control.COLOR_CORRECTION_ABERRATION_MODE -> "Aberration"
-        Camera2Control.CONTROL_AF_MODE -> "Autofocus"
-        Camera2Control.DISTORTION_CORRECTION_MODE -> "Distortion"
-        Camera2Control.EDGE_MODE -> "Edge"
-        Camera2Control.HOT_PIXEL_MODE -> "Hot pixel"
-        Camera2Control.NOISE_REDUCTION_MODE -> "Noise reduction"
-        Camera2Control.SHADING_MODE -> "Shading"
-    }
-
     private fun hardwareLevel(level: Int): String = when (level) {
         C.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> "LEGACY"
         C.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "LIMITED"
@@ -129,12 +105,12 @@ internal class Camera2ReportCollector(private val metadata: CameraMetadata, priv
 
     private fun modeName(prefix: String, value: Int): String = M::class.java.fields.firstOrNull {
         it.type == Int::class.javaPrimitiveType && it.name.startsWith(prefix) && it.getInt(null) == value
-    }?.name?.removePrefix(prefix)?.lowercase(Locale.ROOT)?.split('_')
+    }?.name?.removePrefix(prefix)?.lowercase(java.util.Locale.ROOT)?.split('_')
         ?.joinToString(" ") { it.replaceFirstChar(Char::uppercaseChar) } ?: value.toString()
 
     private fun <T : Comparable<T>> range(value: Range<T>?, unit: String = ""): String =
         value?.let { "${it.lower}…${it.upper}${if (unit.isEmpty()) "" else " $unit"}" } ?: S.NOT_REPORTED.label
-    private fun shutter(value: Range<Long>?): String = value?.let { "${time(it.lower)}…${time(it.upper)}" } ?: S.NOT_REPORTED.label
-    private fun time(nanos: Long): String = if (nanos < 1_000_000_000L && nanos > 0) "1/${kotlin.math.round(1e9 / nanos).toLong()} s" else "${decimal(nanos / 1e9)} s"
-    private fun decimal(value: Double): String = String.format(Locale.US, "%.3f", value).trimEnd('0').trimEnd('.')
+    private fun shutter(value: Range<Long>?): String =
+        value?.let { "${formatShutterNanos(it.lower)}…${formatShutterNanos(it.upper)}" } ?: S.NOT_REPORTED.label
+    private fun decimal(value: Double): String = value.trimmedDecimal(3)
 }

@@ -13,7 +13,6 @@ data class CameraCapabilities(
     val focusMinDistanceDiopters: Float = 0f,
     val fpsRanges: List<Range<Int>> = emptyList(),
     val maxFrameDurationNanos: Long? = null,
-    val supportsManualSensor: Boolean = false,
     val supportsFullManualExposure: Boolean = false,
     val hasManualIsoControl: Boolean = false,
     val hasManualShutterControl: Boolean = false,

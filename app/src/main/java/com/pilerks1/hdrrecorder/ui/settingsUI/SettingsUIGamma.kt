@@ -7,9 +7,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -22,8 +22,7 @@ import com.pilerks1.hdrrecorder.model.GammaSettings
 
 @Composable
 fun GammaSection(settings: GammaSettings, modes: List<GammaMode>, onChange: (GammaSettings) -> Unit) {
-    Text("Gamma", fontSize = 14.sp, fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+    SectionTitle("Gamma")
     val mode = settings.supportedMode(modes)
     RecordingChoiceRow(
         label = "Mode",
@@ -44,7 +43,7 @@ fun GammaSection(settings: GammaSettings, modes: List<GammaMode>, onChange: (Gam
             RecordingChoiceRow(
                 label = "Custom Curve",
                 value = settings.curve.displayName,
-                choices = GammaCurve.entries.filter { it != GammaCurve.AUTO }.map { it to it.displayName },
+                choices = GammaCurve.entries.map { it to it.displayName },
                 onSelect = { onChange(activeSettings.copy(curve = it)) }
             )
         }
@@ -61,12 +60,18 @@ fun GammaSection(settings: GammaSettings, modes: List<GammaMode>, onChange: (Gam
     }
 }
 
+private fun validGamma(text: String): Float? = text.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f }
+
+/**
+ * The text is a local draft so it can be cleared or hold intermediate input such as "0.".
+ * Only valid drafts update the setting; an invalid draft reverts to the setting on focus loss.
+ */
 @Composable
 private fun GammaValueRow(value: Float, onChange: (Float) -> Unit) {
     val focusManager = LocalFocusManager.current
     var text by remember { mutableStateOf(value.toString()) }
     LaunchedEffect(value) {
-        if (text.toFloatOrNull() != value) text = value.toString()
+        if (validGamma(text) != value) text = value.toString()
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
@@ -74,24 +79,19 @@ private fun GammaValueRow(value: Float, onChange: (Float) -> Unit) {
         OutlinedTextField(
             value = text,
             onValueChange = { input ->
-                val gamma = input.toFloatOrNull()
-                if (input.all { it.isDigit() || it == '.' } && gamma != null && gamma.isFinite() && gamma > 0f) {
+                if (input.all { it.isDigit() || it == '.' }) {
                     text = input
-                    onChange(gamma)
+                    validGamma(input)?.let(onChange)
                 }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
             textStyle = LocalTextStyle.current.copy(color = Color.White, textAlign = TextAlign.End),
             singleLine = true,
-            modifier = Modifier.width(100.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = Color.DarkGray,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = MaterialTheme.colorScheme.primary
-            )
+            modifier = Modifier
+                .width(100.dp)
+                .onFocusChanged { if (!it.isFocused && validGamma(text) == null) text = value.toString() },
+            colors = settingsTextFieldColors()
         )
     }
 }

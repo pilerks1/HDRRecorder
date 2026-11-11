@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pilerks1.hdrrecorder.model.presetNameError
 
 @Composable
 fun PresetSection(
@@ -37,13 +38,7 @@ fun PresetSection(
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     var newPresetName by remember { mutableStateOf("") }
 
-    Text(
-        text = "Preset",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
+    SectionTitle("Preset")
 
     val enabled = presetsEnabled && !presetBusy
     if (presetBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -65,10 +60,7 @@ fun PresetSection(
             Button(
                 onClick = { showAddDialog = true },
                 enabled = enabled,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
+                colors = presetButtonColors(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Text("Add")
@@ -85,46 +77,14 @@ fun PresetSection(
     Spacer(modifier = Modifier.height(12.dp))
 
     // Preset Action Buttons
+    val actionsEnabled = enabled && presetsList.isNotEmpty()
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Button(
-            onClick = onSavePreset,
-            enabled = enabled && presetsList.isNotEmpty(),
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            Text("Save", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
-        }
-        Button(
-            onClick = { showDeleteCurrentDialog = true },
-            enabled = enabled && presetsList.isNotEmpty(),
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            Text("Delete Current", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
-        }
-        Button(
-            onClick = { showDeleteAllDialog = true },
-            enabled = enabled && presetsList.isNotEmpty(),
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            Text("Delete All", fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
-        }
+        PresetActionButton("Save", actionsEnabled, onSavePreset)
+        PresetActionButton("Delete Current", actionsEnabled) { showDeleteCurrentDialog = true }
+        PresetActionButton("Delete All", actionsEnabled) { showDeleteAllDialog = true }
     }
 
     Spacer(modifier = Modifier.height(16.dp))
@@ -150,17 +110,14 @@ fun PresetSection(
     // --- Dialogs ---
 
     if (showAddDialog) {
-        val nameError = when {
-            newPresetName.isBlank() -> "Enter a preset name"
-            presetsList.any { it.equals(newPresetName.trim(), ignoreCase = true) } -> "A preset with that name already exists"
-            else -> null
+        val nameError = presetNameError(newPresetName, presetsList)
+        val dismissAdd = {
+            showAddDialog = false
+            newPresetName = ""
+            focusManager.clearFocus()
         }
         AlertDialog(
-            onDismissRequest = {
-                showAddDialog = false
-                newPresetName = ""
-                focusManager.clearFocus()
-            },
+            onDismissRequest = dismissAdd,
             title = { Text("Add Preset", color = Color.White) },
             text = {
                 OutlinedTextField(
@@ -170,79 +127,90 @@ fun PresetSection(
                     singleLine = true,
                     isError = nameError != null,
                     supportingText = { nameError?.let { Text(it) } },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = Color.Gray,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    )
+                    colors = settingsTextFieldColors(unfocusedBorderColor = Color.Gray)
                 )
             },
             confirmButton = {
                 TextButton(enabled = enabled && nameError == null, onClick = {
                     onAddPreset(newPresetName.trim())
-                    showAddDialog = false
-                    newPresetName = ""
-                    focusManager.clearFocus()
+                    dismissAdd()
                 }) {
-                    Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    DialogConfirmText()
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showAddDialog = false
-                    newPresetName = ""
-                    focusManager.clearFocus()
-                }) {
-                    Text("Cancel", color = Color.LightGray)
-                }
+                TextButton(onClick = dismissAdd) { DialogCancelText() }
             },
             containerColor = Color.DarkGray
         )
     }
 
     if (showDeleteCurrentDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteCurrentDialog = false },
-            title = { Text("Delete Preset", color = Color.White) },
-            text = { Text("Are you sure you want to delete the preset '$currentPreset'?", color = Color.White) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDeletePreset(currentPreset)
-                    showDeleteCurrentDialog = false
-                }) {
-                    Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteCurrentDialog = false }) {
-                    Text("Cancel", color = Color.LightGray)
-                }
-            },
-            containerColor = Color.DarkGray
+        ConfirmationDialog(
+            title = "Delete Preset",
+            message = "Are you sure you want to delete the preset '$currentPreset'?",
+            onConfirm = { onDeletePreset(currentPreset) },
+            onDismiss = { showDeleteCurrentDialog = false }
         )
     }
 
     if (showDeleteAllDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteAllDialog = false },
-            title = { Text("Delete All Presets", color = Color.White) },
-            text = { Text("Are you sure you want to delete ALL presets? This cannot be undone.", color = Color.White) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDeleteAllPresets()
-                    showDeleteAllDialog = false
-                }) {
-                    Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteAllDialog = false }) {
-                    Text("Cancel", color = Color.LightGray)
-                }
-            },
-            containerColor = Color.DarkGray
+        ConfirmationDialog(
+            title = "Delete All Presets",
+            message = "Are you sure you want to delete ALL presets? This cannot be undone.",
+            onConfirm = onDeleteAllPresets,
+            onDismiss = { showDeleteAllDialog = false }
         )
     }
+}
+
+@Composable
+private fun presetButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+)
+
+@Composable
+private fun RowScope.PresetActionButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.weight(1f),
+        colors = presetButtonColors(),
+        contentPadding = PaddingValues(horizontal = 4.dp)
+    ) {
+        Text(text, fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1)
+    }
+}
+
+@Composable
+private fun DialogConfirmText() {
+    Text("OK", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun DialogCancelText() {
+    Text("Cancel", color = Color.LightGray)
+}
+
+/** OK confirms and dismisses; Cancel or outside taps only dismiss. */
+@Composable
+private fun ConfirmationDialog(title: String, message: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, color = Color.White) },
+        text = { Text(message, color = Color.White) },
+        confirmButton = {
+            TextButton(onClick = {
+                onConfirm()
+                onDismiss()
+            }) {
+                DialogConfirmText()
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { DialogCancelText() }
+        },
+        containerColor = Color.DarkGray
+    )
 }

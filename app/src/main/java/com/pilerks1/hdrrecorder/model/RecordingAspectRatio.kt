@@ -19,8 +19,6 @@ enum class RecordingAspectRatio(
     fun next(): RecordingAspectRatio = entries[(ordinal + 1) % entries.size]
 
     companion object {
-        fun fromStorageId(value: String?): RecordingAspectRatio? = entries.firstOrNull {
-            it.storageId == value || it.displayLabel == value
-        }
+        fun fromStorageId(value: String?): RecordingAspectRatio? = entries.firstOrNull { it.storageId == value }
     }
 }

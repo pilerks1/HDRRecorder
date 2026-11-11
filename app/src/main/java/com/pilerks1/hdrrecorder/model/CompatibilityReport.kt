@@ -27,20 +27,21 @@ data class CompatibilityConfiguration(
 ) {
     val key: String get() = listOf(aspectRatio, codec ?: "auto", stabilization.toString(),
         resolution, encoding, depth.toString(), fps.toString()).joinToString("|")
+
+    companion object {
+        /** Recording frame rates evaluated by every compatibility scan. */
+        val SCAN_FPS = listOf(24, 30, 60)
+    }
 }
 
 /** AE boost is a reported runtime capability, not a SessionConfig query parameter. */
 data class CompatibilityCombination(
     val configuration: CompatibilityConfiguration,
     val status: CompatibilityStatus,
-    val boostStatus: CompatibilityStatus,
-    val fpsRanges: List<String>,
-    val evidence: List<String>,
-    val diagnostics: List<String> = emptyList()
+    val boostStatus: CompatibilityStatus
 )
 
 data class CompatibilityReport(
-    val schemaVersion: Int = SCHEMA_VERSION,
     val environment: String,
     val cameraId: String,
     val startedAt: Long,
@@ -51,8 +52,5 @@ data class CompatibilityReport(
     val colors: List<CompatibilityColor>,
     val cameraX: List<CompatibilityTable>,
     val camera2: List<CompatibilityTable>,
-    val combinations: List<CompatibilityCombination> = emptyList(),
-    val diagnostics: List<String> = emptyList()
-) {
-    companion object { const val SCHEMA_VERSION = 1 }
-}
+    val combinations: List<CompatibilityCombination> = emptyList()
+)

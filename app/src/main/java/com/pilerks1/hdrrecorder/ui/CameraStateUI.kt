@@ -12,45 +12,14 @@ import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.model.GammaSettings
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
-import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
+import com.pilerks1.hdrrecorder.data.camera.core.CameraControlValues
+import android.util.Range
 
-/**
- * Represents the state of all manual controls.
- */
-data class ManualControlsState(
-    val activePanel: CameraControlPanel? = null,
-    
-    // ISO
-    val isManualIso: Boolean = false,
-    val isoValue: Int? = null,
-    val isManualPostRawSensitivity: Boolean = false,
-    val postRawSensitivityBoost: Int? = null,
-    
-    // Shutter Speed (SS)
-    val isManualSs: Boolean = false,
-    val ssValueNanos: Long? = null,
-    
-    // Exposure Value (EV)
-    val isManualEv: Boolean = false,
-    val evValueIndex: Int = 0,
-    val isLowLightBoostEnabled: Boolean = false,
-    
-    // Focus
-    val isManualFocus: Boolean = false,
-    val focusDistanceDiopters: Float? = null,
-    
-    // White Balance
-    val isManualWb: Boolean = false,
-    val wbTemp: Int? = null,
-    val wbTint: Int? = null,
-    
-    // FPS
-    val isManualFps: Boolean = false,
-    val fpsRange: Range<Int>? = null
-)
+/** Manual controls use the shared domain control model; panel selection lives in [CameraUiState]. */
+typealias ManualControlsState = CameraControlValues
 
 /**
  * Explicit reset-all action; preview metering preserves manual overrides.
@@ -65,13 +34,7 @@ internal val ManualControlsState.hasManualSliderOverride: Boolean
 
 internal fun ManualControlsState.resetManualSlidersToAuto(): ManualControlsState {
     if (!hasManualSliderOverride) return this
-    return copy(
-        isManualIso = false,
-        isoValue = null,
-        isManualPostRawSensitivity = false,
-        postRawSensitivityBoost = null,
-        isManualSs = false,
-        ssValueNanos = null,
+    return withAutoExposure().copy(
         isManualEv = false,
         evValueIndex = 0,
         isManualFocus = false,
@@ -88,7 +51,7 @@ internal fun ManualControlsState.resetManualSlidersToAuto(): ManualControlsState
 data class CameraUiState(
     // Presets
     val currentPresetId: String? = null,
-    val isPresetBusy: Boolean = true,
+    val isPresetBusy: Boolean = false,
     val arePresetsInitialized: Boolean = false,
     val saveRecordingOptions: Boolean = false,
     val saveStorageLocation: Boolean = false,
@@ -100,7 +63,6 @@ data class CameraUiState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
     val isLowLightBoostActive: Boolean = false,
-    val isCameraHardwareEnabled: Boolean = true,
     val previewPlaceholderLabel: String? = null,
 
     // Settings / Configuration
@@ -115,6 +77,7 @@ data class CameraUiState(
     val gammaSettings: GammaSettings = GammaSettings(),
 
     // Manual Controls
+    val activePanel: CameraControlPanel? = null,
     val manualControlsState: ManualControlsState = ManualControlsState(),
     val cameraCapabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities? = null,
     val zoomState: CameraZoomState = CameraZoomState(),
@@ -165,7 +128,7 @@ sealed interface CameraUiEvent {
     data object CycleFps : CameraUiEvent
     data object CycleResolution : CameraUiEvent
     data object CycleAspectRatio : CameraUiEvent
-    data class SetLinearZoom(val progress: Float) : CameraUiEvent
+    data class TogglePanel(val panel: CameraControlPanel) : CameraUiEvent
     data class SetZoomRatio(val ratio: Float) : CameraUiEvent
     data class SelectZoomLens(val cameraId: String) : CameraUiEvent
     data class SetLowLightBoost(val enabled: Boolean) : CameraUiEvent

@@ -45,13 +45,13 @@ fun AxisStack(
 fun AxisOverlay(
     axis: AxisSpec,
     overlay: @Composable () -> Unit,
-    content: @Composable (Modifier) -> Unit,
+    content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     edgePadding: Dp = 8.dp
 ) {
     Layout(
         content = {
-            content(Modifier)
+            content()
             overlay()
         },
         modifier = modifier

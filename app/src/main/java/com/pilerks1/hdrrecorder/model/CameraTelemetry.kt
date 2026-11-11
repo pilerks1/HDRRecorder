@@ -10,7 +10,6 @@ data class CameraTelemetry(
     val iso: Int? = null,
     val postRawSensitivityBoost: Int? = null,
     val shutterNanos: Long? = null,
-    val frameDurationNanos: Long? = null,
     val focusDistanceDiopters: Float? = null,
     val cctTemperatureKelvin: Int? = null,
     val cctTint: Int? = null

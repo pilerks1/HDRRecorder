@@ -14,9 +14,6 @@ enum class Resolution(val qualityName: String, val storageId: String) {
     fun next(): Resolution = entries[(ordinal + 1) % entries.size]
 
     companion object {
-        /** Supports both the stable ID and values stored by older app versions. */
-        fun fromStorageId(value: String?): Resolution? = entries.firstOrNull {
-            it.storageId == value || it.qualityName == value || (it == HIGHEST && value == "Highest")
-        }
+        fun fromStorageId(value: String?): Resolution? = entries.firstOrNull { it.storageId == value }
     }
 }

@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    id("kotlin-parcelize")
 }
 
 configure<com.android.build.api.dsl.ApplicationExtension> {
@@ -68,7 +67,6 @@ dependencies {
 
     // AndroidX Core & Lifecycle
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
@@ -87,7 +85,6 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.compose)
-    implementation(libs.guava) // Required by CameraX for ListenableFuture
     implementation(libs.kotlinx.coroutines.guava)
 
     // Testing

@@ -1,7 +1,7 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
-import com.pilerks1.hdrrecorder.ui.CameraControlPanel
+import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 
 /**
@@ -22,7 +22,6 @@ object ManualControlStateUpdater {
         updater: (ManualControlsState) -> ManualControlsState
     ): Pair<ManualControlsState, Boolean> {
         var newState = updater(oldState)
-        var triggersRebind = false
 
         if (caps != null) {
             newState = clearUnsupportedControls(newState, caps)
@@ -32,61 +31,78 @@ object ManualControlStateUpdater {
 
             // A full-manual device may pair ISO and shutter when the selected individual
             // control has no Hybrid AE priority mode.
-            if (caps.supportsFullManualExposure) {
-                if (returnsToAutoFromUnsupportedHybrid(oldState, newState, caps)) {
-                    newState = newState.copy(isManualIso = false, isManualSs = false)
-                } else if (requiresFullManualExposure(newState, caps)) {
-                    newState = newState.copy(
-                        isManualIso = true,
-                        isManualSs = true,
-                        isManualPostRawSensitivity =
-                            caps.supportsPostRawSensitivityBoost,
-                        isoValue = newState.isoValue
-                            ?: exposureDefaults.isoValue
-                            ?: caps.isoRange?.lower,
-                        postRawSensitivityBoost = newState.postRawSensitivityBoost
-                            ?: exposureDefaults.postRawSensitivityBoost,
-                        ssValueNanos = newState.ssValueNanos
-                            ?: exposureDefaults.shutterNanos
-                            ?: caps.ssRangeNanos?.lower
-                    )
-                }
+            if (caps.supportsFullManualExposure && returnsToAutoFromUnsupportedHybrid(oldState, newState, caps)) {
+                newState = newState.copy(isManualIso = false, isManualSs = false)
             }
-
-            if (caps.supportsCCT && newState.isManualWb) {
-                val temperatureRange = caps.cctTemperatureRange
-                newState = newState.copy(
-                    wbTemp = newState.wbTemp ?: temperatureRange?.let { (it.lower + it.upper) / 2 },
-                    wbTint = newState.wbTint ?: 0
-                )
-            }
-        }
-        
-        if (newState.isManualFps != oldState.isManualFps) {
-            triggersRebind = true
+            newState = completeRequiredValues(newState, caps, exposureDefaults)
         }
 
-        newState = clearInactiveValues(newState)
-        
-        return Pair(newState, triggersRebind)
+        val triggersRebind = newState.isManualFps != oldState.isManualFps
+        return Pair(clearInactiveValues(newState), triggersRebind)
     }
 
-    fun adaptToCapabilities(
-        state: ManualControlsState,
-        caps: CameraCapabilities
-    ): ManualControlsState {
-        var adapted = clearUnsupportedControls(state, caps)
-        if (!caps.supportsFullManualExposure && adapted.isManualIso && adapted.isManualSs) {
-            adapted = adapted.copy(isManualIso = false, isManualSs = false)
+    /**
+     * Normalizes a complete state (such as a loaded preset) against capabilities, without a
+     * previous state to diff against. Low-light boost is dropped when manual exposure or an
+     * effective frame rate above [LOW_LIGHT_BOOST_MAX_FPS] makes it unavailable.
+     */
+    fun normalize(state: ManualControlsState, caps: CameraCapabilities, selectedFps: Int): ManualControlsState {
+        var normalized = clearUnsupportedControls(state, caps)
+        if (!caps.supportsFullManualExposure && normalized.isManualIso && normalized.isManualSs) {
+            normalized = normalized.withAutoExposure()
         }
-        return clearInactiveValues(adapted)
+        // Post-RAW boost is owned by full manual exposure, in both directions.
+        val fullManual = normalized.isManualPostRawSensitivity || (normalized.isManualIso && normalized.isManualSs)
+        normalized = if (caps.supportsPostRawSensitivityBoost && fullManual) {
+            normalized.copy(isManualIso = true, isManualSs = true, isManualPostRawSensitivity = true)
+        } else {
+            normalized.copy(isManualPostRawSensitivity = false, postRawSensitivityBoost = null)
+        }
+        normalized = clearInactiveValues(
+            completeRequiredValues(normalized, caps, ExposureDefaults(null, null, postRawSensitivityBoost = 100))
+        )
+        val effectiveFps = if (normalized.isManualFps) normalized.fpsRange?.upper ?: selectedFps else selectedFps
+        return if (normalized.isLowLightBoostEnabled &&
+            (effectiveFps > LOW_LIGHT_BOOST_MAX_FPS || normalized.isManualIso || normalized.isManualSs)
+        ) normalized.copy(isLowLightBoostEnabled = false) else normalized
+    }
+
+    /** Fills values required by full manual exposure and by manual white balance. */
+    private fun completeRequiredValues(
+        state: ManualControlsState,
+        caps: CameraCapabilities,
+        exposureDefaults: ExposureDefaults
+    ): ManualControlsState {
+        var newState = state
+        if (ExposureMode.resolve(newState, caps) == ExposureMode.FULL_MANUAL) {
+            newState = newState.copy(
+                isManualIso = true,
+                isManualSs = true,
+                isManualPostRawSensitivity = caps.supportsPostRawSensitivityBoost,
+                isoValue = newState.isoValue
+                    ?: exposureDefaults.isoValue
+                    ?: caps.isoRange?.lower,
+                postRawSensitivityBoost = newState.postRawSensitivityBoost
+                    ?: exposureDefaults.postRawSensitivityBoost,
+                ssValueNanos = newState.ssValueNanos
+                    ?: exposureDefaults.shutterNanos
+                    ?: caps.ssRangeNanos?.lower
+            )
+        }
+        if (caps.supportsCCT && newState.isManualWb) {
+            val temperatureRange = caps.cctTemperatureRange
+            newState = newState.copy(
+                wbTemp = newState.wbTemp ?: temperatureRange?.let { (it.lower + it.upper) / 2 },
+                wbTint = newState.wbTint ?: 0
+            )
+        }
+        return newState
     }
 
     private fun clearUnsupportedControls(
         state: ManualControlsState,
         caps: CameraCapabilities
     ): ManualControlsState = state.copy(
-        activePanel = state.activePanel?.takeIf { panelIsAvailable(it, caps) },
         isManualIso = state.isManualIso && caps.hasManualIsoControl,
         isManualPostRawSensitivity = state.isManualPostRawSensitivity &&
             caps.supportsPostRawSensitivityBoost,
@@ -146,14 +162,7 @@ object ManualControlStateUpdater {
                 isManualPostRawSensitivity = false,
                 postRawSensitivityBoost = null
             )
-            else -> newState.copy(
-                isManualIso = false,
-                isoValue = null,
-                isManualPostRawSensitivity = false,
-                postRawSensitivityBoost = null,
-                isManualSs = false,
-                ssValueNanos = null
-            )
+            else -> newState.withAutoExposure()
         }
     }
 
@@ -178,31 +187,6 @@ object ManualControlStateUpdater {
         wbTint = state.wbTint.takeIf { state.isManualWb },
         fpsRange = state.fpsRange.takeIf { state.isManualFps }
     )
-
-    private fun panelIsAvailable(
-        panel: CameraControlPanel,
-        caps: CameraCapabilities
-    ): Boolean = when (panel) {
-        CameraControlPanel.RESOLUTION,
-        CameraControlPanel.ZOOM -> true
-        CameraControlPanel.ISO -> caps.hasManualIsoControl
-        CameraControlPanel.SHUTTER -> caps.hasManualShutterControl
-        CameraControlPanel.EXPOSURE_COMPENSATION ->
-            caps.hasExposureCompensationControl || caps.supportsLowLightBoost
-        CameraControlPanel.FOCUS -> caps.hasManualFocusControl
-        CameraControlPanel.WHITE_BALANCE,
-        CameraControlPanel.TINT -> caps.supportsCCT
-    }
-
-    private fun requiresFullManualExposure(
-        state: ManualControlsState,
-        caps: CameraCapabilities
-    ): Boolean = when {
-        !state.isManualIso && !state.isManualSs -> false
-        state.isManualIso && state.isManualSs -> true
-        state.isManualIso -> !caps.supportsIsoPriorityAe
-        else -> !caps.supportsShutterPriorityAe
-    }
 
     private fun resolvePostRawExposureOwnership(
         oldState: ManualControlsState,
@@ -229,14 +213,7 @@ object ManualControlStateUpdater {
         val returnedPostRawToAuto =
             oldState.isManualPostRawSensitivity && !newState.isManualPostRawSensitivity
         if (returnedPostRawToAuto) {
-            return newState.copy(
-                isManualIso = false,
-                isoValue = null,
-                isManualPostRawSensitivity = false,
-                postRawSensitivityBoost = null,
-                isManualSs = false,
-                ssValueNanos = null
-            )
+            return newState.withAutoExposure()
         }
 
         if (newState.isManualPostRawSensitivity) {
@@ -264,7 +241,7 @@ object ManualControlStateUpdater {
     ): Boolean {
         val turnedOffIso = oldState.isManualIso && !newState.isManualIso
         val turnedOffShutter = oldState.isManualSs && !newState.isManualSs
-        return (turnedOffIso || turnedOffShutter) && requiresFullManualExposure(newState, caps)
+        return (turnedOffIso || turnedOffShutter) && ExposureMode.resolve(newState, caps) == ExposureMode.FULL_MANUAL
     }
 
     private const val LOW_LIGHT_BOOST_MAX_FPS = 30

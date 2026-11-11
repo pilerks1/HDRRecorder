@@ -79,40 +79,33 @@ object TonemapCurves {
         1.000000f, 1.000000f
     )
 
-    fun custom(): TonemapCurve = TonemapCurve(customTonemapPoints, customTonemapPoints, customTonemapPoints)
+    // Curves are immutable, so each one is generated once and reused by every request.
+    val custom: TonemapCurve = TonemapCurve(customTonemapPoints, customTonemapPoints, customTonemapPoints)
 
     /** Reference HLG Curve (OETF). */
-    fun hlg(numPoints: Int = 64): TonemapCurve {
-        val points = FloatArray(numPoints * 2)
+    val hlg: TonemapCurve = run {
         val a = 0.17883277f
         val b = 0.28466892f
         val c = 0.55991073f
-
-        for (i in 0 until numPoints) {
-            val x = i.toFloat() / (numPoints - 1)
-            val y = if (x <= 1.0f / 12.0f) sqrt(3.0f * x) else (a * ln(12.0f * x - b) + c)
-            points[i * 2] = x
-            points[i * 2 + 1] = y.coerceIn(0.0f, 1.0f)
-        }
-        return TonemapCurve(points, points, points)
+        curve { x -> if (x <= 1.0f / 12.0f) sqrt(3.0f * x) else (a * ln(12.0f * x - b) + c) }
     }
 
     /** Reference PQ Curve (SMPTE ST 2084 EOTF^-1). */
-    fun pq(numPoints: Int = 64): TonemapCurve {
-        val points = FloatArray(numPoints * 2)
+    val pq: TonemapCurve = run {
         val m1 = 0.1593017578125f
         val m2 = 78.84375f
         val c1 = 0.8359375f
         val c2 = 18.8515625f
         val c3 = 18.6875f
+        curve { linear -> ((c1 + c2 * linear.pow(m1)) / (1.0f + c3 * linear.pow(m1))).pow(m2) }
+    }
 
+    private fun curve(numPoints: Int = 64, transfer: (Float) -> Float): TonemapCurve {
+        val points = FloatArray(numPoints * 2)
         for (i in 0 until numPoints) {
-            val linear = i.toFloat() / (numPoints - 1)
-            val num = c1 + c2 * linear.pow(m1)
-            val den = 1.0f + c3 * linear.pow(m1)
-            val nonlinear = (num / den).pow(m2)
-            points[i * 2] = linear
-            points[i * 2 + 1] = nonlinear.coerceIn(0.0f, 1.0f)
+            val x = i.toFloat() / (numPoints - 1)
+            points[i * 2] = x
+            points[i * 2 + 1] = transfer(x).coerceIn(0.0f, 1.0f)
         }
         return TonemapCurve(points, points, points)
     }

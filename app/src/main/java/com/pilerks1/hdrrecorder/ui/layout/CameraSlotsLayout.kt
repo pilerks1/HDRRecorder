@@ -6,12 +6,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntSize
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import kotlin.math.roundToInt
 
 private enum class CameraSlot {
     STATS,
-    STATS_FULLSCREEN,
     PREVIEW,
     SECONDARY_CONTROLS,
     EXPANDED_PANEL,
@@ -25,13 +25,18 @@ data class PanelThicknessSpec(
     val maximumThicknessPx: Float
 )
 
-/** Measures the stats slot first, then places every camera surface from one geometry spec. */
+/**
+ * Sizes the stats rail first, then places every camera surface from one geometry spec.
+ * [statsSize] is a pure measurement, so candidate stats bounds are compared without composing
+ * the rail more than once.
+ */
 @Composable
 fun CameraSlotsLayout(
     aspectRatio: RecordingAspectRatio,
     secondaryButtonCount: Int,
     cutoutInsets: EdgeInsets,
     panelThickness: (AxisSpec) -> PanelThicknessSpec,
+    statsSize: (axis: AxisSpec, maxWidth: Int, maxHeight: Int) -> IntSize,
     stats: @Composable (AxisSpec) -> Unit,
     preview: @Composable (CameraLayoutSpec) -> Unit,
     secondaryControls: @Composable (CameraLayoutSpec) -> Unit,
@@ -54,9 +59,7 @@ fun CameraSlotsLayout(
         val safeHeight = (
             height - cutoutInsets.top.roundToInt() - cutoutInsets.bottom.roundToInt()
             ).coerceAtLeast(0)
-        val safeStatsPlaceable = subcompose(CameraSlot.STATS) { stats(axis) }
-            .single()
-            .measure(Constraints(0, safeWidth, 0, safeHeight))
+        val safeStatsSize = statsSize(axis, safeWidth, safeHeight)
 
         fun calculate(statsWidth: Int, statsHeight: Int) = CameraLayoutCalculator.calculate(
                 widthPx = width,
@@ -71,26 +74,18 @@ fun CameraSlotsLayout(
                 cutoutInsets = cutoutInsets
             )
 
-        val safeSpec = calculate(safeStatsPlaceable.width, safeStatsPlaceable.height)
+        val safeSpec = calculate(safeStatsSize.width, safeStatsSize.height)
         val useFullscreenStats = safeSpec.mode == CameraLayoutMode.SHRUNK &&
             (safeWidth != width || safeHeight != height)
-        val fullscreenStatsPlaceable = if (useFullscreenStats) {
-            subcompose(CameraSlot.STATS_FULLSCREEN) { stats(axis) }
-                .single()
-                .measure(Constraints(0, width, 0, height))
-        } else {
-            null
-        }
-        val fullscreenSpec = fullscreenStatsPlaceable?.let {
-            calculate(it.width, it.height)
-        }
-        val keepFullscreenStats = fullscreenSpec?.mode == CameraLayoutMode.SHRUNK
-        val statsPlaceable = if (keepFullscreenStats) {
-            checkNotNull(fullscreenStatsPlaceable)
-        } else {
-            safeStatsPlaceable
-        }
-        val spec = if (keepFullscreenStats) checkNotNull(fullscreenSpec) else safeSpec
+        val fullscreenSpec = if (useFullscreenStats) {
+            val fullscreenStatsSize = statsSize(axis, width, height)
+            calculate(fullscreenStatsSize.width, fullscreenStatsSize.height)
+                .takeIf { it.mode == CameraLayoutMode.SHRUNK }
+        } else null
+        val spec = fullscreenSpec ?: safeSpec
+        val statsPlaceable = subcompose(CameraSlot.STATS) { stats(axis) }
+            .single()
+            .measure(if (fullscreenSpec != null) Constraints(0, width, 0, height) else Constraints(0, safeWidth, 0, safeHeight))
 
         val previewPlaceable = subcompose(CameraSlot.PREVIEW) {
             Box(Modifier.fillMaxSize()) { preview(spec) }

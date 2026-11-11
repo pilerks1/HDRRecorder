@@ -12,8 +12,6 @@ import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.DocumentsContract
 import android.provider.MediaStore
-import android.system.Os
-import android.system.OsConstants
 import android.webkit.MimeTypeMap
 import androidx.camera.video.FileDescriptorOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
@@ -52,7 +50,7 @@ class RecordingStorageManager(private val context: Context, private val reporter
             }
         }
 
-    /** Custom-folder setup retains the existing fallback to primary MediaStore storage. */
+    /** Call from an IO dispatcher. Custom-folder setup falls back to primary MediaStore storage. */
     fun createOutput(destination: RecordingDestination, fileName: String): RecordingOutput {
         if (destination is RecordingDestination.DocumentTree) {
             var document: Uri? = null
@@ -104,18 +102,18 @@ class RecordingStorageManager(private val context: Context, private val reporter
         null
     }
 
+    /**
+     * Document directories cannot be opened as files, and a tree grant does not cover the
+     * provider's root metadata. Free space is therefore known only for the platform's external
+     * storage provider, whose tree IDs start with the storage volume ("primary" or its UUID).
+     * Any other provider reports unavailable (null).
+     */
     private fun documentTreeAvailableBytes(tree: Uri): Long? {
-        val document = DocumentsContract.buildDocumentUriUsingTree(
-            tree, DocumentsContract.getTreeDocumentId(tree)
-        )
-        return resolver.openFileDescriptor(document, "r")?.use { descriptor ->
-            val fd = descriptor.fileDescriptor
-            // Only a real directory identifies the selected filesystem. Reject proxy files/pipes.
-            if (!OsConstants.S_ISDIR(Os.fstat(fd).st_mode)) return@use null
-            val stat = Os.fstatvfs(fd)
-            if (stat.f_bavail < 0L || stat.f_frsize <= 0L) return@use null
-            Math.multiplyExact(stat.f_bavail, stat.f_frsize)
-        }
+        if (tree.authority != EXTERNAL_STORAGE_AUTHORITY) return null
+        val volumeId = DocumentsContract.getTreeDocumentId(tree).substringBefore(':')
+        val volume = context.getSystemService(AndroidStorageManager::class.java).storageVolumes
+            .firstOrNull { if (volumeId == "primary") it.isPrimary else it.uuid == volumeId }
+        return volume?.directory?.let { StatFs(it.absolutePath).availableBytes }
     }
 
     /** Retained by RecordingManager until CameraX finalizes; all cleanup is idempotent. */
@@ -135,7 +133,7 @@ class RecordingStorageManager(private val context: Context, private val reporter
             deleteDocument(document)
         }
 
-        /** Failed recordings retain their files, matching the existing behavior. */
+        /** Call from an IO dispatcher. Failed recordings retain their files, matching the existing behavior. */
         fun complete(outputUri: Uri, successful: Boolean) {
             if (finished) return
             finished = true
@@ -155,12 +153,9 @@ class RecordingStorageManager(private val context: Context, private val reporter
             ?: error("Android has no filename extension for $mimeType")
         val fileName = "$originalName.$extension"
         if (isDocument) {
-            val renamed = DocumentsContract.renameDocument(resolver, uri, fileName)
+            // Document MIME types are provider-owned; providers may report stale or generic types.
+            DocumentsContract.renameDocument(resolver, uri, fileName)
                 ?: error("Document provider could not rename the recording")
-            // Document MIME types are provider-owned and commonly derived from the filename.
-            check(resolver.getType(renamed) == mimeType) {
-                "Document provider did not reflect the detected recording MIME type"
-            }
         } else {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -187,4 +182,7 @@ class RecordingStorageManager(private val context: Context, private val reporter
         }
     }
 
+    private companion object {
+        const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+    }
 }

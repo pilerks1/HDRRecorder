@@ -29,7 +29,6 @@
     <string name="diagnostics_memory_only">History could not be saved. Current reports are available until the app closes.</string>
     <string name="diagnostics_occurrences">Occurrences: %1$d</string>
     <string name="diagnostics_issue">Issue details</string>
-    <string name="issue_copy_failed">Could not copy diagnostics to the clipboard.</string>
     <string name="diagnostics_details">Advanced details</string>
     <string name="diagnostics_copy">Copy diagnostics</string>
     <string name="diagnostics_dismiss">Dismiss</string>

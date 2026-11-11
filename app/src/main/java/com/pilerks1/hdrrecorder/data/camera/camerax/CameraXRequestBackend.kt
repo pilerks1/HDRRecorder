@@ -5,7 +5,6 @@ import androidx.camera.camera2.interop.applyCamera2Interop
 import androidx.camera.core.CameraControl
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.MeteringPoint
-import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestBackend
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestOverrides
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
 import kotlinx.coroutines.guava.await
@@ -13,16 +12,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** Only this adapter writes CameraX interop. Its caller serializes all operations. */
 class CameraXRequestBackend(
-    override val cameraId: String,
-    override val generation: Long,
+    val generation: Long,
     private val control: CameraControl
-) : CameraRequestBackend {
+) {
     private val active = AtomicBoolean(true)
     private var successful: CameraRequestOverrides? = null
     private val ownedKeys = mutableSetOf<CaptureRequest.Key<*>>()
     private var lowLightBoost: Boolean? = null
 
-    override suspend fun apply(overrides: CameraRequestOverrides) {
+    suspend fun apply(overrides: CameraRequestOverrides) {
         ensureActive()
         val changed = overrides.changedKeys(successful)
         val removed = ownedKeys - overrides.keys
@@ -87,16 +85,11 @@ class CameraXRequestBackend(
         return control.setZoomRatio(ratio)
     }
 
-    fun setLinearZoom(progress: Float): com.google.common.util.concurrent.ListenableFuture<Void> {
-        ensureActive()
-        return control.setLinearZoom(progress)
-    }
-
     private fun ensureActive() {
         if (!active.get()) throw CameraRequestSupersededException()
     }
 
-    override fun detach() {
+    fun detach() {
         if (active.getAndSet(false)) {
             // Submit cleanup to this camera before its lifecycle closes or a replacement binds.
             control.cancelFocusAndMetering()

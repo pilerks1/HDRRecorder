@@ -3,8 +3,7 @@ package com.pilerks1.hdrrecorder.model
 /**
  * Latest-known measurements from every telemetry producer.
  *
- * The root is replaced atomically. Each nested sample retains its own timestamp because the
- * sources intentionally update at different rates.
+ * The root is replaced atomically; each producer owns exactly one nested sample.
  */
 data class TelemetrySnapshot(
     val camera: CameraSample = CameraSample(),
@@ -16,33 +15,24 @@ data class TelemetrySnapshot(
 
 data class CameraSample(
     val cameraGeneration: Long = 0L,
-    val frameNumber: Long = -1L,
-    val capturedAtElapsedNanos: Long = 0L,
     val sensorSensitivityIso: Int? = null,
     val postRawSensitivityBoost: Int? = null,
     val shutterNanos: Long? = null,
-    val frameDurationNanos: Long? = null,
     val focusDistanceDiopters: Float? = null,
     val cctTemperatureKelvin: Int? = null,
-    val cctTint: Int? = null,
-    val aeState: Int? = null,
-    val aeLocked: Boolean? = null
+    val cctTint: Int? = null
 ) {
     fun asCameraTelemetry(): CameraTelemetry = CameraTelemetry(
         iso = sensorSensitivityIso,
         postRawSensitivityBoost = postRawSensitivityBoost,
         shutterNanos = shutterNanos,
-        frameDurationNanos = frameDurationNanos,
         focusDistanceDiopters = focusDistanceDiopters,
         cctTemperatureKelvin = cctTemperatureKelvin,
         cctTint = cctTint
     )
-
-
 }
 
 data class RecordingSample(
-    val capturedAtElapsedNanos: Long = 0L,
     val isRecording: Boolean = false,
     val targetFps: Int? = null,
     val targetBitrateMbps: Int = 30,
@@ -53,8 +43,8 @@ data class RecordingSample(
     val droppedFrames: Int = 0
 )
 
+/** Produced by [com.pilerks1.hdrrecorder.data.ThermalManager] and latched without conversion. */
 data class ThermalPowerSample(
-    val capturedAtElapsedNanos: Long = 0L,
     val thermalStatus: ThermalStatus = ThermalStatus.NONE,
     val thermalForecast: ThermalForecast =
         ThermalForecast.Status(ThermalStatus.NONE),
@@ -62,7 +52,6 @@ data class ThermalPowerSample(
 )
 
 data class StorageSample(
-    val capturedAtElapsedNanos: Long = 0L,
     val storageGeneration: Long = 0L,
     val uri: String? = null,
     val baselineAvailableBytes: Long? = null

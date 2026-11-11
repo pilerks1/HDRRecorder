@@ -9,7 +9,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -57,8 +56,8 @@ fun RecordingBitrateRow(label: String, value: String, onChange: (String) -> Unit
         OutlinedTextField(
             value = value,
             onValueChange = { input ->
-                if (input.all { it.isDigit() } && (input.isEmpty() ||
-                    (if (audio) Bitrate.parseAudio(input) else Bitrate.parse(input)) != null)) onChange(input)
+                if (input.all { it.isDigit() } &&
+                    (if (audio) Bitrate.isValidAudio(input) else Bitrate.isValid(input))) onChange(input)
             },
             placeholder = { Text("Auto", color = Color.Gray) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
@@ -66,12 +65,7 @@ fun RecordingBitrateRow(label: String, value: String, onChange: (String) -> Unit
             textStyle = LocalTextStyle.current.copy(color = Color.White, textAlign = TextAlign.End),
             singleLine = true,
             modifier = Modifier.width(100.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = Color.DarkGray,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = MaterialTheme.colorScheme.primary)
+            colors = settingsTextFieldColors()
         )
     }
 }
@@ -79,8 +73,7 @@ fun RecordingBitrateRow(label: String, value: String, onChange: (String) -> Unit
 @Composable
 fun AudioSection(codec: String?, codecs: List<String>, onCodecChange: (String?) -> Unit,
     bitrate: String, onBitrateChange: (String) -> Unit) {
-    Text("Audio", fontSize = 14.sp, fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+    SectionTitle("Audio")
     CodecRow("Audio Codec", codec, codecs, onCodecChange)
     RecordingBitrateRow("Bitrate (kbps)", bitrate, onBitrateChange, audio = true)
 }

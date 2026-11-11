@@ -2,6 +2,9 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
+import com.pilerks1.hdrrecorder.model.formatShutterNanos
+import com.pilerks1.hdrrecorder.model.trimmedDecimal
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -32,7 +35,6 @@ class SliderScale<T : Any>(
     val ruler: SliderRuler,
     val layoutLabels: List<String>
 ) {
-    val ticks: List<SliderTick> get() = ruler.ticks
     fun progress(value: T): Float = valueToProgress(value).finiteProgress()
     fun value(progress: Float): T = progressToValue(progress.finiteProgress())
 }
@@ -46,9 +48,10 @@ data class StandardSliderBinding<T : Any>(
 
 object SliderScales {
     private const val MAX_ISO_LIVE_LABEL = "99999"
+    /** Live readout shown while a value is unavailable. */
+    const val UNAVAILABLE_LABEL = "â€”"
 
-    fun formatZoomFactor(ratio: Float): String =
-        String.format(Locale.US, "%.2f", ratio).trimEnd('0').trimEnd('.') + "x"
+    fun formatZoomFactor(ratio: Float): String = ratio.toDouble().trimmedDecimal(2) + "x"
 
     fun zoom(state: CameraZoomState = CameraZoomState()): SliderScale<Float> = logarithmicScale(
         lower = state.minRatio.toDouble(),
@@ -59,7 +62,7 @@ object SliderScales {
         format = { String.format(Locale.US, "%.2fx", it) },
         tickFormat = ::formatZoomFactor,
         markers = state.shortcuts.map { it.zoomRatio },
-        extraLabels = listOf("—")
+        extraLabels = listOf(UNAVAILABLE_LABEL)
     )
 
     fun iso(caps: CameraCapabilities?): SliderScale<Int> = isoRange(
@@ -78,17 +81,17 @@ object SliderScales {
     )
 
     fun shutter(caps: CameraCapabilities?): SliderScale<Long> = shutterRange(
-        caps?.ssRangeNanos?.lower ?: (1_000_000_000L / 8000L),
-        caps?.ssRangeNanos?.upper ?: (1_000_000_000L / 15L)
+        caps?.ssRangeNanos?.lower ?: (NANOS_PER_SECOND / 8000L),
+        caps?.ssRangeNanos?.upper ?: (NANOS_PER_SECOND / 15L)
     )
 
     internal fun shutterRange(minimum: Long, maximum: Long): SliderScale<Long> = logarithmicScale(
         lower = minimum.coerceAtLeast(1L).toDouble(),
         upper = maximum.coerceAtLeast(minimum.coerceAtLeast(1L)).toDouble(),
-        reference = 1_000_000_000.0,
+        reference = NANOS_PER_SECOND.toDouble(),
         decode = { it.roundToLong() },
         encode = Long::toDouble,
-        format = ::formatShutter
+        format = ::formatShutterNanos
     )
 
     fun exposureCompensation(caps: CameraCapabilities?): SliderScale<Int> = exposureCompensationRange(
@@ -157,14 +160,13 @@ object SliderScales {
         lower: Double,
         upper: Double,
         interval: Double,
-        reference: Double = 0.0,
         decode: (Double) -> T,
         encode: (T) -> Double,
         format: (T) -> String
     ): SliderScale<T> = rulerScale(
         lower, upper, decode, encode, format,
-        toCoordinate = { (it - reference) / interval },
-        fromCoordinate = { reference + it * interval }
+        toCoordinate = { it / interval },
+        fromCoordinate = { it * interval }
     )
 
     private fun <T : Any> logarithmicScale(
@@ -229,36 +231,27 @@ object SliderScales {
         )
     }
 
-    private fun formatShutter(nanos: Long): String {
-        val seconds = nanos / 1_000_000_000.0
-        return if (seconds < 1.0) {
-            "1/${(1.0 / seconds).roundToInt()}"
-        } else {
-            "${(seconds * 10).roundToInt() / 10.0}s"
-        }
-    }
-
+    /**
+     * Camera2 reports the step as a Rational, whose denominator is never negative; a zero
+     * denominator cannot reach here because an unusable step disables the EV slider.
+     */
     private fun formatEv(index: Int, stepNumerator: Int, stepDenominator: Int): String {
-        val safeDenominator = stepDenominator.toLong().takeIf { it != 0L } ?: 1L
-        val rawNumerator = index.toLong() * stepNumerator.toLong()
-        val decimalPlaces = evDecimalPlaces(stepNumerator, safeDenominator)
-        val magnitude = abs(rawNumerator.toDouble() / safeDenominator.toDouble())
-        val formattedMagnitude = String.format(Locale.US, "%.${decimalPlaces}f", magnitude)
+        val denominator = stepDenominator.coerceAtLeast(1)
+        val ev = index.toDouble() * stepNumerator / denominator
+        val formatted = String.format(Locale.US, "%.${evDecimalPlaces(stepNumerator, denominator)}f", abs(ev))
         return when {
-            rawNumerator == 0L -> formattedMagnitude
-            (rawNumerator > 0L) == (safeDenominator > 0L) -> "+$formattedMagnitude"
-            else -> "-$formattedMagnitude"
+            ev > 0.0 -> "+$formatted"
+            ev < 0.0 -> "-$formatted"
+            else -> formatted
         }
     }
 
-    private fun evDecimalPlaces(stepNumerator: Int, stepDenominator: Long): Int {
+    private fun evDecimalPlaces(stepNumerator: Int, stepDenominator: Int): Int {
         val numeratorMagnitude = abs(stepNumerator.toLong())
         if (numeratorMagnitude == 0L) return 1
-
-        val denominatorMagnitude = abs(stepDenominator).coerceAtLeast(1L)
         var decimalPlaces = 1
         var decimalScale = 10L
-        while (numeratorMagnitude * decimalScale < denominatorMagnitude) {
+        while (numeratorMagnitude * decimalScale < stepDenominator) {
             decimalPlaces++
             decimalScale *= 10L
         }

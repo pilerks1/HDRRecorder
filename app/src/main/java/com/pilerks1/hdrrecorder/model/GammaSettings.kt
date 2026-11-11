@@ -23,7 +23,6 @@ data class GammaSettings(
 ) {
     init {
         require(value.isFinite() && value > 0f) { "Gamma must be a finite positive number" }
-        require(curve != GammaCurve.AUTO) { "Select an explicit contrast curve" }
     }
 
     fun supportedMode(modes: List<GammaMode>): GammaMode? =

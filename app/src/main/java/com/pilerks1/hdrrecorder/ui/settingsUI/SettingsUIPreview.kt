@@ -2,13 +2,9 @@ package com.pilerks1.hdrrecorder.ui.settingsUI
 
 import android.os.Build
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import android.util.Range
 import com.pilerks1.hdrrecorder.model.PreviewSettings
 import com.pilerks1.hdrrecorder.model.PreviewOptions
@@ -18,7 +14,6 @@ import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
 fun PreviewSection(
     settings: PreviewSettings,
     options: PreviewOptions,
-    enabled: Boolean,
     onFrameRateChange: (Range<Int>?) -> Unit,
     onDynamicRangeChange: (PreviewDynamicRange?) -> Unit,
     isRespectDisplayCutoutsEnabled: Boolean,
@@ -26,13 +21,7 @@ fun PreviewSection(
     isForceDisplaySdrEnabled: Boolean,
     onForceDisplaySdrChange: (Boolean) -> Unit
 ) {
-    Text(
-        text = "Preview",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
+    SectionTitle("Preview")
 
     fun frameRateLabel(range: Range<Int>): String =
         if (range.lower == range.upper) "${range.lower} FPS" else "${range.lower}–${range.upper} FPS"
@@ -41,16 +30,14 @@ fun PreviewSection(
         label = "Frame rate",
         value = settings.frameRate?.let(::frameRateLabel) ?: "Auto",
         choices = listOf(null to "Auto") + options.frameRates.map { it to frameRateLabel(it) },
-        onSelect = onFrameRateChange,
-        enabled = enabled
+        onSelect = onFrameRateChange
     )
     Spacer(Modifier.height(12.dp))
     RecordingChoiceRow(
         label = "Dynamic range",
         value = settings.dynamicRange?.displayName ?: "Auto",
         choices = listOf(null to "Auto") + options.dynamicRanges.map { it to it.displayName },
-        onSelect = onDynamicRangeChange,
-        enabled = enabled
+        onSelect = onDynamicRangeChange
     )
 
     Spacer(Modifier.height(16.dp))

@@ -8,10 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.net.URLDecoder
+import android.provider.DocumentsContract
 import androidx.core.net.toUri
 
 @Composable
@@ -28,13 +27,7 @@ fun StorageSection(
 
     val displayPath = getReadablePath(storageUri)
 
-    Text(
-        text = "Storage",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
+    SectionTitle("Storage")
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -69,16 +62,13 @@ fun StorageSection(
 }
 
 /**
- * Converts a raw Document Tree URI into a highly readable full path for the user.
- * (e.g. content://.../tree/primary%3AMovies -> primary:Movies)
+ * Shows the tree's document ID, which the provider already returns decoded
+ * (e.g. content://.../tree/primary%3AMovies -> primary:Movies).
  */
 private fun getReadablePath(uriString: String?): String {
     if (uriString.isNullOrEmpty()) return "Default (DCIM/HDR-Recorder)"
     return try {
-        val uri = uriString.toUri()
-        val path = uri.path ?: uri.toString()
-        // Strips out the initial provider jargon so it just shows the folder structure
-        URLDecoder.decode(path, "UTF-8").substringAfter("tree/")
+        DocumentsContract.getTreeDocumentId(uriString.toUri())
     } catch (e: IllegalArgumentException) {
         "Custom Directory"
     }

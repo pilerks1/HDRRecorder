@@ -9,14 +9,10 @@ import android.os.Build
 import android.os.PowerManager
 import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
 import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+import androidx.annotation.RequiresApi
 import com.pilerks1.hdrrecorder.model.ThermalForecast
+import com.pilerks1.hdrrecorder.model.ThermalPowerSample
 import com.pilerks1.hdrrecorder.model.ThermalStatus
-
-data class ThermalPowerSnapshot(
-    val thermalStatus: ThermalStatus = ThermalStatus.NONE,
-    val thermalForecast: ThermalForecast = ThermalForecast.Status(ThermalStatus.NONE),
-    val netPowerWatts: Double = 0.0
-)
 
 /**
  * Converts the raw battery-current property to amps.
@@ -35,9 +31,7 @@ internal fun batteryCurrentToAmps(rawCurrent: Long): Double? {
 }
 
 /**
- * Manages thermal and power monitoring.
- * Refactored to be passive: it no longer has its own timer.
- * Its state is queried by the unified timer in StatsManager.
+ * Passive thermal and power source. StatsManager's polling loop decides when to query it.
  */
 class ThermalManager(private val context: Context, private val reporter: ErrorReporter) {
 
@@ -68,10 +62,7 @@ class ThermalManager(private val context: Context, private val reporter: ErrorRe
         context.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
     }
 
-    /**
-     * Heavy API call. Should be called asynchronously (e.g., every 10-20s) 
-     * from the unified stats loop.
-     */
+    /** Heavy API call; StatsManager calls it about every 10 seconds off the main thread. */
     fun updateHeadroom() {
         lastForecast = try {
             powerManager.getThermalHeadroom(60)
@@ -85,7 +76,7 @@ class ThermalManager(private val context: Context, private val reporter: ErrorRe
      * Synchronous, non-blocking retrieval of current thermal and power metrics.
      * Uses cached voltage and listener status, but polls current amperage (fast).
      */
-    fun getInstantThermalState(): ThermalPowerSnapshot {
+    fun getInstantThermalState(): ThermalPowerSample {
         // Poll current amperage (fast memory read on most modern devices)
         val rawCurrent = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
 
@@ -100,33 +91,25 @@ class ThermalManager(private val context: Context, private val reporter: ErrorRe
             ThermalForecast.Headroom(lastForecast)
         }
 
-        return ThermalPowerSnapshot(
+        return ThermalPowerSample(
             thermalStatus = ThermalStatus.fromInt(currentThermalStatus),
             thermalForecast = forecast,
             netPowerWatts = netWatts
         )
     }
 
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private fun mapHeadroomToStatus(headroom: Float): ThermalForecast {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            val thresholds = powerManager.thermalHeadroomThresholds
-            if (thresholds.isNotEmpty()) {
-                val highestStatus = thresholds.keys
-                    .filter { headroom >= (thresholds[it] ?: Float.MAX_VALUE) }
-                    .maxByOrNull { it }
-
-                return if (highestStatus != null) {
-                    ThermalForecast.Status(ThermalStatus.fromInt(highestStatus))
-                } else {
-                    if (thresholds.containsKey(PowerManager.THERMAL_STATUS_LIGHT)) {
-                        ThermalForecast.Status(ThermalStatus.NONE)
-                    } else {
-                        ThermalForecast.Headroom(headroom)
-                    }
-                }
-            }
+        val thresholds = powerManager.thermalHeadroomThresholds
+        if (thresholds.isEmpty()) return ThermalForecast.Headroom(headroom)
+        val highestStatus = thresholds.keys
+            .filter { headroom >= (thresholds[it] ?: Float.MAX_VALUE) }
+            .maxByOrNull { it }
+        return when {
+            highestStatus != null -> ThermalForecast.Status(ThermalStatus.fromInt(highestStatus))
+            thresholds.containsKey(PowerManager.THERMAL_STATUS_LIGHT) -> ThermalForecast.Status(ThermalStatus.NONE)
+            else -> ThermalForecast.Headroom(headroom)
         }
-        return ThermalForecast.Headroom(headroom)
     }
 
     fun cleanup() {

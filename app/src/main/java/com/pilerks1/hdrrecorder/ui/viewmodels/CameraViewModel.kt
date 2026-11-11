@@ -3,28 +3,30 @@ package com.pilerks1.hdrrecorder.ui.viewmodels
 import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
 import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 
-import android.app.Application
 import android.util.Range
 import androidx.camera.core.SurfaceRequest
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.core.net.toUri
+import com.pilerks1.hdrrecorder.data.BindOutcome
 import com.pilerks1.hdrrecorder.data.CameraManager
 import com.pilerks1.hdrrecorder.data.Bitrate
 import com.pilerks1.hdrrecorder.data.PresetManager
 import com.pilerks1.hdrrecorder.model.CameraPreset
 import com.pilerks1.hdrrecorder.model.PresetSettings
+import com.pilerks1.hdrrecorder.model.presetNameError
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
 import com.pilerks1.hdrrecorder.data.RecordingConfiguration
 import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
 import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
+import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
 import com.pilerks1.hdrrecorder.data.camera.DesiredCameraState
-import com.pilerks1.hdrrecorder.data.camera.ExposureMode
-import com.pilerks1.hdrrecorder.data.camera.core.CameraControlValues
+import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntimeEventResult
@@ -32,14 +34,16 @@ import com.pilerks1.hdrrecorder.data.camera.core.InteropSettings
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
 import com.pilerks1.hdrrecorder.data.camera.core.Camera2Settings
 import com.pilerks1.hdrrecorder.data.camera.TelemetryCoordinator
+import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
+import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.model.VideoColorOption
 import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
-import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import com.pilerks1.hdrrecorder.ui.resetManualSlidersToAuto
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeBound
 import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeMath
+import com.pilerks1.hdrrecorder.ui.manualcontrols.availableControlPanels
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -55,7 +59,6 @@ import kotlin.math.roundToInt
  * ViewModel no longer constructs its own Android dependencies.
  */
 internal class CameraViewModel(
-    application: Application,
     private val statsManager: StatsManager,
     private val telemetryCoordinator: TelemetryCoordinator,
     private val preferencesManager: PreferencesManager,
@@ -66,14 +69,15 @@ internal class CameraViewModel(
     private val controlCoordinator: CameraControlCoordinator,
     private val cameraRuntime: CameraRuntime,
     private val reporter: ErrorReporter
-) : AndroidViewModel(application) {
+) : ViewModel() {
 
     // --- Deferred settings and camera binding state ---
     private var pendingHardRebind = false
     private var pendingSoftRebind = false
     private var cameraLifecycleOwner: LifecycleOwner? = null
     private var lastDisplayRotation = 0
-    private var cameraRebindJob: kotlinx.coroutines.Job? = null
+    private var cameraRebindJob: Job? = null
+    private var recordingStartJob: Job? = null
     private var lowLightBoostApplyJob: Job? = null
     private var exposureTransitionJob: Job? = null
     private var exposureTransitionGeneration = 0L
@@ -96,13 +100,14 @@ internal class CameraViewModel(
         )
         reporter.contextProvider = {
             val state = _uiState.value
-            RecordingConfiguration.diagnosticContext(state) +
+            RecordingConfiguration.diagnosticContext(state.toCaptureConfiguration()) +
                 mapOf("cameraId" to (state.zoomState.inventory?.defaultCameraId ?: "unavailable"),
                 "recording" to state.isRecording.toString(),
                 "destination" to if (state.storageUri == null) "default" else "custom")
         }
         initializePresets()
 
+        // The recording-state collector also delivers the initial stats state.
         collectRecordingState()
         collectLowLightBoostState()
 
@@ -117,36 +122,47 @@ internal class CameraViewModel(
                 _uiState.update { it.copy(meteringState = state) }
             }
         }
-        statsManager.setRecordingState(false, requestedFpsForStats(), (Bitrate.parse(_uiState.value.bitrate) ?: 0), _uiState.value.storageUri)
     }
+
+    /** True from the moment a recording start is requested until its finalization completes. */
+    private fun isRecordingBusy(): Boolean =
+        recordingManager.isRecording.value || recordingStartJob?.isActive == true
 
     /**
      * Helper to automatically apply state whenever a setting changes.
      * Defer camera rebinds if the Settings UI is currently open.
      */
     private fun updateSettings(requiresHardRebind: Boolean = false, update: (CameraUiState) -> CameraUiState) {
-        if (recordingManager.isRecording.value) return
-        _uiState.update { oldState -> update(oldState) }
+        if (isRecordingBusy()) return
+        _uiState.update(update)
         if (!cameraRuntime.usesCameraHardware) return
 
-        if (_uiState.value.isSettingsSheetVisible) {
+        when {
+            requiresHardRebind -> requestRebind()
             // Defer changes while in settings UI
-            if (requiresHardRebind) pendingHardRebind = true else pendingSoftRebind = true
-        } else {
-            if (requiresHardRebind) {
-                scheduleCameraRebind(debounce = true)
-            } else {
-                applyInterop()
-            }
+            _uiState.value.isSettingsSheetVisible -> pendingSoftRebind = true
+            else -> applyInterop()
         }
     }
 
+    /** Rebinds now (debounced), or after Settings closes when it is open. */
+    private fun requestRebind() {
+        if (!cameraRuntime.usesCameraHardware) return
+        if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
+        else scheduleCameraRebind(debounce = true)
+    }
+
     fun onEvent(event: CameraUiEvent) {
+        // Panel selection is presentation state only; it never touches camera settings.
+        if (event is CameraUiEvent.TogglePanel) {
+            _uiState.update { it.copy(activePanel = if (it.activePanel == event.panel) null else event.panel) }
+            return
+        }
         if (_uiState.value.isPresetBusy) return
         if (!_uiState.value.arePresetsInitialized && event != CameraUiEvent.RetryPresets &&
             event != CameraUiEvent.OpenSettings && event != CameraUiEvent.CloseSettings) return
         // isRecording stays true until Finalize, including after stop was requested.
-        if (recordingManager.isRecording.value && when (event) {
+        if (isRecordingBusy() && when (event) {
             is CameraUiEvent.AddPreset, CameraUiEvent.SavePreset,
             is CameraUiEvent.SetSaveRecordingOptions, is CameraUiEvent.SetSaveStorageLocation,
             is CameraUiEvent.LoadPreset, is CameraUiEvent.DeletePreset,
@@ -167,8 +183,7 @@ internal class CameraViewModel(
             CameraUiEvent.RetryPresets -> if (!_uiState.value.arePresetsInitialized) initializePresets()
             is CameraUiEvent.AddPreset -> runPresetOperation {
                 val name = event.name.trim()
-                require(name.isNotEmpty()) { "Enter a preset name" }
-                require(presetDocuments.none { it.name.equals(name, ignoreCase = true) }) { "A preset with that name already exists" }
+                presetNameError(name, presetDocuments.map { it.name })?.let { throw IllegalArgumentException(it) }
                 val preset = _uiState.value.toPreset(PresetManager.newId(), name)
                 presetManager.save(preset, create = true)
                 refreshPresets()
@@ -186,6 +201,7 @@ internal class CameraViewModel(
                 val preset = presetManager.read(id)
                 applyPreset(preset)
                 selectSavedPreset(preset)
+                requestRebind()
             }
             is CameraUiEvent.DeletePreset -> runPresetOperation {
                 val id = presetDocuments.first { it.name == event.name }.id
@@ -247,7 +263,7 @@ internal class CameraViewModel(
                     updateSettings(requiresHardRebind = true) { it.copy(audioCodec = event.mimeType) }
                 }
             }
-            is CameraUiEvent.SetAudioBitrate -> if (event.bitrate.isEmpty() || Bitrate.parseAudio(event.bitrate) != null) {
+            is CameraUiEvent.SetAudioBitrate -> if (Bitrate.isValidAudio(event.bitrate)) {
                 updateSettings(requiresHardRebind = true) { it.copy(audioBitrate = event.bitrate) }
             }
             is CameraUiEvent.SetGammaSettings -> if (_uiState.value.encoding.supportsGammaCurveSelection &&
@@ -257,20 +273,11 @@ internal class CameraViewModel(
                 }
             }
 
-            is CameraUiEvent.SetBitrate -> {
-                if (event.bitrate.isEmpty() || Bitrate.parse(event.bitrate) != null) {
-                    updateSettings(requiresHardRebind = true) {
-                        it.copy(bitrate = event.bitrate)
-                    }
-                }
+            is CameraUiEvent.SetBitrate -> if (Bitrate.isValid(event.bitrate)) {
+                updateSettings(requiresHardRebind = true) { it.copy(bitrate = event.bitrate) }
             }
             is CameraUiEvent.SetStabilization -> updateSettings(requiresHardRebind = true) { it.copy(isStabilizationEnabled = event.enabled) }
             is CameraUiEvent.SetLowLightBoost -> setLowLightBoostRequested(event.enabled)
-            is CameraUiEvent.SetLinearZoom -> {
-                if (cameraRuntime.usesCameraHardware) {
-                    cameraManager.setLinearZoom(event.progress)
-                }
-            }
             is CameraUiEvent.SetZoomRatio -> {
                 if (cameraRuntime.usesCameraHardware) cameraManager.setZoomRatio(event.ratio)
             }
@@ -315,18 +322,19 @@ internal class CameraViewModel(
                 }
             }
             is CameraUiEvent.SetPreviewDynamicRange -> {
-                if (recordingManager.isRecording.value) return
                 val state = _uiState.value
                 if (event.dynamicRange != null && event.dynamicRange !in state.previewOptions.dynamicRanges) return
                 val requested = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = event.dynamicRange))
-                val error = if (cameraRuntime.usesCameraHardware) cameraManager.previewDynamicRangeError(requested) else null
+                val error = if (cameraRuntime.usesCameraHardware) {
+                    cameraManager.previewDynamicRangeError(requested.toCaptureConfiguration())
+                } else null
                 if (error == null) {
                     updateSettings(requiresHardRebind = true) { requested }
                 }
             }
 
             is CameraUiEvent.SetRespectDisplayCutouts -> {
-                if (!recordingManager.isRecording.value) {
+                if (!isRecordingBusy()) {
                     _uiState.update { it.copy(isRespectDisplayCutoutsEnabled = event.enabled) }
                 }
             }
@@ -361,21 +369,22 @@ internal class CameraViewModel(
             is CameraUiEvent.OpenSettings -> _uiState.update { it.copy(isSettingsSheetVisible = true) }
             is CameraUiEvent.CloseSettings -> {
                 _uiState.update { it.copy(isSettingsSheetVisible = false) }
-
-                if (pendingHardRebind) {
-                    scheduleCameraRebind(debounce = false)
-                } else if (pendingSoftRebind) {
-                    applyInterop()
-                }
-
+                val hardRebind = pendingHardRebind
+                val softRebind = pendingSoftRebind
                 pendingHardRebind = false
                 pendingSoftRebind = false
+                if (hardRebind) {
+                    scheduleCameraRebind(debounce = false)
+                } else if (softRebind) {
+                    applyInterop()
+                }
             }
+            is CameraUiEvent.TogglePanel -> Unit // Handled before the preset and recording gates.
         }
     }
 
     private fun runPresetOperation(operation: suspend () -> Unit) {
-        if (_uiState.value.isPresetBusy || recordingManager.isRecording.value) return
+        if (_uiState.value.isPresetBusy || isRecordingBusy()) return
         _uiState.update { it.copy(isPresetBusy = true) }
         viewModelScope.launch {
             try {
@@ -401,7 +410,6 @@ internal class CameraViewModel(
     }
 
     private fun initializePresets() {
-        _uiState.update { it.copy(isPresetBusy = false) }
         runPresetOperation {
             refreshPresets()
             if (presetDocuments.isEmpty()) createDefaultPreset()
@@ -415,9 +423,8 @@ internal class CameraViewModel(
     }
 
     private suspend fun refreshPresets() {
-        val listing = presetManager.list()
-        presetDocuments = listing.presets
-        _uiState.update { it.copy(presetsList = listing.presets.map { preset -> preset.name }) }
+        presetDocuments = presetManager.list()
+        _uiState.update { it.copy(presetsList = presetDocuments.map { preset -> preset.name }) }
     }
 
     private fun selectSavedPreset(preset: CameraPreset) {
@@ -440,14 +447,15 @@ internal class CameraViewModel(
         if (reset) {
             _uiState.update { it.copy(
                 selectedFps = 30,
-                selectedResolution = com.pilerks1.hdrrecorder.model.Resolution.FHD,
-                selectedAspectRatio = com.pilerks1.hdrrecorder.model.RecordingAspectRatio.FOUR_THREE,
-                manualControlsState = ManualControlsState()
+                selectedResolution = Resolution.FHD,
+                selectedAspectRatio = RecordingAspectRatio.FOUR_THREE,
+                manualControlsState = ManualControlsState(),
+                zoomState = it.zoomState.copy(ratio = 1f)
             ) }
-            _uiState.update { it.copy(zoomState = it.zoomState.copy(ratio = 1f)) }
         }
         applyPreset(preset)
         selectSavedPreset(preset)
+        requestRebind()
     }
 
     private suspend fun applyPreset(preset: CameraPreset) {
@@ -464,40 +472,23 @@ internal class CameraViewModel(
         _uiState.update { it.withPreset(preset).copy(storageUri = destination, isExposureTransitioning = false) }
         preferencesManager.storageUri = destination
         statsManager.updateStorageUri(destination)
-        reconcilePresetControls()
+        normalizeManualControls()
         if (!cameraRuntime.usesCameraHardware) {
             _uiState.update { it.copy(zoomState = it.zoomState.let { zoom ->
                 zoom.copy(ratio = zoom.ratio.coerceIn(zoom.minRatio, zoom.maxRatio))
             }) }
         }
-        triggerRebindForPresets()
     }
 
-    private fun reconcilePresetControls() {
-        val state = _uiState.value
-        val caps = state.cameraCapabilities ?: return
-        val adapted = ManualControlStateUpdater.adaptToCapabilities(state.manualControlsState, caps)
-        val calculated = ManualControlStateUpdater.calculateNextState(
-            ManualControlsState(), caps,
-            ManualControlStateUpdater.ExposureDefaults(adapted.isoValue, adapted.ssValueNanos,
-                adapted.postRawSensitivityBoost ?: 100)
-        ) { adapted }.first
-        val controls = if (calculated.isLowLightBoostEnabled &&
-            ((if (calculated.isManualFps) calculated.fpsRange?.upper ?: state.selectedFps else state.selectedFps) > LOW_LIGHT_BOOST_MAX_FPS ||
-                calculated.isManualIso || calculated.isManualSs)) {
-            calculated.copy(isLowLightBoostEnabled = false)
-        } else calculated
-        _uiState.update { it.copy(manualControlsState = controls) }
-    }
-
-    private fun triggerRebindForPresets() {
-        if (!cameraRuntime.usesCameraHardware) return
-        if (_uiState.value.isSettingsSheetVisible) pendingHardRebind = true
-        else scheduleCameraRebind(debounce = true)
+    private fun normalizeManualControls() {
+        val caps = _uiState.value.cameraCapabilities ?: return
+        _uiState.update {
+            it.copy(manualControlsState = ManualControlStateUpdater.normalize(it.manualControlsState, caps, it.selectedFps))
+        }
     }
 
     private fun updateCamera2Settings(update: (Camera2Settings) -> Camera2Settings) {
-        if (recordingManager.isRecording.value) return
+        if (isRecordingBusy()) return
         val capabilities = _uiState.value.cameraCapabilities?.camera2Modes ?: return
         _uiState.update { state ->
             state.copy(camera2Settings = update(state.camera2Settings).reconcile(capabilities))
@@ -510,30 +501,34 @@ internal class CameraViewModel(
      * Keeps CameraX aligned with the rotation of the Activity's actual display.
      * The Activity itself is sensor-driven by Android (fullSensor), so this callback
      * never decides or requests a screen orientation and never rebinds the camera.
+     * Capture rotation stays frozen for the duration of a recording.
      */
     fun onDisplayRotationChanged(rotation: Int) {
         if (rotation != lastDisplayRotation) controlCoordinator.cancelMetering()
         lastDisplayRotation = rotation
-        if (!cameraRuntime.usesCameraHardware) return
-        CameraRotationPolicy.targetRotation(rotation, _uiState.value.isRecording)
-            ?.let(cameraManager::updateRotation)
+        if (!cameraRuntime.usesCameraHardware || _uiState.value.isRecording) return
+        cameraManager.updateRotation(rotation)
     }
 
     private fun toggleRecording() {
         if (!cameraRuntime.usesCameraHardware) return
         if (_uiState.value.isRecording) {
             recordingManager.stopRecording()
-        } else {
-            if (!_uiState.value.isCameraReady || _uiState.value.isSettingsSheetVisible || pendingHardRebind) return
-            val videoCapture = cameraManager.videoCapture ?: return
-            val targetBitrate = (Bitrate.parse(_uiState.value.bitrate) ?: 0)
+            return
+        }
+        // A scheduled or deferred rebind would interrupt the recording, so it must finish first.
+        if (isRecordingBusy() || cameraRebindJob?.isActive == true || pendingHardRebind) return
+        val state = _uiState.value
+        if (!state.isCameraReady || state.isSettingsSheetVisible) return
+        val videoCapture = cameraManager.videoCapture ?: return
+        recordingStartJob = viewModelScope.launch {
             val result = recordingManager.startRecording(
-                videoCapture, RecordingDestination.fromStorageUri(_uiState.value.storageUri)
+                videoCapture, RecordingDestination.fromStorageUri(state.storageUri)
             )
-            if (result !is RecordingManager.StartResult.Started) return
-            val requestedFps = requestedFpsForStats()
+            if (result !is RecordingManager.StartResult.Started) return@launch
             telemetryCoordinator.startFpsCalculation()
-            statsManager.setRecordingState(true, requestedFps, targetBitrate, result.destination.toStorageUri())
+            statsManager.setRecordingState(true, requestedFpsForStats(), Bitrate.parse(state.bitrate) ?: 0,
+                result.destination.toStorageUri())
         }
     }
 
@@ -591,7 +586,7 @@ internal class CameraViewModel(
 
         if (
             caps != null &&
-            exposureMode(oldControls, caps) != exposureMode(newState, caps)
+            ExposureMode.resolve(oldControls, caps) != ExposureMode.resolve(newState, caps)
         ) {
             beginExposureTransition(
                 oldControls = oldControls,
@@ -605,8 +600,7 @@ internal class CameraViewModel(
 
         _uiState.update { it.copy(manualControlsState = newState) }
 
-        if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
-        else if (triggersRebind) scheduleCameraRebind(debounce = true)
+        if (triggersRebind) requestRebind()
         applyInterop(coalesce = true)
         if (lowLightBoostChanged) applyLowLightBoostPreference()
     }
@@ -618,19 +612,15 @@ internal class CameraViewModel(
         triggersRebind: Boolean,
         lowLightBoostChanged: Boolean
     ) {
-        if (_uiState.value.cameraCapabilities == null) return
         exposureTransitionJob?.cancel()
         val generation = ++exposureTransitionGeneration
-        _uiState.update {
-            it.copy(
-                isExposureTransitioning = true
-            )
-        }
+        _uiState.update { it.copy(isExposureTransitioning = true) }
 
         exposureTransitionJob = viewModelScope.launch {
+            var resolved: ManualControlsState? = null
             try {
-                val result = controlCoordinator.transition(
-                    previous = oldControls.toCameraValues().copy(
+                resolved = controlCoordinator.transition(
+                    previous = oldControls.copy(
                         isoValue = oldControls.isoValue ?: defaults.isoValue,
                         ssValueNanos = oldControls.ssValueNanos ?: defaults.shutterNanos,
                         postRawSensitivityBoost = oldControls.postRawSensitivityBoost ?: defaults.postRawSensitivityBoost
@@ -638,41 +628,41 @@ internal class CameraViewModel(
                     target = desiredState(targetControls),
                     waitToLockAe = _uiState.value.isWaitToLockAeEnabled
                 )
-                if (generation != exposureTransitionGeneration) return@launch
-                _uiState.update {
-                    it.copy(
-                        manualControlsState = it.manualControlsState.withCameraValues(result.controls),
-                        isExposureTransitioning = false
-                    )
-                }
-                if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
-                else if (triggersRebind) scheduleCameraRebind(debounce = true)
-                if (lowLightBoostChanged) applyLowLightBoostPreference()
             } catch (_: CameraRequestSupersededException) {
-                if (generation == exposureTransitionGeneration) {
-                    _uiState.update { it.copy(isExposureTransitioning = false) }
-                }
-            } catch (cancelled: CancellationException) {
-                if (generation == exposureTransitionGeneration) _uiState.update { it.copy(isExposureTransitioning = false) }
-                throw cancelled
+                // A rebind or newer transition owns the camera now.
             } catch (error: Exception) {
+                if (error is CancellationException) throw error
                 reporter.report(IssueCode.CAMERA_CONTROL, "exposureTransition", error)
+            } finally {
                 if (generation == exposureTransitionGeneration) {
-                    _uiState.update { it.copy(isExposureTransitioning = false) }
+                    _uiState.update {
+                        it.copy(
+                            manualControlsState = resolved ?: it.manualControlsState,
+                            isExposureTransitioning = false
+                        )
+                    }
                 }
             }
+            if (resolved == null || generation != exposureTransitionGeneration) return@launch
+            if (triggersRebind) requestRebind()
+            if (lowLightBoostChanged) applyLowLightBoostPreference()
         }
     }
-
-    private fun exposureMode(
-        controls: ManualControlsState,
-        caps: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
-    ): ExposureMode = controlCoordinator.exposureMode(controls.toCameraValues(), caps)
 
     /** Attaches the current lifecycle and starts the initial bind without an arbitrary delay. */
     fun attachCamera(lifecycleOwner: LifecycleOwner, displayRotation: Int) {
         if (!cameraRuntime.usesCameraHardware) return
         val lifecycleChanged = cameraLifecycleOwner !== lifecycleOwner
+        if (lifecycleChanged) {
+            // The owner is the Activity; this ViewModel outlives it and must not retain it.
+            lifecycleOwner.lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onDestroy(owner: LifecycleOwner) {
+                    if (cameraLifecycleOwner !== owner) return
+                    cameraLifecycleOwner = null
+                    cameraRebindJob?.cancel()
+                }
+            })
+        }
         cameraLifecycleOwner = lifecycleOwner
         lastDisplayRotation = displayRotation
         scheduleCameraRebind(debounce = !lifecycleChanged)
@@ -681,6 +671,8 @@ internal class CameraViewModel(
     /**
      * Coalesces quick changes (such as 24 -> 30 -> 60 FPS) but never waits for a guessed camera
      * startup time. CameraManager binds only after the ProcessCameraProvider is actually ready.
+     * While the debounce is pending, recording cannot start; a bind that finds a recording in
+     * progress is deferred until the recording finalizes.
      */
     private fun scheduleCameraRebind(debounce: Boolean) {
         if (!cameraRuntime.usesCameraHardware || !_uiState.value.arePresetsInitialized) return
@@ -690,32 +682,19 @@ internal class CameraViewModel(
         exposureTransitionGeneration++
         _uiState.update { it.copy(isExposureTransitioning = false) }
 
-        val bind = {
+        fun bind() {
+            if (isRecordingBusy()) {
+                pendingHardRebind = true
+                return
+            }
             lowLightBoostApplyJob?.cancel()
             _uiState.update { it.copy(isCameraReady = false) }
             cameraManager.requestBindWhenReady(
                 lifecycleOwner = lifecycleOwner,
                 onSurfaceRequest = { request -> _surfaceRequest.value = request },
-                uiState = _uiState.value,
+                configuration = _uiState.value.toCaptureConfiguration(),
                 displayRotation = lastDisplayRotation,
-                onCameraBound = { caps, previewOptions, previewSettings ->
-                    _uiState.update {
-                        it.copy(
-                            cameraCapabilities = caps,
-                            previewOptions = previewOptions,
-                            previewSettings = previewSettings,
-                            camera2Settings = it.camera2Settings.reconcile(caps.camera2Modes),
-                            manualControlsState = ManualControlStateUpdater.adaptToCapabilities(
-                                it.manualControlsState,
-                                caps
-                            ),
-                            isCameraReady = true
-                        )
-                    }
-                    reconcilePresetControls()
-                    applyInterop()
-                    applyLowLightBoostPreference()
-                }
+                onResult = ::onBindResult
             )
         }
 
@@ -726,6 +705,34 @@ internal class CameraViewModel(
             }
         } else {
             bind()
+        }
+    }
+
+    private fun onBindResult(outcome: BindOutcome) {
+        when (outcome) {
+            is BindOutcome.Bound -> {
+                val caps = outcome.capabilities
+                _uiState.update {
+                    it.copy(
+                        cameraCapabilities = caps,
+                        previewOptions = outcome.previewOptions,
+                        previewSettings = outcome.previewSettings,
+                        camera2Settings = it.camera2Settings.reconcile(caps.camera2Modes),
+                        activePanel = it.activePanel?.takeIf { panel -> panel in availableControlPanels(caps) },
+                        manualControlsState = ManualControlStateUpdater.normalize(
+                            it.manualControlsState, caps, it.selectedFps
+                        ),
+                        isCameraReady = true
+                    )
+                }
+                applyInterop()
+                applyLowLightBoostPreference()
+            }
+            // The rejected settings never reached the camera; show what is actually bound.
+            is BindOutcome.Retained -> _uiState.update {
+                it.withCaptureConfiguration(outcome.configuration).copy(isCameraReady = it.zoomState.isReady)
+            }
+            BindOutcome.Failed -> Unit // Nothing is bound, so the camera remains unready.
         }
     }
 
@@ -741,18 +748,9 @@ internal class CameraViewModel(
         if (
             enabled &&
             caps != null &&
-            exposureMode(controls, caps) != ExposureMode.AUTO
+            ExposureMode.resolve(controls, caps) != ExposureMode.AUTO
         ) {
-            updateManualControls {
-                it.copy(
-                    isManualIso = false,
-                    isoValue = null,
-                    isManualPostRawSensitivity = false,
-                    postRawSensitivityBoost = null,
-                    isManualSs = false,
-                    ssValueNanos = null
-                )
-            }
+            updateManualControls { it.withAutoExposure() }
             viewModelScope.launch {
                 exposureTransitionJob?.join()
                 if (
@@ -776,69 +774,47 @@ internal class CameraViewModel(
             effectiveUpperFps > LOW_LIGHT_BOOST_MAX_FPS
         ) return
 
+        val currentRange = controls.fpsRange
         val adjustedRange = if (
-            enabled &&
-            controls.isManualFps &&
-            (controls.fpsRange?.upper ?: 0) > LOW_LIGHT_BOOST_MAX_FPS
+            enabled && caps != null && controls.isManualFps &&
+            currentRange != null && currentRange.upper > LOW_LIGHT_BOOST_MAX_FPS
         ) {
-            clampManualFpsForLowLightBoost(controls.fpsRange, current.cameraCapabilities)
+            // Without a supported range at or below the boost limit, boost cannot be enabled.
+            clampManualFpsForLowLightBoost(currentRange, caps) ?: return
         } else {
-            controls.fpsRange
+            currentRange
         }
         val needsHardRebind = enabled &&
             !controls.isManualFps &&
             current.selectedFps > LOW_LIGHT_BOOST_MAX_FPS
 
         _uiState.update { state ->
+            val base = if (enabled) state.manualControlsState.withAutoExposure() else state.manualControlsState
             state.copy(
                 selectedFps = if (needsHardRebind) LOW_LIGHT_BOOST_MAX_FPS else state.selectedFps,
-                manualControlsState = state.manualControlsState.copy(
-                    isLowLightBoostEnabled = enabled,
-                    isManualIso = if (enabled) false else state.manualControlsState.isManualIso,
-                    isoValue = if (enabled) null else state.manualControlsState.isoValue,
-                    isManualPostRawSensitivity = if (enabled) {
-                        false
-                    } else {
-                        state.manualControlsState.isManualPostRawSensitivity
-                    },
-                    postRawSensitivityBoost = if (enabled) {
-                        null
-                    } else {
-                        state.manualControlsState.postRawSensitivityBoost
-                    },
-                    isManualSs = if (enabled) false else state.manualControlsState.isManualSs,
-                    ssValueNanos = if (enabled) null else state.manualControlsState.ssValueNanos,
-                    fpsRange = adjustedRange
-                )
+                manualControlsState = base.copy(isLowLightBoostEnabled = enabled, fpsRange = adjustedRange)
             )
         }
 
         applyInterop()
         if (needsHardRebind) {
-            scheduleCameraRebind(debounce = true)
+            requestRebind()
         } else {
             applyLowLightBoostPreference()
         }
     }
 
+    /** Returns null when the camera reports no FPS range compatible with low-light boost. */
     private fun clampManualFpsForLowLightBoost(
-        currentRange: Range<Int>?,
-        capabilities: com.pilerks1.hdrrecorder.data.camera.CameraCapabilities?
-    ): Range<Int> {
-        val oldRange = currentRange ?: Range(
-            LOW_LIGHT_BOOST_MAX_FPS,
-            LOW_LIGHT_BOOST_MAX_FPS
-        )
-        val compatibleRanges = capabilities?.fpsRanges
-            ?.filter { it.upper <= LOW_LIGHT_BOOST_MAX_FPS }
-            .orEmpty()
-        if (compatibleRanges.isEmpty()) {
-            return Range(LOW_LIGHT_BOOST_MAX_FPS, LOW_LIGHT_BOOST_MAX_FPS)
-        }
+        currentRange: Range<Int>,
+        capabilities: CameraCapabilities
+    ): Range<Int>? {
+        val compatibleRanges = capabilities.fpsRanges.filter { it.upper <= LOW_LIGHT_BOOST_MAX_FPS }
+        if (compatibleRanges.isEmpty()) return null
 
         val snapped = FpsRangeMath.clampToSupportedRange(
-            newRange = oldRange.lower.toFloat()..LOW_LIGHT_BOOST_MAX_FPS.toFloat(),
-            oldRange = oldRange.lower.toFloat()..oldRange.upper.toFloat(),
+            newRange = currentRange.lower.toFloat()..LOW_LIGHT_BOOST_MAX_FPS.toFloat(),
+            oldRange = currentRange.lower.toFloat()..currentRange.upper.toFloat(),
             draggedBound = FpsRangeBound.UPPER,
             dragDirection = -1f,
             validRanges = compatibleRanges
@@ -874,7 +850,7 @@ internal class CameraViewModel(
     private fun desiredState(controls: ManualControlsState = _uiState.value.manualControlsState): DesiredCameraState {
         val state = _uiState.value
         return DesiredCameraState(
-            controls = controls.toCameraValues(),
+            controls = controls,
             settings = InteropSettings(
                 gamma = state.gammaSettings.takeIf { state.encoding.supportsGammaCurveSelection },
                 camera2 = state.camera2Settings
@@ -893,7 +869,6 @@ internal class CameraViewModel(
     private var recordingPriority = listOf(RecordingSetting.CODEC, RecordingSetting.BIT_DEPTH, RecordingSetting.ENCODING)
 
     private fun selectVideoConfiguration(touched: RecordingSetting, requested: CameraUiState) {
-        if (recordingManager.isRecording.value) return
         val state = _uiState.value
         val options = state.recordingOptions
         val combinations = options.colorsByVideoCodec.flatMap { (codec, colors) -> colors.map { codec to it } }
@@ -934,6 +909,11 @@ internal class CameraViewModel(
                         targetBitrate = (Bitrate.parse(state.bitrate) ?: 0),
                         storageUri = state.storageUri
                     )
+                    // Apply a rebind that was deferred so it would not interrupt the recording.
+                    if (pendingHardRebind && !state.isSettingsSheetVisible) {
+                        pendingHardRebind = false
+                        scheduleCameraRebind(debounce = false)
+                    }
                 }
             }
         }
@@ -951,7 +931,6 @@ internal class CameraViewModel(
         if (!cameraRuntime.usesCameraHardware) return
         viewModelScope.launch {
             cameraManager.zoomState.collect { zoom ->
-                if (zoom.ratio != _uiState.value.zoomState.ratio) controlCoordinator.onZoomChanged()
                 _uiState.update { it.copy(zoomState = zoom, isCameraReady = zoom.isReady) }
             }
         }
@@ -959,9 +938,6 @@ internal class CameraViewModel(
 
     override fun onCleared() {
         reporter.contextProvider = null
-        cameraRebindJob?.cancel()
-        lowLightBoostApplyJob?.cancel()
-        exposureTransitionJob?.cancel()
         cameraManager.release()
         controlCoordinator.close()
         telemetryCoordinator.cleanup()
@@ -971,7 +947,5 @@ internal class CameraViewModel(
     private companion object {
         const val CAMERA_REBIND_DEBOUNCE_MS = 300L
         const val LOW_LIGHT_BOOST_MAX_FPS = 30
-
     }
-
 }

@@ -1,19 +1,17 @@
 package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
-import android.os.SystemClock
 import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
 import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 import kotlinx.coroutines.CancellationException
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
 import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
 import com.pilerks1.hdrrecorder.model.StorageSample
 import com.pilerks1.hdrrecorder.model.TelemetrySnapshot
-import com.pilerks1.hdrrecorder.model.ThermalPowerSample
 import com.pilerks1.hdrrecorder.model.formatDataSize
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.round
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +29,7 @@ import kotlinx.coroutines.launch
  * performs storage, thermal-headroom, or battery acquisition on that presentation path.
  */
 class StatsManager(
-    private val context: Context,
+    context: Context,
     private val telemetryStore: TelemetryStore,
     private val recordingStorage: RecordingStorageManager,
     private val reporter: ErrorReporter
@@ -39,29 +37,27 @@ class StatsManager(
     private val thermalManager = ThermalManager(context, reporter)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val storageGeneration = AtomicLong(0L)
-    private val telemetryActive = AtomicBoolean(false)
-    private var powerPollingJob: Job? = null
-    private var headroomPollingJob: Job? = null
-    private var idleStoragePollingJob: Job? = null
-    private var storageRefreshJob: Job? = null
+    // Thermal and power polling only run while a camera generation is active.
+    private var thermalPollingJob: Job? = null
 
     init {
-        startPowerPolling()
-        startHeadroomPolling()
-        startIdleStoragePolling()
-        requestStorageRefresh()
-    }
-
-    fun updateStorageUri(uri: String?) {
-        val generation = storageGeneration.incrementAndGet()
-        telemetryStore.updateStorage {
-            it.copy(storageGeneration = generation, uri = uri, baselineAvailableBytes = null)
+        scope.launch {
+            while (isActive) {
+                delay(IDLE_STORAGE_INTERVAL_MS)
+                if (!telemetryStore.snapshot().recording.isRecording) {
+                    refreshStorage(telemetryStore.snapshot().storage.uri)
+                }
+            }
         }
-        requestStorageRefresh(generation, uri)
+        refreshStorage(null)
     }
 
+    fun updateStorageUri(uri: String?) = refreshStorage(uri)
+
+    @Synchronized
     fun setTelemetryActive(active: Boolean) {
-        telemetryActive.set(active)
+        thermalPollingJob?.cancel()
+        thermalPollingJob = if (active) startThermalPolling() else null
     }
 
     fun setRecordingState(
@@ -72,7 +68,6 @@ class StatsManager(
     ) {
         telemetryStore.updateRecording { current ->
             current.copy(
-                capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
                 isRecording = recording,
                 targetFps = targetFps,
                 targetBitrateMbps = targetBitrate,
@@ -83,20 +78,13 @@ class StatsManager(
                 droppedFrames = if (recording) 0 else current.droppedFrames
             )
         }
-
-        val currentStorage = telemetryStore.snapshot().storage
-        if (storageUri != currentStorage.uri) {
-            updateStorageUri(storageUri)
-        } else {
-            requestStorageRefresh()
-        }
+        refreshStorage(storageUri)
     }
 
     /** Called directly from CameraX's recording-status callback. */
     fun updateHardwareStats(bytes: Long, durationNanos: Long, bitrate: Double) {
         telemetryStore.updateRecording {
             it.copy(
-                capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
                 recordedBytes = bytes,
                 hardwareDurationNanos = durationNanos,
                 actualBitrateMbps = bitrate
@@ -163,79 +151,38 @@ class StatsManager(
         )
     }
 
-    private fun startPowerPolling() {
-        powerPollingJob = scope.launch {
-            while (isActive) {
-                if (telemetryActive.get()) {
-                    try {
-                        val state = thermalManager.getInstantThermalState()
-                        telemetryStore.updateThermalPower(
-                            ThermalPowerSample(
-                                capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
-                                thermalStatus = state.thermalStatus,
-                                thermalForecast = state.thermalForecast,
-                                netPowerWatts = state.netPowerWatts
-                            )
-                        )
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: Exception) {
-                        // Keep the last measured sample; a transient read must not kill polling.
-                        reporter.report(IssueCode.TELEMETRY, "powerSample", error, notify = false)
-                    }
-                }
-                delay(POWER_INTERVAL_MS)
+    private fun startThermalPolling(): Job = scope.launch {
+        var sinceHeadroom = HEADROOM_INTERVAL_MS
+        while (isActive) {
+            if (sinceHeadroom >= HEADROOM_INTERVAL_MS) {
+                thermalManager.updateHeadroom()
+                sinceHeadroom = 0L
             }
+            try {
+                telemetryStore.updateThermalPower(thermalManager.getInstantThermalState())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // Keep the last measured sample; a transient read must not kill polling.
+                reporter.report(IssueCode.TELEMETRY, "powerSample", error, notify = false)
+            }
+            delay(POWER_INTERVAL_MS)
+            sinceHeadroom += POWER_INTERVAL_MS
         }
     }
 
-    private fun startHeadroomPolling() {
-        headroomPollingJob = scope.launch {
-            while (isActive) {
-                if (telemetryActive.get()) {
-                    thermalManager.updateHeadroom()
-                }
-                delay(HEADROOM_INTERVAL_MS)
-            }
-        }
-    }
-
-    private fun startIdleStoragePolling() {
-        idleStoragePollingJob = scope.launch {
-            while (isActive) {
-                delay(IDLE_STORAGE_INTERVAL_MS)
-                if (!telemetryStore.snapshot().recording.isRecording) {
-                    requestStorageRefresh()
-                }
-            }
-        }
-    }
-
-    private fun requestStorageRefresh() {
-        val current = telemetryStore.snapshot().storage
+    /**
+     * Provider queries cannot be cancelled, so a late result is rejected by generation alone:
+     * only the most recent request may replace the baseline.
+     */
+    private fun refreshStorage(uri: String?) {
         val generation = storageGeneration.incrementAndGet()
-        telemetryStore.updateStorage {
-            it.copy(storageGeneration = generation, uri = current.uri, baselineAvailableBytes = null)
-        }
-        requestStorageRefresh(generation, current.uri)
-    }
-
-    private fun requestStorageRefresh(generation: Long, uri: String?) {
-        storageRefreshJob?.cancel()
-        storageRefreshJob = scope.launch(Dispatchers.IO) {
+        telemetryStore.updateStorage { StorageSample(storageGeneration = generation, uri = uri) }
+        scope.launch(Dispatchers.IO) {
             val availableBytes = recordingStorage.availableBytes(RecordingDestination.fromStorageUri(uri))
-            if (storageGeneration.get() != generation) return@launch
             telemetryStore.updateStorage { current ->
-                if (current.storageGeneration != generation || current.uri != uri) {
-                    current
-                } else {
-                    StorageSample(
-                        capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
-                        storageGeneration = generation,
-                        uri = uri,
-                        baselineAvailableBytes = availableBytes
-                    )
-                }
+                if (current.storageGeneration != generation) current
+                else current.copy(baselineAvailableBytes = availableBytes)
             }
         }
     }
@@ -263,10 +210,6 @@ class StatsManager(
     }
 
     fun cleanup() {
-        powerPollingJob?.cancel()
-        headroomPollingJob?.cancel()
-        idleStoragePollingJob?.cancel()
-        storageRefreshJob?.cancel()
         try {
             thermalManager.cleanup()
         } catch (error: Exception) {
@@ -283,6 +226,5 @@ class StatsManager(
         const val HEADROOM_INTERVAL_MS = 10_000L
         const val IDLE_STORAGE_INTERVAL_MS = 120_000L
         const val SLOW_DISPLAY_TICKS = 40L
-        const val NANOS_PER_SECOND = 1_000_000_000L
     }
 }

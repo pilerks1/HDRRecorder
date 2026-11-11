@@ -23,18 +23,26 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 
 private val ClipXAxisShape = object : Shape {
@@ -48,6 +56,11 @@ private val ClipXAxisShape = object : Shape {
             )
         )
     }
+}
+
+/** Gesture-owned fling handle; composition never reads it. */
+private class FlingHandle {
+    var job: Job? = null
 }
 
 private data class RibbonTickLayout(
@@ -85,17 +98,22 @@ internal fun ribbonTickLabelTop(
     tickBottom + labelPadding + labelWidth / 2f - labelHeight / 2f
 }
 
+/**
+ * @param modeKey changing this (for example, Auto to manual) cancels a fling in progress.
+ */
 @Composable
 fun RibbonSlider(
     value: Float, // 0f..1f
     onValueChange: (Float) -> Unit,
-    onValueChangeFinished: () -> Unit = {},
     axis: AxisSpec,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    labelString: String = "",
     ruler: SliderRuler,
     layoutLabels: List<String>,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    onValueChangeFinished: () -> Unit = {},
+    enabled: Boolean = true,
+    labelString: String = "",
+    modeKey: Any? = null,
     axisReservation: SliderAxisReservation = SliderAxisReservation()
 ) {
     // ==========================================
@@ -107,7 +125,7 @@ fun RibbonSlider(
 
     val ticks = ruler.ticks
     val textRotation = axis.contentCounterRotationDegrees
-    
+
     val density = LocalDensity.current
     val tickStartYOffsetPx = with(density) { tickStartYOffset.toPx() }
     val tickToTextPaddingPx = with(density) { tickToTextPadding.toPx() }
@@ -146,14 +164,10 @@ fun RibbonSlider(
             .map { layout(it, isMarker = true, auxiliaryLabel = true) }
         (regular + markers).sortedBy(RibbonTickLayout::fraction)
     }
+    // Draw-time scratch storage for auxiliary label bounds; reused instead of allocated per frame.
+    val drawnAuxiliaryLabels = remember { ArrayList<ClosedFloatingPointRange<Float>>() }
     val maximumLiveLabelSize = remember(layoutLabels, density, textMeasurer) {
-        layoutLabels.fold(IntSize.Zero) { maximum, label ->
-            val size = textMeasurer.measure(AnnotatedString(label), style = liveTextStyle).size
-            IntSize(
-                width = maxOf(maximum.width, size.width),
-                height = maxOf(maximum.height, size.height)
-            )
-        }
+        layoutLabels.maxMeasuredSize(textMeasurer, liveTextStyle)
     }
     val sliderTopExtentPx = standardSliderTopExtentPx(
         axis = axis,
@@ -170,105 +184,81 @@ fun RibbonSlider(
         centerIndicatorHalfHeightPx + standardElementGapPx + liveLabelCrossExtentPx / 2f
         )
     val maximumLiveLabelWidth = with(density) { maximumLiveLabelSize.width.toDp() }
-    
+
     val currentVal by rememberUpdatedState(value)
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
-    
+
     val scope = rememberCoroutineScope()
-    val animatable = remember { Animatable(value) }
-    val velocityTracker = remember { VelocityTracker() }
-    
-    var dragAccumulator by remember { mutableFloatStateOf(value) }
-    
-    val sliderContent = @Composable {
-        var sliderSurfaceSize by remember { mutableStateOf(IntSize.Zero) }
-        val labelPrimaryOffset = if (sliderSurfaceSize.width > 0) {
-            val geometry = ribbonAxisGeometry(
-                width = sliderSurfaceSize.width.toFloat(),
-                edgePadding = axisEdgePaddingPx,
-                reservedStart = axisReservedStartPx,
-                reservedEnd = axisReservedEndPx
-            )
-            with(density) {
-                (((geometry.axisStart + geometry.axisEnd) / 2f) - sliderSurfaceSize.width / 2f).toDp()
-            }
-        } else {
-            0.dp
-        }
-        val sliderCrossCenterOffset = if (sliderSurfaceSize.height > 0) {
-            with(density) {
-                (standardPaneEdgePaddingPx + sliderTopExtentPx - sliderSurfaceSize.height / 2f).toDp()
-            }
-        } else {
-            0.dp
-        }
-        val liveLabelCrossOffset = with(density) { liveLabelRelativeCenterPx.toDp() }
+    // The animatable only drives flings; bounds keep decay inside the slider range.
+    val animatable = remember { Animatable(value).apply { updateBounds(0f, 1f) } }
+    val fling = remember { FlingHandle() }
+    DisposableEffect(modeKey, enabled, ruler) {
+        onDispose { fling.job?.cancel() }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
+                .rotateForAxis(axis)
                 .fillMaxSize()
-                .onSizeChanged { sliderSurfaceSize = it }
                 .clip(ClipXAxisShape)
+                .semantics {
+                    this.contentDescription = contentDescription
+                    stateDescription = labelString
+                    progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(0f, 1f), 0f..1f)
+                    if (enabled) {
+                        setProgress { target ->
+                            currentOnValueChange(target.coerceIn(0f, 1f))
+                            currentOnValueChangeFinished()
+                            true
+                        }
+                    } else disabled()
+                }
                 .pointerInput(enabled, axisReservation, ruler, virtualLengthPx) {
                     if (!enabled || ruler.intervalCount <= 0f) return@pointerInput
+                    val velocityTracker = VelocityTracker()
+                    val trackLengthPx = virtualLengthPx.coerceAtLeast(1f)
+                    var dragAccumulator = 0f
                     detectHorizontalDragGestures(
-                        onDragStart = { 
+                        onDragStart = {
+                            fling.job?.cancel()
                             velocityTracker.resetTracking()
                             dragAccumulator = currentVal
-                            scope.launch { animatable.snapTo(dragAccumulator) }
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
                             velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            val trackLengthPx = virtualLengthPx.coerceAtLeast(1f)
-                            dragAccumulator -= (dragAmount / trackLengthPx)
-                            val newValue = dragAccumulator.coerceIn(0f, 1f)
-                            scope.launch { animatable.snapTo(newValue) }
-                            onValueChange(newValue)
+                            // Clamped so reversing at an endpoint responds immediately.
+                            dragAccumulator = (dragAccumulator - dragAmount / trackLengthPx).coerceIn(0f, 1f)
+                            currentOnValueChange(dragAccumulator)
                         },
                         onDragEnd = {
-                            val velocityPx = velocityTracker.calculateVelocity().x
-                            val trackLengthPx = virtualLengthPx.coerceAtLeast(1f)
-                            val velocityInValue = -(velocityPx / trackLengthPx)
-                            
-                            scope.launch {
-                                val decay = exponentialDecay<Float>(frictionMultiplier = 2f)
+                            val velocityInValue = -(velocityTracker.calculateVelocity().x / trackLengthPx)
+                            fling.job = scope.launch {
+                                animatable.snapTo(dragAccumulator)
                                 animatable.animateDecay(
                                     initialVelocity = velocityInValue,
-                                    animationSpec = decay
-                                ) {
-                                    val clamped = this.value.coerceIn(0f, 1f)
-                                    onValueChange(clamped)
-                                    dragAccumulator = clamped
-                                }
-                                
-                                val finalValue = animatable.value.coerceIn(0f, 1f)
+                                    animationSpec = exponentialDecay(frictionMultiplier = 2f)
+                                ) { currentOnValueChange(this.value) }
+
+                                val finalValue = animatable.value
                                 val closestTick = ticks.minByOrNull { abs(it.position - finalValue) }
-                                if (closestTick != null) {
-                                    val distanceToTick = abs(finalValue - closestTick.position)
-                                    if (distanceToTick < 0.01f) {
-                                        animatable.animateTo(
-                                            targetValue = closestTick.position,
-                                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                                        ) {
-                                            val clamped = this.value.coerceIn(0f, 1f)
-                                            onValueChange(clamped)
-                                            dragAccumulator = clamped
-                                        }
-                                    }
+                                if (closestTick != null && abs(finalValue - closestTick.position) < 0.01f) {
+                                    animatable.animateTo(
+                                        targetValue = closestTick.position,
+                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                    ) { currentOnValueChange(this.value) }
                                 }
                                 currentOnValueChangeFinished()
                             }
                         },
-                        onDragCancel = currentOnValueChangeFinished
+                        onDragCancel = { currentOnValueChangeFinished() }
                     )
                 },
             contentAlignment = Alignment.Center
         ) {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(ClipXAxisShape)
-            ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
                 val axisGeometry = ribbonAxisGeometry(
                     width = size.width,
                     edgePadding = axisEdgePaddingPx,
@@ -282,13 +272,18 @@ fun RibbonSlider(
                 clipRect(left = axisGeometry.axisStart, right = axisGeometry.axisEnd) {
                     fun labelHalfExtent(label: TextLayoutResult): Float =
                         (if (textRotation == 0f) label.size.width else label.size.height) / 2f
-                    val regularLabelBounds = tickLayouts.filter { !it.auxiliaryLabel && it.label != null }
-                        .map { tick ->
+                    fun overlaps(start: Float, end: Float, other: ClosedFloatingPointRange<Float>): Boolean =
+                        start < other.endInclusive + labelGapPx && end + labelGapPx > other.start
+                    // Auxiliary labels yield to regular labels and to auxiliary labels already drawn.
+                    fun collides(start: Float, end: Float): Boolean =
+                        tickLayouts.any { tick ->
+                            val label = tick.label
+                            if (tick.auxiliaryLabel || label == null) return@any false
                             val x = centerX + (tick.fraction - value) * totalPanDistancePx
-                            val half = labelHalfExtent(checkNotNull(tick.label))
-                            (x - half)..(x + half)
-                        }
-                    val markerLabelBounds = mutableListOf<ClosedFloatingPointRange<Float>>()
+                            val half = labelHalfExtent(label)
+                            overlaps(start, end, (x - half)..(x + half))
+                        } || drawnAuxiliaryLabels.any { overlaps(start, end, it) }
+                    drawnAuxiliaryLabels.clear()
                     tickLayouts.forEach { tick ->
                         val tickX = centerX + (tick.fraction - value) * totalPanDistancePx
                         if (tickX < axisGeometry.axisStart || tickX > axisGeometry.axisEnd) return@forEach
@@ -312,18 +307,14 @@ fun RibbonSlider(
                                 x = tickX - label.size.width / 2f,
                                 y = labelTop
                             )
-                            val labelPrimaryHalfExtent = labelHalfExtent(label)
-                            val labelBounds = (tickX - labelPrimaryHalfExtent)..(tickX + labelPrimaryHalfExtent)
-                            val collision = tick.auxiliaryLabel &&
-                                (regularLabelBounds + markerLabelBounds).any { bounds ->
-                                    labelBounds.start < bounds.endInclusive + labelGapPx &&
-                                        labelBounds.endInclusive + labelGapPx > bounds.start
-                                }
+                            val half = labelHalfExtent(label)
+                            val start = tickX - half
+                            val end = tickX + half
                             if (
-                                !collision && tickX - labelPrimaryHalfExtent >= axisGeometry.axisStart &&
-                                tickX + labelPrimaryHalfExtent <= axisGeometry.axisEnd
+                                !(tick.auxiliaryLabel && collides(start, end)) &&
+                                start >= axisGeometry.axisStart && end <= axisGeometry.axisEnd
                             ) {
-                                if (tick.auxiliaryLabel) markerLabelBounds.add(labelBounds)
+                                if (tick.auxiliaryLabel) drawnAuxiliaryLabels.add(start..end)
                                 rotate(
                                     degrees = textRotation,
                                     pivot = Offset(tickX, topLeft.y + label.size.height / 2f)
@@ -342,7 +333,7 @@ fun RibbonSlider(
                     strokeWidth = 2.dp.toPx()
                 )
             }
-            
+
             if (labelString.isNotEmpty()) {
                 Text(
                     text = labelString,
@@ -350,20 +341,29 @@ fun RibbonSlider(
                     maxLines = 1,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier
+                        // Offsets depend on the slider surface size (the incoming constraints), so
+                        // they are resolved during layout instead of feeding a size back into composition.
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            val surfaceWidth = constraints.maxWidth.toFloat()
+                            val surfaceHeight = constraints.maxHeight.toFloat()
+                            val geometry = ribbonAxisGeometry(
+                                width = surfaceWidth,
+                                edgePadding = axisEdgePaddingPx,
+                                reservedStart = axisReservedStartPx,
+                                reservedEnd = axisReservedEndPx
+                            )
+                            val x = (geometry.axisStart + geometry.axisEnd) / 2f - surfaceWidth / 2f
+                            val y = standardPaneEdgePaddingPx + sliderTopExtentPx - surfaceHeight / 2f +
+                                liveLabelRelativeCenterPx
+                            layout(placeable.width, placeable.height) {
+                                placeable.placeRelative(x.roundToInt(), y.roundToInt())
+                            }
+                        }
                         .width(maximumLiveLabelWidth)
-                        .offset(
-                            x = labelPrimaryOffset,
-                            y = sliderCrossCenterOffset + liveLabelCrossOffset
-                        )
                         .graphicsLayer { rotationZ = textRotation }
                 )
             }
-        }
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Box(modifier = Modifier.rotateForAxis(axis)) {
-            sliderContent()
         }
     }
 }

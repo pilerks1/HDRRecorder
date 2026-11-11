@@ -18,6 +18,7 @@ class AvailableControlPanelsTest {
         assertEquals(
             listOf(
                 CameraControlPanel.RESOLUTION,
+                CameraControlPanel.ZOOM,
                 CameraControlPanel.SHUTTER,
                 CameraControlPanel.ISO,
                 CameraControlPanel.EXPOSURE_COMPENSATION,
@@ -30,9 +31,9 @@ class AvailableControlPanelsTest {
     }
 
     @Test
-    fun resolutionPanelIsAlwaysAvailable() {
+    fun resolutionAndZoomPanelsAreAlwaysAvailable() {
         assertEquals(
-            listOf(CameraControlPanel.RESOLUTION),
+            listOf(CameraControlPanel.RESOLUTION, CameraControlPanel.ZOOM),
             orderedControlPanels(false, false, false, false, false)
         )
     }

@@ -4,6 +4,7 @@ import android.hardware.camera2.CameraMetadata as AndroidCameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import androidx.annotation.RequiresApi
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
 import com.pilerks1.hdrrecorder.model.TonemapCurves
 import com.pilerks1.hdrrecorder.model.GammaCurve
 import com.pilerks1.hdrrecorder.model.GammaMode
@@ -63,21 +64,14 @@ object CameraRequestCompiler {
                 exposureCompensationIndex(state, capabilities)
             )
         }
-        val manualShutter = state.isManualSs &&
-            state.ssValueNanos != null &&
-            capabilities?.hasManualShutterControl == true
-        val manualIso = state.isManualIso &&
-            state.isoValue != null &&
-            capabilities?.hasManualIsoControl == true
-
-        when {
-            manualShutter && manualIso && capabilities.supportsFullManualExposure -> {
+        when (ExposureMode.resolve(state, capabilities)) {
+            ExposureMode.FULL_MANUAL -> if (state.ssValueNanos != null && state.isoValue != null) {
                 builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
                 builder.set(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
                 if (
                     state.postRawSensitivityBoost != null &&
                     state.isManualPostRawSensitivity &&
-                    capabilities.supportsPostRawSensitivityBoost
+                    capabilities?.supportsPostRawSensitivityBoost == true
                 ) {
                     builder.set(
                         CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
@@ -89,21 +83,17 @@ object CameraRequestCompiler {
                     AndroidCameraMetadata.CONTROL_AE_MODE_OFF
                 )
             }
-            manualShutter && !manualIso &&
-                capabilities.supportsShutterPriorityAe &&
-                Build.VERSION.SDK_INT >= 36 -> {
+            ExposureMode.SHUTTER_PRIORITY -> if (state.ssValueNanos != null && Build.VERSION.SDK_INT >= 36) {
                 builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, state.ssValueNanos)
                 applyHybridAe(builder, usesShutterPriority = true)
             }
-            manualIso && !manualShutter &&
-                capabilities.supportsIsoPriorityAe &&
-                Build.VERSION.SDK_INT >= 36 -> {
+            ExposureMode.SENSITIVITY_PRIORITY -> if (state.isoValue != null && Build.VERSION.SDK_INT >= 36) {
                 builder.set(CaptureRequest.SENSOR_SENSITIVITY, state.isoValue)
                 applyHybridAe(builder, usesShutterPriority = false)
             }
             // CameraX owns automatic AE, including low-light boost. Omitting the Camera2
             // override here also clears a previous manual/hybrid AE override.
-            else -> Unit
+            ExposureMode.AUTO -> Unit
         }
     }
 
@@ -175,12 +165,10 @@ object CameraRequestCompiler {
         capabilities: CameraCapabilities?
     ) {
         if (state.isManualFps && state.fpsRange != null) {
-            val fullManual = state.isManualIso &&
-                state.isManualSs &&
-                capabilities?.supportsFullManualExposure == true
+            val fullManual = ExposureMode.resolve(state, capabilities) == ExposureMode.FULL_MANUAL
             if (fullManual) {
                 val requestedDuration = NANOS_PER_SECOND / state.fpsRange.upper.coerceAtLeast(1)
-                val frameDuration = capabilities.maxFrameDurationNanos
+                val frameDuration = capabilities?.maxFrameDurationNanos
                     ?.let(requestedDuration::coerceAtMost)
                     ?: requestedDuration
                 builder.set(
@@ -219,15 +207,12 @@ object CameraRequestCompiler {
         when (mode) {
             GammaMode.GAMMA_VALUE -> builder.set(CaptureRequest.TONEMAP_GAMMA, settings.value)
             GammaMode.CONTRAST_CURVE -> builder.set(CaptureRequest.TONEMAP_CURVE, when (settings.curve) {
-                GammaCurve.HLG -> TonemapCurves.hlg()
-                GammaCurve.PQ -> TonemapCurves.pq()
-                GammaCurve.CUSTOM -> TonemapCurves.custom()
-                GammaCurve.AUTO -> error("Select an explicit contrast curve")
+                GammaCurve.HLG -> TonemapCurves.hlg
+                GammaCurve.PQ -> TonemapCurves.pq
+                GammaCurve.CUSTOM -> TonemapCurves.custom
             })
             GammaMode.PRESET_CURVE -> builder.set(CaptureRequest.TONEMAP_PRESET_CURVE, settings.preset.camera2Value)
             GammaMode.FAST, GammaMode.HIGH_QUALITY -> Unit
         }
     }
-
-    private const val NANOS_PER_SECOND = 1_000_000_000L
 }

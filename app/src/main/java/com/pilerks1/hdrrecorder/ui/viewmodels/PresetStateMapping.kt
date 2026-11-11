@@ -1,8 +1,8 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
+import com.pilerks1.hdrrecorder.data.CaptureConfiguration
 import com.pilerks1.hdrrecorder.model.*
 import com.pilerks1.hdrrecorder.ui.CameraUiState
-import com.pilerks1.hdrrecorder.ui.ManualControlsState
 
 internal fun CameraUiState.toPreset(id: String, name: String) = CameraPreset(
     id = id,
@@ -31,22 +31,7 @@ internal fun CameraUiState.toPreset(id: String, name: String) = CameraPreset(
         selectedResolution = selectedResolution,
         selectedAspectRatio = selectedAspectRatio,
         zoomRatio = zoomState.ratio,
-        isManualIso = manualControlsState.isManualIso,
-        isoValue = manualControlsState.isoValue,
-        isManualPostRawSensitivity = manualControlsState.isManualPostRawSensitivity,
-        postRawSensitivityBoost = manualControlsState.postRawSensitivityBoost,
-        isManualSs = manualControlsState.isManualSs,
-        ssValueNanos = manualControlsState.ssValueNanos,
-        isManualEv = manualControlsState.isManualEv,
-        evValueIndex = manualControlsState.evValueIndex,
-        isLowLightBoostEnabled = manualControlsState.isLowLightBoostEnabled,
-        isManualFocus = manualControlsState.isManualFocus,
-        focusDistanceDiopters = manualControlsState.focusDistanceDiopters,
-        isManualWb = manualControlsState.isManualWb,
-        wbTemp = manualControlsState.wbTemp,
-        wbTint = manualControlsState.wbTint,
-        isManualFps = manualControlsState.isManualFps,
-        fpsRange = manualControlsState.fpsRange
+        controls = manualControlsState
     )
 )
 
@@ -76,23 +61,44 @@ internal fun CameraUiState.withPreset(preset: CameraPreset): CameraUiState {
         selectedFps = recording?.selectedFps ?: selectedFps,
         selectedResolution = recording?.selectedResolution ?: selectedResolution,
         selectedAspectRatio = recording?.selectedAspectRatio ?: selectedAspectRatio,
-        manualControlsState = if (recording == null) manualControlsState else ManualControlsState(
-            isManualIso = recording.isManualIso,
-            isoValue = recording.isoValue,
-            isManualPostRawSensitivity = recording.isManualPostRawSensitivity,
-            postRawSensitivityBoost = recording.postRawSensitivityBoost,
-            isManualSs = recording.isManualSs,
-            ssValueNanos = recording.ssValueNanos,
-            isManualEv = recording.isManualEv,
-            evValueIndex = recording.evValueIndex,
-            isLowLightBoostEnabled = recording.isLowLightBoostEnabled,
-            isManualFocus = recording.isManualFocus,
-            focusDistanceDiopters = recording.focusDistanceDiopters,
-            isManualWb = recording.isManualWb,
-            wbTemp = recording.wbTemp,
-            wbTint = recording.wbTint,
-            isManualFps = recording.isManualFps,
-            fpsRange = recording.fpsRange
-        )
+        manualControlsState = recording?.controls ?: manualControlsState
     )
 }
+
+/** The data-layer view of everything the bound camera session depends on. */
+internal fun CameraUiState.toCaptureConfiguration() = CaptureConfiguration(
+    fps = selectedFps,
+    manualFpsRange = manualControlsState.fpsRange.takeIf { manualControlsState.isManualFps },
+    resolution = selectedResolution,
+    aspectRatio = selectedAspectRatio,
+    encoding = encoding,
+    bitDepth = videoBitDepth,
+    videoCodec = videoCodec,
+    audioCodec = audioCodec,
+    bitrate = bitrate,
+    audioBitrate = audioBitrate,
+    isStabilizationEnabled = isStabilizationEnabled,
+    previewSettings = previewSettings,
+    isExtendManualRangesEnabled = isExtendManualRangesEnabled,
+    zoomRatio = zoomState.ratio
+)
+
+/** Restores session-defining settings from a retained session; zoom keeps its live value. */
+internal fun CameraUiState.withCaptureConfiguration(config: CaptureConfiguration) = copy(
+    selectedFps = config.fps,
+    selectedResolution = config.resolution,
+    selectedAspectRatio = config.aspectRatio,
+    encoding = config.encoding,
+    videoBitDepth = config.bitDepth,
+    videoCodec = config.videoCodec,
+    audioCodec = config.audioCodec,
+    bitrate = config.bitrate,
+    audioBitrate = config.audioBitrate,
+    isStabilizationEnabled = config.isStabilizationEnabled,
+    previewSettings = config.previewSettings,
+    isExtendManualRangesEnabled = config.isExtendManualRangesEnabled,
+    manualControlsState = manualControlsState.copy(
+        isManualFps = config.manualFpsRange != null,
+        fpsRange = config.manualFpsRange
+    )
+)

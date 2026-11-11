@@ -14,12 +14,13 @@ enum class CameraLayoutMode {
 }
 
 /** All orientation-dependent presentation values, derived once at the screen boundary. */
-data class AxisSpec(
-    val orientation: CameraOrientation,
-    val contentCounterRotationDegrees: Float
-) {
+data class AxisSpec(val orientation: CameraOrientation) {
     val usesVerticalTrack: Boolean
         get() = orientation == CameraOrientation.LANDSCAPE
+
+    /** Content drawn along the vertical track is rotated back to stay upright. */
+    val contentCounterRotationDegrees: Float
+        get() = if (usesVerticalTrack) 90f else 0f
 }
 
 data class EdgeInsets(
@@ -52,10 +53,8 @@ data class LayoutRect(
     }
 }
 
-data class ActionRailSpec(
-    val buttonSize: Float,
-    val requiredThickness: Float
-)
+/** The rail is exactly one button thick. */
+data class ActionRailSpec(val buttonSize: Float)
 
 data class CameraLayoutSpec(
     val mode: CameraLayoutMode,
@@ -64,26 +63,24 @@ data class CameraLayoutSpec(
     val stats: LayoutRect,
     val secondaryControls: LayoutRect,
     val expandedPanel: LayoutRect,
-    val maximumPanelReservation: LayoutRect,
     val primaryActions: LayoutRect,
     val manualReset: LayoutRect,
     val lowLightBoostIndicator: LayoutRect,
     val actionRail: ActionRailSpec
 )
 
-/** Pure responsive geometry used by the Compose camera layout and JVM tests. */
 /** Shared by button rendering and the layout space reserved for those buttons. */
 object PrimaryActionSizes {
     const val RECORD_BUTTON_DP = 56f
     const val SECONDARY_ACTION_DP = 36f
 }
 
+/** Pure responsive geometry used by the Compose camera layout and JVM tests. */
 object CameraLayoutCalculator {
     private const val PREFERRED_BUTTON_DP = 54f
     private const val MIN_BUTTON_DP = 36f
     private const val PRIMARY_ACTION_INSET_DP = 4f
     private const val STATS_GAP_DP = 2f
-    private const val PRIMARY_ACTION_GAP_DP = 0f
     private const val LOW_LIGHT_BOOST_INDICATOR_DP = 16f
     private const val LOW_LIGHT_BOOST_INDICATOR_INSET_DP = 8f
     private const val MANUAL_RESET_WIDTH_DP = 32f
@@ -91,11 +88,7 @@ object CameraLayoutCalculator {
     private const val MANUAL_RESET_INSET_DP = 8f
 
     fun axisFor(widthPx: Int, heightPx: Int): AxisSpec {
-        val orientation = if (widthPx > heightPx) CameraOrientation.LANDSCAPE else CameraOrientation.PORTRAIT
-        return AxisSpec(
-            orientation = orientation,
-            contentCounterRotationDegrees = if (orientation == CameraOrientation.LANDSCAPE) 90f else 0f
-        )
+        return AxisSpec(if (widthPx > heightPx) CameraOrientation.LANDSCAPE else CameraOrientation.PORTRAIT)
     }
 
     fun calculate(
@@ -232,9 +225,9 @@ object CameraLayoutCalculator {
         val crossLength = if (axis.usesVerticalTrack) root.height else root.width
         val actionRail = actionRailSpec(buttonCount, crossLength, density, maximumButtonSize)
         val controls = if (axis.usesVerticalTrack) {
-            LayoutRect(root.right - actionRail.requiredThickness, root.top, root.right, root.bottom)
+            LayoutRect(root.right - actionRail.buttonSize, root.top, root.right, root.bottom)
         } else {
-            LayoutRect(root.left, root.bottom - actionRail.requiredThickness, root.right, root.bottom)
+            LayoutRect(root.left, root.bottom - actionRail.buttonSize, root.right, root.bottom)
         }
         val expandedPanel = panelRect(
             controls = controls,
@@ -302,16 +295,12 @@ object CameraLayoutCalculator {
         density: Float,
         maximumButtonSize: Float
     ): ActionRailSpec {
-        if (count <= 0) return ActionRailSpec(0f, 0f)
+        if (count <= 0) return ActionRailSpec(0f)
 
         val usableLength = availableLength.coerceAtLeast(0f)
         val preferredSize = minOf(PREFERRED_BUTTON_DP * density, maximumButtonSize.coerceAtLeast(0f))
         val fittingSize = usableLength / count
-        val buttonSize = minOf(preferredSize, fittingSize)
-        return ActionRailSpec(
-            buttonSize = buttonSize,
-            requiredThickness = buttonSize
-        )
+        return ActionRailSpec(buttonSize = minOf(preferredSize, fittingSize))
     }
 
     private fun shrinkStageButtonSizeLimit(
@@ -341,17 +330,8 @@ object CameraLayoutCalculator {
         val recordSize = PrimaryActionSizes.RECORD_BUTTON_DP * density
         val secondarySize = PrimaryActionSizes.SECONDARY_ACTION_DP * density
         val crossSize = maxOf(recordSize, secondarySize)
-        val gap = PRIMARY_ACTION_GAP_DP * density
-        val groupLength = recordSize + gap + secondarySize
-        val panelLength = primaryLength(expandedPanel, axis)
-        val panelOverlapsPreview = panelLength > 0f &&
-            primaryStart(expandedPanel, axis) < primaryEnd(preview, axis) &&
-            primaryEnd(expandedPanel, axis) > primaryStart(preview, axis)
-        val trailingBoundary = if (panelOverlapsPreview) {
-            minOf(primaryEnd(preview, axis), primaryStart(expandedPanel, axis))
-        } else {
-            primaryEnd(preview, axis)
-        }
+        val groupLength = recordSize + secondarySize
+        val trailingBoundary = trailingBoundary(preview, expandedPanel, axis)
         return if (axis.usesVerticalTrack) {
             val top = preview.top + (preview.height - groupLength) / 2f
             LayoutRect(
@@ -368,6 +348,18 @@ object CameraLayoutCalculator {
                 left + groupLength,
                 trailingBoundary - inset
             )
+        }
+    }
+
+    /** The preview edge nearest the controls, moved in to the expanded panel when it overlaps. */
+    private fun trailingBoundary(preview: LayoutRect, expandedPanel: LayoutRect, axis: AxisSpec): Float {
+        val panelOverlapsPreview = primaryLength(expandedPanel, axis) > 0f &&
+            primaryStart(expandedPanel, axis) < primaryEnd(preview, axis) &&
+            primaryEnd(expandedPanel, axis) > primaryStart(preview, axis)
+        return if (panelOverlapsPreview) {
+            minOf(primaryEnd(preview, axis), primaryStart(expandedPanel, axis))
+        } else {
+            primaryEnd(preview, axis)
         }
     }
 
@@ -394,15 +386,7 @@ object CameraLayoutCalculator {
         val width = MANUAL_RESET_WIDTH_DP * density
         val height = MANUAL_RESET_HEIGHT_DP * density
         val inset = MANUAL_RESET_INSET_DP * density
-        val panelLength = primaryLength(expandedPanel, axis)
-        val panelOverlapsPreview = panelLength > 0f &&
-            primaryStart(expandedPanel, axis) < primaryEnd(preview, axis) &&
-            primaryEnd(expandedPanel, axis) > primaryStart(preview, axis)
-        val trailingBoundary = if (panelOverlapsPreview) {
-            minOf(primaryEnd(preview, axis), primaryStart(expandedPanel, axis))
-        } else {
-            primaryEnd(preview, axis)
-        }
+        val trailingBoundary = trailingBoundary(preview, expandedPanel, axis)
         return if (axis.usesVerticalTrack) {
             LayoutRect(
                 left = trailingBoundary - inset - width,
@@ -433,7 +417,6 @@ object CameraLayoutCalculator {
         stats = geometry.stats,
         secondaryControls = geometry.controls,
         expandedPanel = geometry.expandedPanel,
-        maximumPanelReservation = geometry.maximumPanelReservation,
         primaryActions = primaryActions(preview, geometry.expandedPanel, axis, density),
         manualReset = manualReset(preview, geometry.expandedPanel, axis, density),
         lowLightBoostIndicator = lowLightBoostIndicator(preview, density),

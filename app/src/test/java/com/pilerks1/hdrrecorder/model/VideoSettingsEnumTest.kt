@@ -6,29 +6,26 @@ import org.junit.Test
 
 class VideoSettingsEnumTest {
     @Test
-    fun encodingReadsStableAndLegacyPresetValues() {
+    fun encodingReadsStablePresetValues() {
         assertEquals(VideoEncoding.HDR10_PLUS, VideoEncoding.fromStorageId("hdr10_plus"))
-        assertEquals(VideoEncoding.HDR10_PLUS, VideoEncoding.fromStorageId("HDR10+"))
         assertNull(VideoEncoding.fromStorageId("unsupported"))
     }
 
     @Test
-    fun gammaCurveReadsStableAndLegacyPresetValues() {
-        assertEquals(GammaCurve.AUTO, GammaCurve.fromStorageId("auto"))
-        assertEquals(GammaCurve.AUTO, GammaCurve.fromStorageId("Auto"))
+    fun gammaCurveReadsStablePresetValues() {
+        assertEquals(GammaCurve.HLG, GammaCurve.fromStorageId("hlg"))
+        assertEquals(GammaCurve.PQ, GammaCurve.fromStorageId("pq"))
     }
 
     @Test
-    fun resolutionReadsThePreviousHighestPresetName() {
+    fun resolutionReadsTheHighestStorageId() {
         assertEquals(Resolution.HIGHEST, Resolution.fromStorageId("highest"))
-        assertEquals(Resolution.HIGHEST, Resolution.fromStorageId("MAX"))
-        assertEquals(Resolution.HIGHEST, Resolution.fromStorageId("Highest"))
     }
 
     @Test
-    fun recordingAspectRatioReadsStableAndDisplayValues() {
+    fun recordingAspectRatioReadsStableValues() {
         assertEquals(RecordingAspectRatio.FOUR_THREE, RecordingAspectRatio.fromStorageId("4_3"))
-        assertEquals(RecordingAspectRatio.SIXTEEN_NINE, RecordingAspectRatio.fromStorageId("16:9"))
+        assertEquals(RecordingAspectRatio.SIXTEEN_NINE, RecordingAspectRatio.fromStorageId("16_9"))
         assertNull(RecordingAspectRatio.fromStorageId("unsupported"))
     }
 }

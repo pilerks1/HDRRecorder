@@ -1,5 +1,7 @@
 package com.pilerks1.hdrrecorder.data
 
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
+
 /** Pure, target-optional frame-rate math used by [StatsManager]. */
 internal object FrameRateEstimator {
     data class Sample(val effectiveFps: Int, val droppedFrames: Int?)
@@ -13,6 +15,4 @@ internal object FrameRateEstimator {
         }
         return Sample(effectiveFps, droppedFrames)
     }
-
-    private const val NANOS_PER_SECOND = 1_000_000_000L
 }

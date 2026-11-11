@@ -29,7 +29,7 @@ class SliderScaleTest {
         val scale = SliderScales.shutterRange(50_000L, 1_000_000_000L)
 
         assertTrue("1/20000" in scale.layoutLabels)
-        assertTrue("1.0s" in scale.layoutLabels)
+        assertTrue("1s" in scale.layoutLabels)
     }
 
     @Test
@@ -45,24 +45,24 @@ class SliderScaleTest {
     fun ticksAreUniqueAndNormalized() {
         val scale = SliderScales.tint()
 
-        assertEquals(scale.ticks.size, scale.ticks.map { it.position }.distinct().size)
-        assertTrue(scale.ticks.all { it.position in 0f..1f })
+        assertEquals(scale.ruler.ticks.size, scale.ruler.ticks.map { it.position }.distinct().size)
+        assertTrue(scale.ruler.ticks.all { it.position in 0f..1f })
     }
 
     @Test
     fun standardTicksAreSparseAndVisuallyLinear() {
-        val ticks = SliderScales.isoRange(100, 6400).ticks
+        val ticks = SliderScales.isoRange(100, 6400).ruler.ticks
 
-        assertEquals(15, ticks.size)
+        assertEquals(13, ticks.size)
         ticks.zipWithNext().forEach { (first, second) ->
-            assertEquals(1f / 14f, second.position - first.position, 0.0001f)
+            assertEquals(1f / 12f, second.position - first.position, 0.0001f)
         }
         assertEquals(800, SliderScales.isoRange(100, 6400).value(0.5f))
     }
 
     @Test
     fun labelsAppearEverySecondTickWithoutRepeating() {
-        val ticks = SliderScales.tint().ticks
+        val ticks = SliderScales.tint().ruler.ticks
         val labels = ticks.map { it.label }
 
         labels.forEachIndexed { index, label ->
@@ -81,14 +81,14 @@ class SliderScaleTest {
             stepDenominator = 10
         )
 
-        val representedIndices = scale.ticks.map { scale.value(it.position) }
-        assertEquals(61, scale.ticks.size)
+        val representedIndices = scale.ruler.ticks.map { scale.value(it.position) }
+        assertEquals(61, scale.ruler.ticks.size)
         assertEquals((-30..30).toList(), representedIndices)
         assertEquals(representedIndices.size, representedIndices.distinct().size)
         assertTrue(-30 in representedIndices)
         assertTrue(0 in representedIndices)
         assertTrue(30 in representedIndices)
-        scale.ticks.forEach { tick ->
+        scale.ruler.ticks.forEach { tick ->
             assertEquals(tick.position, scale.progress(scale.value(tick.position)), 0.000001f)
         }
         assertEquals("-3.0", scale.formatValue(-30))
@@ -97,8 +97,8 @@ class SliderScaleTest {
         assertEquals("+0.3", scale.formatValue(3))
         assertEquals("+3.0", scale.formatValue(30))
         assertEquals(
-            listOf("-3.0", "-2.0", "-1.0", "0.0", "+1.0", "+2.0", "+3.0"),
-            scale.ticks.map { it.label }.filter(String::isNotEmpty)
+            (-30..30 step 2).map(scale.formatValue),
+            scale.ruler.ticks.map { it.label }.filter(String::isNotEmpty)
         )
     }
 

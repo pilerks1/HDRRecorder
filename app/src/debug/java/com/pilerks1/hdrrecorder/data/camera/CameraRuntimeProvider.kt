@@ -8,7 +8,6 @@ import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
 import com.pilerks1.hdrrecorder.data.camera.core.ZoomShortcut
 import com.pilerks1.hdrrecorder.data.camera.core.DefaultCameraInventory
-import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
 
 /** Selects the optional UI testbed for debuggable builds. */
 internal object CameraRuntimeProvider {
@@ -35,9 +34,6 @@ private class UiTestbedCameraRuntime : CameraRuntime {
         currentState: CameraUiState
     ): CameraRuntimeEventResult {
         val replacement = when (event) {
-            is CameraUiEvent.SetLinearZoom -> currentState.copy(zoomState = currentState.zoomState.let {
-                it.copy(ratio = ZoomMapping.ratio(event.progress, it.minRatio, it.maxRatio))
-            })
             is CameraUiEvent.SelectZoomLens -> currentState.zoomState.shortcuts
                 .firstOrNull { it.cameraId == event.cameraId }?.zoomRatio
                 ?.let { currentState.copy(zoomState = currentState.zoomState.copy(ratio = it)) }
@@ -55,7 +51,6 @@ private class UiTestbedCameraRuntime : CameraRuntime {
     }
 
     private fun newTestbedState(): CameraUiState = CameraUiState(
-        isCameraHardwareEnabled = false,
         previewPlaceholderLabel = "UI TESTBED — NO CAMERA",
         cameraCapabilities = allControlsCapabilities,
         zoomState = testbedZoomState
@@ -67,7 +62,7 @@ private class UiTestbedCameraRuntime : CameraRuntime {
             val lenses = factors.map { factor ->
                 ZoomShortcut("testbed-$factor", factor)
             }
-            CameraZoomState(DefaultCameraInventory("testbed-main", lenses.map { it.cameraId }.toSet(), lenses), 1f, 0.5f, 10f, true)
+            CameraZoomState(DefaultCameraInventory("testbed-main", lenses), 1f, 0.5f, 10f, true)
         }
 
         private val allControlsCapabilities = CameraCapabilities(
@@ -85,7 +80,6 @@ private class UiTestbedCameraRuntime : CameraRuntime {
                 Range(120, 120)
             ),
             maxFrameDurationNanos = 30_000_000_000L,
-            supportsManualSensor = true,
             supportsFullManualExposure = true,
             hasManualIsoControl = true,
             hasManualShutterControl = true,

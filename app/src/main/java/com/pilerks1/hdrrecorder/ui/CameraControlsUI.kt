@@ -13,172 +13,109 @@ import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpSize
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.AxisStack
-import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
 import com.pilerks1.hdrrecorder.ui.layout.PrimaryActionSizes
-import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
-import com.pilerks1.hdrrecorder.ui.manualcontrols.ActiveControlPanel
-import com.pilerks1.hdrrecorder.ui.manualcontrols.SecondaryControlsRail
 import com.pilerks1.hdrrecorder.ui.manualcontrols.SliderPaneStyle
-import com.pilerks1.hdrrecorder.ui.manualcontrols.availableControlPanels
 
+/** Camera buttons use their visible bounds for both layout and touch input. */
 @Composable
-fun ExpandedControlPanelUI(
-    uiState: CameraUiState,
-    actions: CameraActions,
-    axis: AxisSpec,
-    contentInsets: EdgeInsets,
-    modifier: Modifier = Modifier
-) {
-    ActiveControlPanel(
-        state = uiState.manualControlsState,
-        zoomState = uiState.zoomState,
-        onLinearZoomChange = { actions.onEvent(CameraUiEvent.SetLinearZoom(it)) },
-        onSelectZoomLens = { actions.onEvent(CameraUiEvent.SelectZoomLens(it)) },
-        caps = uiState.cameraCapabilities,
-        cameraTelemetry = actions.sliderTelemetry,
-        isRecording = uiState.isRecording,
-        selectedResolution = uiState.selectedResolution,
-        selectedAspectRatio = uiState.selectedAspectRatio,
-        axis = axis,
-        contentInsets = contentInsets,
-        onCycleResolution = { actions.onEvent(CameraUiEvent.CycleResolution) },
-        onCycleAspectRatio = { actions.onEvent(CameraUiEvent.CycleAspectRatio) },
-        onSetIso = { isManual, value -> actions.onManualControlsChange { it.copy(isManualIso = isManual, isoValue = value) } },
-        onSetPostRawSensitivity = { isManual, value ->
-            actions.onManualControlsChange {
-                it.copy(
-                    isManualPostRawSensitivity = isManual,
-                    postRawSensitivityBoost = value
-                )
-            }
-        },
-        onSetSs = { isManual, value -> actions.onManualControlsChange { it.copy(isManualSs = isManual, ssValueNanos = value) } },
-        onSetEv = { isManual, value -> actions.onManualControlsChange { it.copy(isManualEv = isManual, evValueIndex = value ?: 0) } },
-        onSetLowLightBoost = { enabled -> actions.onEvent(CameraUiEvent.SetLowLightBoost(enabled)) },
-        onSetFocus = { isManual, value -> actions.onManualControlsChange { it.copy(isManualFocus = isManual, focusDistanceDiopters = value) } },
-        onSetWb = { isManual, temp, tint -> actions.onManualControlsChange { it.copy(isManualWb = isManual, wbTemp = temp, wbTint = tint) } },
-        onSetFps = { isManual, range ->
-            actions.onManualControlsChange {
-                it.copy(isManualFps = isManual, fpsRange = range)
-            }
-            actions.onManualControlInteractionFinished()
-        },
-        autoFps = uiState.selectedFps,
-        onCycleFps = {
-            if (uiState.manualControlsState.isManualFps) {
-                actions.onManualControlsChange { it.copy(isManualFps = false) }
-            } else {
-                actions.onEvent(CameraUiEvent.CycleFps)
-            }
-        },
-        controlsEnabled = !uiState.isExposureTransitioning,
-        onManualControlInteractionFinished = actions.onManualControlInteractionFinished,
-        modifier = modifier
+internal fun CameraControlTouchTargets(content: @Composable () -> Unit) {
+    val configuration = LocalViewConfiguration.current
+    val buttonConfiguration = remember(configuration) {
+        object : ViewConfiguration by configuration {
+            override val minimumTouchTargetSize = DpSize.Zero
+        }
+    }
+    CompositionLocalProvider(
+        LocalViewConfiguration provides buttonConfiguration,
+        LocalMinimumInteractiveComponentSize provides 0.dp,
+        content = content
     )
 }
 
-@Composable
-fun SecondaryControlsUI(
-    uiState: CameraUiState,
-    actions: CameraActions,
-    axis: AxisSpec,
-    railSpec: ActionRailSpec,
-    modifier: Modifier = Modifier
-) {
-    val panels = availableControlPanels(uiState.cameraCapabilities)
-    SecondaryControlsRail(
-        panels = panels,
-        activePanel = uiState.manualControlsState.activePanel,
-        axis = axis,
-        railSpec = railSpec,
-        onTogglePanel = { panel ->
-            actions.onManualControlsChange {
-                it.copy(activePanel = if (it.activePanel == panel) null else panel)
-            }
-        },
-        modifier = modifier
-    )
-}
-
+/** Record plus pause/settings, ordered along the control axis. */
 @Composable
 fun PrimaryActionsUI(
-    uiState: CameraUiState,
-    actions: CameraActions,
+    isRecording: Boolean,
+    isPaused: Boolean,
+    recordEnabled: Boolean,
+    onEvent: (CameraUiEvent) -> Unit,
     axis: AxisSpec,
     modifier: Modifier = Modifier
 ) {
-    AxisStack(axis = axis, modifier = modifier, spacing = 0.dp) {
-        if (axis.usesVerticalTrack) {
-            RecordButton(uiState, actions.onEvent)
-            PauseOrSettingsButton(uiState, actions.onEvent)
+    val record = @Composable {
+        IconAction(
+            icon = if (isRecording) Icons.Filled.Stop else Icons.Filled.RadioButtonChecked,
+            contentDescription = if (isRecording) "Stop" else "Record",
+            tint = if (isRecording) Color.White else Color.Red,
+            sizeDp = PrimaryActionSizes.RECORD_BUTTON_DP,
+            enabled = recordEnabled,
+            onClick = { onEvent(CameraUiEvent.ToggleRecording) }
+        )
+    }
+    val secondary = @Composable {
+        if (isRecording) {
+            IconAction(
+                icon = if (isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                contentDescription = if (isPaused) "Play" else "Pause",
+                onClick = { onEvent(CameraUiEvent.TogglePause) }
+            )
         } else {
-            PauseOrSettingsButton(uiState, actions.onEvent)
-            RecordButton(uiState, actions.onEvent)
+            IconAction(
+                icon = Icons.Filled.Settings,
+                contentDescription = "Settings",
+                onClick = { onEvent(CameraUiEvent.OpenSettings) }
+            )
+        }
+    }
+    AxisStack(axis = axis, modifier = modifier) {
+        if (axis.usesVerticalTrack) {
+            record()
+            secondary()
+        } else {
+            secondary()
+            record()
         }
     }
 }
 
 @Composable
-fun RecordButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
+private fun IconAction(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    tint: Color = Color.White,
+    sizeDp: Float = PrimaryActionSizes.SECONDARY_ACTION_DP,
+    enabled: Boolean = true
+) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(PrimaryActionSizes.RECORD_BUTTON_DP.dp)
-            .clickable(enabled = uiState.isCameraReady && uiState.isCameraHardwareEnabled && uiState.arePresetsInitialized && !uiState.isPresetBusy) {
-                if (!uiState.isSettingsSheetVisible) {
-                    onEvent(CameraUiEvent.ToggleRecording)
-                }
-            }
+            .size(sizeDp.dp)
+            .clickable(enabled = enabled, onClick = onClick)
     ) {
         Icon(
-            imageVector = if (uiState.isRecording) Icons.Filled.Stop else Icons.Filled.RadioButtonChecked,
-            contentDescription = if (uiState.isRecording) "Stop" else "Record",
-            tint = if (uiState.isRecording) Color.White else Color.Red,
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
             modifier = Modifier.fillMaxSize()
         )
-    }
-}
-
-@Composable
-fun PauseOrSettingsButton(uiState: CameraUiState, onEvent: (CameraUiEvent) -> Unit) {
-    if (uiState.isRecording) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(PrimaryActionSizes.SECONDARY_ACTION_DP.dp)
-                .clickable { onEvent(CameraUiEvent.TogglePause) }
-        ) {
-            Icon(
-                imageVector = if (uiState.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                contentDescription = if (uiState.isPaused) "Play" else "Pause",
-                tint = Color.White,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-    } else {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(PrimaryActionSizes.SECONDARY_ACTION_DP.dp)
-                .clickable { onEvent(CameraUiEvent.OpenSettings) }
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Settings",
-                tint = Color.White,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
     }
 }
 
@@ -200,7 +137,6 @@ fun ManualResetButton(
     ) {
         Text(
             text = "RES",
-            color = if (enabled) Color.White else Color.Gray,
             style = SliderPaneStyle.tickTextStyle.copy(
                 color = if (enabled) Color.White else Color.Gray,
                 fontWeight = FontWeight.Bold

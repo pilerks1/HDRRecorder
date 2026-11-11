@@ -8,15 +8,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -37,20 +30,27 @@ internal fun sliderAxisReservation(axis: AxisSpec, actionTouchExtent: Dp): Slide
         SliderAxisReservation(start = actionTouchExtent)
     }
 
+/** Action buttons have a fixed size, so this is the exact measured length of the action group. */
 internal fun sliderActionGroupLength(actionCount: Int): Dp =
     SliderPaneStyle.actionButtonSize * actionCount.coerceAtLeast(0) +
         SliderPaneStyle.actionButtonGap * (actionCount - 1).coerceAtLeast(0)
 
+/**
+ * @param modeKey identifies the control's Auto/manual mode; changing it cancels any fling in
+ * progress so stale fling updates cannot override the new mode.
+ */
 @Composable
 fun BaseSlider(
     value: Float,
     axis: AxisSpec,
     labelString: String,
+    contentDescription: String,
     ruler: SliderRuler,
     layoutLabels: List<String>,
     onValueChange: (Float) -> Unit,
-    onValueChangeFinished: () -> Unit = {},
+    onValueChangeFinished: () -> Unit,
     primaryButtonText: String,
+    modeKey: Any?,
     modifier: Modifier = Modifier,
     sliderEnabled: Boolean = true,
     primaryButtonEnabled: Boolean = true,
@@ -86,18 +86,20 @@ fun BaseSlider(
                 )
             }
         },
-        content = { sliderModifier, axisReservation ->
+        content = { axisReservation ->
             RibbonSlider(
                 value = value,
                 onValueChange = onValueChange,
                 onValueChangeFinished = onValueChangeFinished,
                 axis = axis,
                 labelString = labelString,
+                contentDescription = contentDescription,
                 ruler = ruler,
                 layoutLabels = layoutLabels,
                 enabled = sliderEnabled,
+                modeKey = modeKey,
                 axisReservation = axisReservation,
-                modifier = sliderModifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize()
             )
         }
     )
@@ -108,21 +110,14 @@ fun SliderPanelLayout(
     axis: AxisSpec,
     actionCount: Int,
     actions: @Composable () -> Unit,
-    content: @Composable (Modifier, SliderAxisReservation) -> Unit,
+    content: @Composable (SliderAxisReservation) -> Unit,
     modifier: Modifier = Modifier,
     edgePadding: Dp = SliderPaneStyle.actionEdgePadding,
     contentGap: Dp = 0.dp
 ) {
-    val density = LocalDensity.current
-    var measuredActionGroup by remember(axis.orientation) { mutableStateOf(Size.Zero) }
-    val estimatedActionLength = sliderActionGroupLength(actionCount)
-    val measuredActionLength = with(density) {
-        (if (axis.usesVerticalTrack) measuredActionGroup.height else measuredActionGroup.width).toDp()
-    }
-    val resolvedActionLength = measuredActionLength.takeIf { it > 0.dp } ?: estimatedActionLength
     val axisReservation = sliderAxisReservation(
         axis = axis,
-        actionTouchExtent = edgePadding + resolvedActionLength + contentGap
+        actionTouchExtent = edgePadding + sliderActionGroupLength(actionCount) + contentGap
     )
     AxisOverlay(
         axis = axis,
@@ -132,13 +127,10 @@ fun SliderPanelLayout(
             AxisStack(
                 axis = axis,
                 spacing = SliderPaneStyle.actionButtonGap,
-                modifier = Modifier.onSizeChanged {
-                    measuredActionGroup = Size(it.width.toFloat(), it.height.toFloat())
-                },
                 content = actions
             )
         },
-        content = { content(it, axisReservation) }
+        content = { content(axisReservation) }
     )
 }
 

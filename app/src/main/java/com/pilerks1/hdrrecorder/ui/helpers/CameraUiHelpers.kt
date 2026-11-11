@@ -80,20 +80,15 @@ fun DisplayRotationListener(onDisplayRotationChanged: (Int) -> Unit) {
 
 @Composable
 fun HdrBrightnessManagement(shouldLimitBrightness: Boolean) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        val context = LocalContext.current
-        val window = (context as? Activity)?.window
-        LaunchedEffect(shouldLimitBrightness) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                window?.setDesiredHdrHeadroom(if (shouldLimitBrightness) 1.0f else 0.0f)
-            }
+    val context = LocalContext.current
+    val window = (context as? Activity)?.window
+    DisposableEffect(window, shouldLimitBrightness) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            window?.setDesiredHdrHeadroom(if (shouldLimitBrightness) 1.0f else 0.0f)
         }
-        DisposableEffect(window) {
-            onDispose {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                    window?.setDesiredHdrHeadroom(0.0f)
-                }
+        onDispose {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                window?.setDesiredHdrHeadroom(0.0f)
             }
         }
     }
@@ -102,37 +97,26 @@ fun HdrBrightnessManagement(shouldLimitBrightness: Boolean) {
 @Composable
 fun SystemUiManagement() {
     val view = LocalView.current
-    if (!view.isInEditMode) {
-        val window = (view.context as Activity).window
-        DisposableEffect(Unit) {
-            val insetsController = WindowCompat.getInsetsController(window, view)
-            insetsController.apply {
-                hide(WindowInsetsCompat.Type.systemBars())
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-            onDispose {
-                insetsController.show(WindowInsetsCompat.Type.systemBars())
-            }
+    val window = (view.context as Activity).window
+    DisposableEffect(window, view) {
+        val insetsController = WindowCompat.getInsetsController(window, view)
+        insetsController.apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        onDispose {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 }
 
 @Composable
 fun ScreenTimeoutManagement(isRecording: Boolean) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        val window = (view.context as Activity).window
-        LaunchedEffect(isRecording) {
-            if (isRecording) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        }
-        DisposableEffect(Unit) {
-            onDispose {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
+    val window = (LocalView.current.context as Activity).window
+    DisposableEffect(window, isRecording) {
+        if (isRecording) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 }

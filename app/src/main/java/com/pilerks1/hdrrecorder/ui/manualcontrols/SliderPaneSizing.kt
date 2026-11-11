@@ -59,7 +59,7 @@ internal data class SliderPaneSizing(
 internal fun rememberSliderPaneSizing(
     panels: List<CameraControlPanel>,
     caps: CameraCapabilities?,
-    zoomState: CameraZoomState = CameraZoomState()
+    zoomState: CameraZoomState
 ): SliderPaneSizing {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
@@ -233,7 +233,7 @@ private fun fpsLayoutLabels(caps: CameraCapabilities?): List<String> {
     return (values.ifEmpty { listOf(15, 60) }).map(Int::toString)
 }
 
-private fun List<String>.maxMeasuredSize(
+internal fun List<String>.maxMeasuredSize(
     textMeasurer: androidx.compose.ui.text.TextMeasurer,
     style: TextStyle
 ): androidx.compose.ui.unit.IntSize {

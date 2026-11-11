@@ -10,8 +10,16 @@ import androidx.camera.video.*
 import androidx.core.content.ContextCompat
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
 import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -20,6 +28,9 @@ import java.util.*
  * This class handles starting, stopping, pausing, and resuming recordings.
  * Recording duration is owned by StatsManager (fed via updateHardwareStats using the
  * hardware recording stream), so this class does not keep its own timer.
+ *
+ * Storage provider work (output creation and finalization metadata) runs on IO. [isRecording]
+ * remains true until finalization completes, so recording-dependent operations stay gated.
  */
 class RecordingManager(
     private val context: Context,
@@ -41,14 +52,17 @@ class RecordingManager(
         var lastDurationNanos: Long = 0L
     )
 
+    // Finalization must outlive the screen that started the recording.
+    private val finalizationScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var activeRecording: ActiveRecording? = null
     private var nextRecordingId = 0L
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording = _isRecording.asStateFlow()
 
+    /** Call from the main thread; the caller must not start another recording until this returns. */
     @SuppressLint("MissingPermission")
-    fun startRecording(videoCapture: VideoCapture<Recorder>, destination: RecordingDestination): StartResult {
+    suspend fun startRecording(videoCapture: VideoCapture<Recorder>, destination: RecordingDestination): StartResult {
         if (activeRecording != null) {
             reporter.report(IssueCode.RECORDING_BUSY, "startRecording")
             return StartResult.Failed
@@ -59,43 +73,33 @@ class RecordingManager(
         val name = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US)
             .format(System.currentTimeMillis())
 
-        var output = try {
-            storage.createOutput(destination, name)
-        } catch (e: Exception) {
-            reporter.report(IssueCode.RECORDING_START, "createRecordingOutput", e)
-            return StartResult.Failed
-        }
-        val pendingRecording = try {
-            try {
-                prepareRecording(videoCapture, output)
-            } catch (error: Exception) {
-                if (output.destination !is RecordingDestination.DocumentTree) throw error
-                output.abort()
-                reporter.report(IssueCode.STORAGE_FALLBACK, "prepareRecording", error, mapOf("recovery" to "MediaStore"))
-                output = storage.createOutput(RecordingDestination.Default, name)
-                prepareRecording(videoCapture, output)
-            }
-        } catch (error: Exception) {
-            output.abort()
-            reporter.report(IssueCode.RECORDING_START, "prepareRecording", error)
-            return StartResult.Failed
-        }
-        val session = ActiveRecording(id = nextRecordingId++, output = output)
-        activeRecording = session
-
+        // createOutput already falls back to MediaStore when the custom folder is unusable.
+        var pendingOutput: RecordingStorageManager.RecordingOutput? = null
+        var operation = "createRecordingOutput"
         return try {
-            session.recording = pendingRecording
+            // Retain ownership even if cancellation discards the IO dispatcher's return value.
+            withContext(Dispatchers.IO) { pendingOutput = storage.createOutput(destination, name) }
+            val output = requireNotNull(pendingOutput)
+            operation = "startRecording"
+            val session = ActiveRecording(id = nextRecordingId++, output = output)
+            session.recording = prepareRecording(videoCapture, output)
                 .withAudioEnabled()
                 .start(ContextCompat.getMainExecutor(context)) { event ->
                     handleRecordingEvent(session.id, event)
                 }
+            activeRecording = session
+            pendingOutput = null // Finalization now owns the output.
             _isRecording.value = true
             StartResult.Started(output.destination)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
-            activeRecording = null
-            output.abort()
-            reporter.report(IssueCode.RECORDING_START, "startRecording", e)
+            reporter.report(IssueCode.RECORDING_START, operation, e)
             StartResult.Failed
+        } finally {
+            pendingOutput?.let { output ->
+                withContext(NonCancellable + Dispatchers.IO) { output.abort() }
+            }
         }
     }
 
@@ -144,18 +148,18 @@ class RecordingManager(
                 val stats = event.recordingStats
                 val bytes = stats.numBytesRecorded
                 val durationNanos = stats.recordedDurationNanos
-                
+
                 // 1. Calculate precise bitrate using hardware deltas
                 var bitrate = 0.0
                 if (session.lastDurationNanos > 0L) {
                     val deltaBytes = bytes - session.lastBytes
                     val deltaNanos = durationNanos - session.lastDurationNanos
-                    val deltaSeconds = deltaNanos / 1_000_000_000.0
+                    val deltaSeconds = deltaNanos / NANOS_PER_SECOND.toDouble()
                     if (deltaSeconds > 0) {
                         bitrate = (deltaBytes * 8.0) / (deltaSeconds * 1_000_000.0)
                     }
                 }
-                
+
                 session.lastBytes = bytes
                 session.lastDurationNanos = durationNanos
 
@@ -166,11 +170,13 @@ class RecordingManager(
             is VideoRecordEvent.Start -> {
                 Log.d("RecordingManager", "Recording started")
             }
-            is VideoRecordEvent.Finalize -> {
+            is VideoRecordEvent.Finalize -> finalizationScope.launch {
                 // Finalize is asynchronous: startup catches cannot handle failures here.
                 var completionError: Exception? = null
                 try {
-                    session.output.complete(event.outputResults.outputUri, successful = !event.hasError())
+                    withContext(Dispatchers.IO) {
+                        session.output.complete(event.outputResults.outputUri, successful = !event.hasError())
+                    }
                 } catch (error: Exception) {
                     completionError = error
                 } finally {

@@ -35,6 +35,7 @@ import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
 import com.pilerks1.hdrrecorder.data.camera.core.RegionalMeteringState
 import com.pilerks1.hdrrecorder.ui.helpers.detectPreviewGestures
 import com.pilerks1.hdrrecorder.ui.layout.LayoutRect
+import com.pilerks1.hdrrecorder.model.NANOS_PER_SECOND
 
 /**
  * Camera preview composable. Layout and capture rotation are owned outside this component.
@@ -48,15 +49,16 @@ fun PreviewUI(
     zoomState: CameraZoomState,
     meteringState: RegionalMeteringState,
     onEvent: (CameraUiEvent) -> Unit,
-    modifier: Modifier = Modifier,
-    placeholderLabel: String? = null
+    placeholderLabel: String?,
+    modifier: Modifier = Modifier
 ) {
-    val recordedDurationNanos by recordingDurationNanos.collectAsStateWithLifecycle()
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
     val coordinateTransformer = remember { MutableCoordinateTransformer() }
     val currentZoom by rememberUpdatedState(zoomState)
     val currentMetering by rememberUpdatedState(meteringState)
     val currentOnEvent by rememberUpdatedState(onEvent)
+    val currentSurfaceRequest by rememberUpdatedState(surfaceRequest)
+    val currentExcludedBounds by rememberUpdatedState(expandedPanelBounds)
 
     // Use a lambda: local function references compare equal across recompositions and can
     // retain the initial null SurfaceRequest inside rememberUpdatedState.
@@ -106,9 +108,11 @@ fun PreviewUI(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { previewSize = it }
-                .pointerInput(surfaceRequest, meteringState.generation, expandedPanelBounds) {
+                // Stable key: changing state is read through updated references, so metering and
+                // panel updates never restart a gesture in progress.
+                .pointerInput(Unit) {
                     fun start(offset: Offset, mode: MeteringMode) {
-                        if (surfaceRequest == null || size.width == 0 || size.height == 0) return
+                        if (currentSurfaceRequest == null || size.width == 0 || size.height == 0) return
                         val anchor = MeteringAnchor(
                             (offset.x / size.width).coerceIn(0f, 1f),
                             (offset.y / size.height).coerceIn(0f, 1f)
@@ -117,7 +121,7 @@ fun PreviewUI(
                         currentOnEvent(CameraUiEvent.StartMetering(point, anchor, mode, currentMetering.generation))
                     }
                     detectPreviewGestures(
-                        excludedBounds = expandedPanelBounds,
+                        excludedBounds = { currentExcludedBounds },
                         zoomRatio = { currentZoom.ratio },
                         zoomLimits = { currentZoom.minRatio..currentZoom.maxRatio },
                         onZoom = { if (currentZoom.isReady) currentOnEvent(CameraUiEvent.SetZoomRatio(it)) },
@@ -175,25 +179,34 @@ fun PreviewUI(
                 }
             }
 
-            // Recording timer display (hardware duration is the single time source)
-            if (isRecording || recordedDurationNanos > 0L) {
-                val seconds = recordedDurationNanos / 1_000_000_000L
-                val h = seconds / 3600
-                val m = (seconds % 3600) / 60
-                val s = seconds % 60
-                val timeString = if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
-                Text(
-                    text = timeString,
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 16.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
+            RecordingTimer(
+                durationNanos = recordingDurationNanos,
+                isRecording = isRecording,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
         }
     }
+}
+
+/** Collects the duration here so each tick recomposes only the timer. */
+@Composable
+private fun RecordingTimer(durationNanos: StateFlow<Long>, isRecording: Boolean, modifier: Modifier) {
+    val recordedDurationNanos by durationNanos.collectAsStateWithLifecycle()
+    // Hardware duration is the single time source.
+    if (!isRecording && recordedDurationNanos <= 0L) return
+    val seconds = recordedDurationNanos / NANOS_PER_SECOND
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    val timeString = if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+    Text(
+        text = timeString,
+        color = Color.White,
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier
+            .padding(top = 16.dp)
+            .background(Color.Black.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    )
 }

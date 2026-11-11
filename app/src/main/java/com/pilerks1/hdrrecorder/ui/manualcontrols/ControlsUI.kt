@@ -2,7 +2,6 @@ package com.pilerks1.hdrrecorder.ui.manualcontrols
 
 import android.util.Range
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +9,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.sp
@@ -26,10 +28,9 @@ import com.pilerks1.hdrrecorder.model.CameraTelemetry
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
 import com.pilerks1.hdrrecorder.model.Resolution
 import com.pilerks1.hdrrecorder.ui.CameraControlPanel
-import com.pilerks1.hdrrecorder.ui.ManualControl
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
-import com.pilerks1.hdrrecorder.data.camera.core.ZoomMapping
+import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
 import com.pilerks1.hdrrecorder.ui.layout.AxisSpec
 import com.pilerks1.hdrrecorder.ui.layout.ActionRailSpec
 import com.pilerks1.hdrrecorder.ui.layout.EdgeInsets
@@ -140,6 +141,7 @@ internal fun evenlySpacedOrigins(
     }
 }
 
+/** A panel tab: exposes selection to accessibility services. */
 @Composable
 private fun GridButton(
     label: String,
@@ -150,9 +152,11 @@ private fun GridButton(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxSize()
-            .clickable(
+            .selectable(
+                selected = isActive,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                role = Role.Tab,
                 onClick = onClick
             )
     ) {
@@ -167,9 +171,10 @@ private fun GridButton(
 
 @Composable
 fun ActiveControlPanel(
+    activePanel: CameraControlPanel,
     state: ManualControlsState,
     zoomState: CameraZoomState,
-    onLinearZoomChange: (Float) -> Unit,
+    onZoomRatioChange: (Float) -> Unit,
     onSelectZoomLens: (String) -> Unit,
     caps: CameraCapabilities?,
     cameraTelemetry: StateFlow<CameraTelemetry>,
@@ -190,12 +195,10 @@ fun ActiveControlPanel(
     onSetFps: (Boolean, Range<Int>?) -> Unit,
     autoFps: Int,
     onCycleFps: () -> Unit,
-    controlsEnabled: Boolean = true,
+    controlsEnabled: Boolean,
     onManualControlInteractionFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activePanel = state.activePanel ?: return
-    val telemetry = cameraTelemetry.collectAsStateWithLifecycle().value
     val density = LocalDensity.current
     val safeContentPadding = with(density) {
         if (axis.usesVerticalTrack) {
@@ -221,19 +224,15 @@ fun ActiveControlPanel(
                 .fillMaxSize()
                 .padding(safeContentPadding),
             contentAlignment = Alignment.Center
-        ) panelContent@{
-            if (activePanel == CameraControlPanel.ZOOM) {
-                ZoomPanel(
+        ) {
+            when (activePanel) {
+                CameraControlPanel.ZOOM -> ZoomPanel(
                     zoomState = zoomState,
-                    onLinearZoomChange = onLinearZoomChange,
+                    onZoomRatioChange = onZoomRatioChange,
                     onSelectZoomLens = onSelectZoomLens,
                     axis = axis,
                 )
-                return@panelContent
-            }
-
-            if (activePanel == CameraControlPanel.RESOLUTION) {
-                ResolutionPanel(
+                CameraControlPanel.RESOLUTION -> ResolutionPanel(
                     selectedResolution = selectedResolution,
                     selectedAspectRatio = selectedAspectRatio,
                     state = state,
@@ -247,176 +246,159 @@ fun ActiveControlPanel(
                     onSetFps = onSetFps,
                     controlsEnabled = controlsEnabled
                 )
-                return@panelContent
-            }
-
-            when (activePanel.manualControl) {
-            ManualControl.ISO -> {
-                IsoPanel(
-                    state = state,
-                    caps = caps,
-                    telemetry = telemetry,
-                    axis = axis,
-                    enabled = controlsEnabled,
-                    onSetIso = onSetIso,
-                    onSetPostRawSensitivity = onSetPostRawSensitivity,
-                    onInteractionFinished = onManualControlInteractionFinished
-                )
-            }
-            ManualControl.SHUTTER -> {
-                val scale = remember(caps?.ssRangeNanos) { SliderScales.shutter(caps) }
-                val effective = if (state.isManualSs) state.ssValueNanos else telemetry.shutterNanos
-                StandardSlider(
-                    scale = scale,
-                    binding = StandardSliderBinding(
-                        isManual = state.isManualSs,
-                        effectiveValue = effective,
-                        onToggleAuto = {
-                            if (state.isManualSs) {
-                                onSetSs(false, null)
-                            } else {
-                                effective?.let { onSetSs(true, it) }
-                            }
-                        },
-                        onManualValue = { onSetSs(true, it) }
-                    ),
-                    axis = axis,
-                    enabled = controlsEnabled,
-                    onInteractionFinished = onManualControlInteractionFinished
-                )
-            }
-            ManualControl.EXPOSURE_COMPENSATION -> {
-                val scale = remember(caps?.evRange, caps?.evStep) { SliderScales.exposureCompensation(caps) }
-                val aeIsOff = when {
-                    state.isManualSs && state.isManualIso -> true
-                    state.isManualSs -> caps?.supportsShutterPriorityAe != true
-                    state.isManualIso -> caps?.supportsIsoPriorityAe != true
-                    else -> false
+                CameraControlPanel.ISO -> {
+                    val telemetry by cameraTelemetry.collectAsStateWithLifecycle()
+                    IsoPanel(
+                        state = state,
+                        caps = caps,
+                        telemetry = telemetry,
+                        axis = axis,
+                        enabled = controlsEnabled,
+                        onSetIso = onSetIso,
+                        onSetPostRawSensitivity = onSetPostRawSensitivity,
+                        onInteractionFinished = onManualControlInteractionFinished
+                    )
                 }
-                val isManualEv = state.evValueIndex != 0
-                BaseSlider(
-                    value = scale.progress(state.evValueIndex),
-                    axis = axis,
-                    labelString = scale.formatValue(state.evValueIndex),
-                    ruler = scale.ruler,
-                    layoutLabels = scale.layoutLabels,
-                    onValueChange = { onSetEv(true, scale.value(it)) },
-                    onValueChangeFinished = onManualControlInteractionFinished,
-                    primaryButtonText = "RES",
-                    sliderEnabled = !aeIsOff,
-                    primaryButtonEnabled = true,
-                    primaryButtonColor = if (isManualEv) Color.White else Color.DarkGray,
-                    primaryButtonTextColor = if (isManualEv) Color.Black else Color.LightGray,
-                    onPrimaryButtonClick = {
-                        onSetEv(false, 0)
-                        onManualControlInteractionFinished()
-                    },
-                    secondaryButtonText = if (caps?.supportsLowLightBoost == true) "NHT" else null,
-                    secondaryButtonEnabled = !isRecording || maxOf(
-                        if (state.isManualFps) state.fpsRange?.upper ?: autoFps else autoFps,
-                        0
-                    ) <= 30,
-                    secondaryButtonColor = if (state.isLowLightBoostEnabled) Color.Yellow else Color.DarkGray,
-                    secondaryButtonTextColor = if (state.isLowLightBoostEnabled) Color.Black else Color.LightGray,
-                    onSecondaryButtonClick = if (caps?.supportsLowLightBoost == true) {
-                        {
-                            onSetLowLightBoost(!state.isLowLightBoostEnabled)
+                CameraControlPanel.SHUTTER -> {
+                    val telemetry by cameraTelemetry.collectAsStateWithLifecycle()
+                    val scale = remember(caps?.ssRangeNanos) { SliderScales.shutter(caps) }
+                    StandardSlider(
+                        scale = scale,
+                        binding = autoManualBinding(
+                            isManual = state.isManualSs,
+                            effectiveValue = if (state.isManualSs) state.ssValueNanos else telemetry.shutterNanos,
+                            onSet = onSetSs
+                        ),
+                        contentDescription = "Shutter speed",
+                        axis = axis,
+                        enabled = controlsEnabled,
+                        onInteractionFinished = onManualControlInteractionFinished
+                    )
+                }
+                CameraControlPanel.EXPOSURE_COMPENSATION -> {
+                    val scale = remember(caps?.evRange, caps?.evStep) { SliderScales.exposureCompensation(caps) }
+                    val aeIsOff = ExposureMode.resolve(state, caps) == ExposureMode.FULL_MANUAL
+                    val isManualEv = state.evValueIndex != 0
+                    BaseSlider(
+                        value = scale.progress(state.evValueIndex),
+                        axis = axis,
+                        labelString = scale.formatValue(state.evValueIndex),
+                        contentDescription = "Exposure compensation",
+                        ruler = scale.ruler,
+                        layoutLabels = scale.layoutLabels,
+                        onValueChange = { onSetEv(true, scale.value(it)) },
+                        onValueChangeFinished = onManualControlInteractionFinished,
+                        primaryButtonText = "RES",
+                        modeKey = isManualEv,
+                        sliderEnabled = !aeIsOff,
+                        primaryButtonColor = if (isManualEv) Color.White else Color.DarkGray,
+                        primaryButtonTextColor = if (isManualEv) Color.Black else Color.LightGray,
+                        onPrimaryButtonClick = {
+                            onSetEv(false, 0)
                             onManualControlInteractionFinished()
-                        }
-                    } else null
-                )
-            }
-            ManualControl.FOCUS -> {
-                val scale = remember(caps?.focusMinDistanceDiopters) { SliderScales.focus(caps) }
-                val effective = if (state.isManualFocus) {
-                    state.focusDistanceDiopters
-                } else {
-                    telemetry.focusDistanceDiopters
+                        },
+                        secondaryButtonText = if (caps?.supportsLowLightBoost == true) "NHT" else null,
+                        secondaryButtonEnabled = !isRecording || maxOf(
+                            if (state.isManualFps) state.fpsRange?.upper ?: autoFps else autoFps,
+                            0
+                        ) <= 30,
+                        secondaryButtonColor = if (state.isLowLightBoostEnabled) Color.Yellow else Color.DarkGray,
+                        secondaryButtonTextColor = if (state.isLowLightBoostEnabled) Color.Black else Color.LightGray,
+                        onSecondaryButtonClick = if (caps?.supportsLowLightBoost == true) {
+                            {
+                                onSetLowLightBoost(!state.isLowLightBoostEnabled)
+                                onManualControlInteractionFinished()
+                            }
+                        } else null
+                    )
                 }
-                StandardSlider(
-                    scale = scale,
-                    binding = StandardSliderBinding(
-                        isManual = state.isManualFocus,
-                        effectiveValue = effective,
-                        onToggleAuto = {
-                            if (state.isManualFocus) {
-                                onSetFocus(false, null)
+                CameraControlPanel.FOCUS -> {
+                    val telemetry by cameraTelemetry.collectAsStateWithLifecycle()
+                    val scale = remember(caps?.focusMinDistanceDiopters) { SliderScales.focus(caps) }
+                    StandardSlider(
+                        scale = scale,
+                        binding = autoManualBinding(
+                            isManual = state.isManualFocus,
+                            effectiveValue = if (state.isManualFocus) {
+                                state.focusDistanceDiopters
                             } else {
-                                effective?.let { onSetFocus(true, it) }
-                            }
-                        },
-                        onManualValue = { onSetFocus(true, it) }
-                    ),
-                    axis = axis,
-                    onInteractionFinished = onManualControlInteractionFinished
-                )
-            }
-            ManualControl.WHITE_BALANCE -> {
-                val scale = remember(caps?.cctTemperatureRange) { SliderScales.whiteBalance(caps) }
-                val effective = resolveEffectiveWhiteBalance(state, telemetry)
-                StandardSlider(
-                    scale = scale,
-                    binding = StandardSliderBinding(
-                        isManual = state.isManualWb,
-                        effectiveValue = effective.temperatureKelvin,
-                        onToggleAuto = {
-                            if (state.isManualWb) {
-                                onSetWb(false, null, null)
-                            } else {
-                                val temperature = effective.temperatureKelvin
-                                val tint = effective.tint
-                                if (temperature != null && tint != null) {
-                                    onSetWb(true, temperature, tint)
-                                }
-                            }
-                        },
-                        onManualValue = { temperature ->
-                            effective.tint?.let { tint -> onSetWb(true, temperature, tint) }
-                        }
-                    ),
-                    axis = axis,
-                    onInteractionFinished = onManualControlInteractionFinished
-                )
-            }
-            ManualControl.TINT -> {
-                val scale = remember { SliderScales.tint() }
-                val effective = resolveEffectiveWhiteBalance(state, telemetry)
-                StandardSlider(
-                    scale = scale,
-                    binding = StandardSliderBinding(
-                        isManual = state.isManualWb,
-                        effectiveValue = effective.tint,
-                        onToggleAuto = {
-                            if (state.isManualWb) {
-                                onSetWb(false, null, null)
-                            } else {
-                                val temperature = effective.temperatureKelvin
-                                val tint = effective.tint
-                                if (temperature != null && tint != null) {
-                                    onSetWb(true, temperature, tint)
-                                }
-                            }
-                        },
-                        onManualValue = { tint ->
-                            effective.temperatureKelvin?.let { temperature ->
-                                onSetWb(true, temperature, tint)
-                            }
-                        }
-                    ),
-                    axis = axis,
-                    onInteractionFinished = onManualControlInteractionFinished
-                )
-            }
-                null -> Unit
+                                telemetry.focusDistanceDiopters
+                            },
+                            onSet = onSetFocus
+                        ),
+                        contentDescription = "Focus distance",
+                        axis = axis,
+                        onInteractionFinished = onManualControlInteractionFinished
+                    )
+                }
+                CameraControlPanel.WHITE_BALANCE -> {
+                    val telemetry by cameraTelemetry.collectAsStateWithLifecycle()
+                    val scale = remember(caps?.cctTemperatureRange) { SliderScales.whiteBalance(caps) }
+                    val effective = resolveEffectiveWhiteBalance(state, telemetry)
+                    StandardSlider(
+                        scale = scale,
+                        binding = whiteBalanceBinding(state, effective, editsTemperature = true, onSetWb = onSetWb),
+                        contentDescription = "White balance temperature",
+                        axis = axis,
+                        onInteractionFinished = onManualControlInteractionFinished
+                    )
+                }
+                CameraControlPanel.TINT -> {
+                    val telemetry by cameraTelemetry.collectAsStateWithLifecycle()
+                    val scale = remember { SliderScales.tint() }
+                    val effective = resolveEffectiveWhiteBalance(state, telemetry)
+                    StandardSlider(
+                        scale = scale,
+                        binding = whiteBalanceBinding(state, effective, editsTemperature = false, onSetWb = onSetWb),
+                        contentDescription = "White balance tint",
+                        axis = axis,
+                        onInteractionFinished = onManualControlInteractionFinished
+                    )
+                }
             }
         }
     }
 }
 
+/** Auto/manual toggle for one control: Auto releases the value; manual holds the effective value. */
+private fun <T : Any> autoManualBinding(
+    isManual: Boolean,
+    effectiveValue: T?,
+    onSet: (Boolean, T?) -> Unit
+) = StandardSliderBinding(
+    isManual = isManual,
+    effectiveValue = effectiveValue,
+    onToggleAuto = {
+        if (isManual) onSet(false, null) else effectiveValue?.let { onSet(true, it) }
+    },
+    onManualValue = { onSet(true, it) }
+)
+
+/** Temperature and tint share one Auto/manual mode; editing one keeps the other's current value. */
+private fun whiteBalanceBinding(
+    state: ManualControlsState,
+    effective: EffectiveWhiteBalance,
+    editsTemperature: Boolean,
+    onSetWb: (Boolean, Int?, Int?) -> Unit
+) = StandardSliderBinding(
+    isManual = state.isManualWb,
+    effectiveValue = if (editsTemperature) effective.temperatureKelvin else effective.tint,
+    onToggleAuto = {
+        val temperature = effective.temperatureKelvin
+        val tint = effective.tint
+        if (state.isManualWb) onSetWb(false, null, null)
+        else if (temperature != null && tint != null) onSetWb(true, temperature, tint)
+    },
+    onManualValue = { value ->
+        if (editsTemperature) effective.tint?.let { onSetWb(true, value, it) }
+        else effective.temperatureKelvin?.let { onSetWb(true, it, value) }
+    }
+)
+
 @Composable
 private fun ZoomPanel(
     zoomState: CameraZoomState,
-    onLinearZoomChange: (Float) -> Unit,
+    onZoomRatioChange: (Float) -> Unit,
     onSelectZoomLens: (String) -> Unit,
     axis: AxisSpec
 ) {
@@ -438,18 +420,19 @@ private fun ZoomPanel(
                 )
             }
         },
-        content = { sliderModifier, axisReservation ->
+        content = { axisReservation ->
             RibbonSlider(
                 value = scale.progress(zoomState.ratio),
                 onValueChange = { progress ->
-                    onLinearZoomChange(ZoomMapping.progress(scale.value(progress), zoomState.minRatio, zoomState.maxRatio))
+                    onZoomRatioChange(scale.value(progress))
                 },
                 axis = axis,
-                labelString = if (zoomState.isReady) scale.formatValue(zoomState.ratio) else "—",
+                labelString = if (zoomState.isReady) scale.formatValue(zoomState.ratio) else SliderScales.UNAVAILABLE_LABEL,
+                contentDescription = "Zoom",
                 ruler = scale.ruler,
                 layoutLabels = scale.layoutLabels,
                 axisReservation = axisReservation,
-                modifier = sliderModifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize()
             )
         }
     )
@@ -475,7 +458,6 @@ private fun ResolutionPanel(
         axis = axis,
         actionCount = 3,
         modifier = Modifier.fillMaxSize(),
-        edgePadding = SliderPaneStyle.actionEdgePadding,
         contentGap = SliderPaneStyle.actionEdgePadding,
         actions = {
             SliderActionButton(
@@ -500,22 +482,19 @@ private fun ResolutionPanel(
                 onClick = onCycleFps
             )
         },
-        content = { sliderModifier, axisReservation ->
+        content = { axisReservation ->
             FpsSlider(
                 isManualFps = state.isManualFps,
                 currentRange = currentRange.lower.toFloat()..currentRange.upper.toFloat(),
                 isRecording = isRecording,
-                isExposureFullyManual = state.isManualIso &&
-                    state.isManualSs &&
-                    caps?.supportsFullManualExposure == true,
+                isExposureFullyManual = ExposureMode.resolve(state, caps) == ExposureMode.FULL_MANUAL,
                 caps = caps,
                 onValueChange = { newRange ->
                     onSetFps(true, Range(newRange.start.roundToInt(), newRange.endInclusive.roundToInt()))
                 },
                 axis = axis,
                 axisReservation = axisReservation,
-                enabled = controlsEnabled,
-                modifier = sliderModifier
+                enabled = controlsEnabled
             )
         }
     )
@@ -525,6 +504,7 @@ private fun ResolutionPanel(
 private fun <T : Any> StandardSlider(
     scale: SliderScale<T>,
     binding: StandardSliderBinding<T>,
+    contentDescription: String,
     axis: AxisSpec,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -535,15 +515,17 @@ private fun <T : Any> StandardSlider(
     BaseSlider(
         value = effectiveValue?.let(scale::progress) ?: 0f,
         axis = axis,
-        labelString = effectiveValue?.let(scale.formatValue) ?: "—",
+        labelString = effectiveValue?.let(scale.formatValue) ?: SliderScales.UNAVAILABLE_LABEL,
+        contentDescription = contentDescription,
         ruler = if (hasValue) scale.ruler else scale.ruler.copy(ticks = emptyList(), markers = emptyList()),
-        layoutLabels = if (hasValue) scale.layoutLabels else listOf("—"),
+        layoutLabels = if (hasValue) scale.layoutLabels else listOf(SliderScales.UNAVAILABLE_LABEL),
         onValueChange = { binding.onManualValue(scale.value(it)) },
         onValueChangeFinished = onInteractionFinished,
         modifier = modifier,
         sliderEnabled = enabled && hasValue,
         primaryButtonEnabled = enabled && (hasValue || binding.isManual),
         primaryButtonText = if (binding.isManual) "MAN" else "AUTO",
+        modeKey = binding.isManual,
         primaryButtonColor = if (binding.isManual) Color.DarkGray else Color.White,
         primaryButtonTextColor = if (binding.isManual) Color.White else Color.Black,
         onPrimaryButtonClick = {
@@ -565,22 +547,15 @@ private fun IsoPanel(
     onInteractionFinished: () -> Unit
 ) {
     val isoScale = remember(caps?.isoRange) { SliderScales.iso(caps) }
-    val effectiveIso = if (state.isManualIso) state.isoValue else telemetry.iso
     val sensorSlider: @Composable (Modifier) -> Unit = { modifier ->
         StandardSlider(
             scale = isoScale,
-            binding = StandardSliderBinding(
+            binding = autoManualBinding(
                 isManual = state.isManualIso,
-                effectiveValue = effectiveIso,
-                onToggleAuto = {
-                    if (state.isManualIso) {
-                        onSetIso(false, null)
-                    } else {
-                        effectiveIso?.let { onSetIso(true, it) }
-                    }
-                },
-                onManualValue = { onSetIso(true, it) }
+                effectiveValue = if (state.isManualIso) state.isoValue else telemetry.iso,
+                onSet = onSetIso
             ),
+            contentDescription = "ISO",
             axis = axis,
             modifier = modifier,
             enabled = enabled,
@@ -596,26 +571,19 @@ private fun IsoPanel(
     val postScale = remember(caps.postRawSensitivityBoostRange) {
         SliderScales.postRawSensitivity(caps)
     }
-    val effectivePost = if (state.isManualPostRawSensitivity) {
-        state.postRawSensitivityBoost
-    } else {
-        telemetry.postRawSensitivityBoost ?: 100
-    }
     val postSlider: @Composable (Modifier) -> Unit = { modifier ->
         StandardSlider(
             scale = postScale,
-            binding = StandardSliderBinding(
+            binding = autoManualBinding(
                 isManual = state.isManualPostRawSensitivity,
-                effectiveValue = effectivePost,
-                onToggleAuto = {
-                    if (state.isManualPostRawSensitivity) {
-                        onSetPostRawSensitivity(false, null)
-                    } else {
-                        effectivePost?.let { onSetPostRawSensitivity(true, it) }
-                    }
+                effectiveValue = if (state.isManualPostRawSensitivity) {
+                    state.postRawSensitivityBoost
+                } else {
+                    telemetry.postRawSensitivityBoost ?: 100
                 },
-                onManualValue = { onSetPostRawSensitivity(true, it) }
+                onSet = onSetPostRawSensitivity
             ),
+            contentDescription = "Post-RAW sensitivity boost",
             axis = axis,
             modifier = modifier,
             enabled = enabled,

@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
@@ -13,10 +14,18 @@ import com.pilerks1.hdrrecorder.model.formatBitrateMbps
 import com.pilerks1.hdrrecorder.model.formatDataSize
 import kotlin.math.roundToInt
 
+/** One source of text styles for both stats measurement and rendering. */
 internal data class StatsTypography(
     val fontSize: TextUnit,
     val lineHeight: TextUnit
-)
+) {
+    private fun style(weight: FontWeight) =
+        TextStyle(fontSize = fontSize, lineHeight = lineHeight, letterSpacing = 0.sp, fontWeight = weight)
+
+    val headerStyle = style(FontWeight.Bold)
+    val labelStyle = style(FontWeight.Medium)
+    val valueStyle = style(FontWeight.Normal)
+}
 
 internal data class StatRowModel(
     val label: String,
@@ -38,54 +47,48 @@ internal data class StatBlockMetrics(
     val actualValueWidths: List<Int>
 )
 
-internal fun measureBlockMetrics(
-    blocks: List<StatBlockModel>,
-    typography: StatsTypography,
-    textMeasurer: TextMeasurer
-): List<StatBlockMetrics> {
-    val labelStyle = TextStyle(
-        fontSize = typography.fontSize,
-        lineHeight = typography.lineHeight,
-        letterSpacing = 0.sp,
-        fontWeight = FontWeight.Medium
-    )
-    val valueStyle = TextStyle(
-        fontSize = typography.fontSize,
-        lineHeight = typography.lineHeight,
-        letterSpacing = 0.sp,
-        fontWeight = FontWeight.Normal
-    )
-    val headerStyle = TextStyle(
-        fontSize = typography.fontSize,
-        lineHeight = typography.lineHeight,
-        letterSpacing = 0.sp,
-        fontWeight = FontWeight.Bold
-    )
-    val spaceWidth = textMeasurer.measure(" ", style = labelStyle, maxLines = 1).size.width
+/**
+ * Titles, labels, and ceiling values never change, so their widths are measured once per
+ * typography. Only the current values are measured on each update. One instance belongs to one
+ * [TextMeasurer], which is itself recreated when density or fonts change.
+ */
+internal class StatsMetricsCache(private val textMeasurer: TextMeasurer) {
+    private val static = HashMap<StatsTypography, List<StatBlockMetrics>>()
+    private val lineHeights = HashMap<StatsTypography, Int>()
 
-    return blocks.map { block ->
-        val labelWidth = block.rows.maxOf {
-            textMeasurer.measure("${it.label}:", style = labelStyle, maxLines = 1).size.width
+    fun metrics(blocks: List<StatBlockModel>, typography: StatsTypography): List<StatBlockMetrics> {
+        val fixed = static.getOrPut(typography) { measureStatic(blocks, typography) }
+        return blocks.mapIndexed { index, block ->
+            fixed[index].copy(actualValueWidths = block.rows.map { width(it.value, typography.valueStyle) })
         }
-        val ceilingWidths = block.rows.map { row ->
-            row.ceilingValues.maxOf {
-                textMeasurer.measure(it, style = valueStyle, maxLines = 1).size.width
-            }
+    }
+
+    /** Every stats line is single-line text at the same fixed line height. */
+    fun lineHeight(typography: StatsTypography): Int = lineHeights.getOrPut(typography) {
+        textMeasurer.measure("0", style = typography.valueStyle, maxLines = 1).size.height
+    }
+
+    fun wrappedValueHeight(value: String, typography: StatsTypography, maxWidth: Int): Int =
+        textMeasurer.measure(value, style = typography.valueStyle,
+            constraints = Constraints(maxWidth = maxWidth.coerceAtLeast(0))).size.height
+
+    private fun width(text: String, style: TextStyle): Int =
+        textMeasurer.measure(text, style = style, maxLines = 1).size.width
+
+    private fun measureStatic(blocks: List<StatBlockModel>, typography: StatsTypography): List<StatBlockMetrics> {
+        val spaceWidth = width(" ", typography.labelStyle)
+        return blocks.map { block ->
+            val labelWidth = block.rows.maxOf { width("${it.label}:", typography.labelStyle) }
+            val ceilingWidths = block.rows.map { row -> row.ceilingValues.maxOf { width(it, typography.valueStyle) } }
+            val headerWidth = width(block.title, typography.headerStyle)
+            StatBlockMetrics(
+                naturalWidth = maxOf(headerWidth, ceilingWidths.maxOf { labelWidth + spaceWidth + it }),
+                minimumWidth = maxOf(headerWidth, labelWidth),
+                labelWidth = labelWidth,
+                spaceWidth = spaceWidth,
+                actualValueWidths = emptyList()
+            )
         }
-        val actualWidths = block.rows.map {
-            textMeasurer.measure(it.value, style = valueStyle, maxLines = 1).size.width
-        }
-        val headerWidth = textMeasurer.measure(block.title, style = headerStyle, maxLines = 1).size.width
-        StatBlockMetrics(
-            naturalWidth = maxOf(
-                headerWidth,
-                block.rows.indices.maxOf { labelWidth + spaceWidth + ceilingWidths[it] }
-            ),
-            minimumWidth = maxOf(headerWidth, labelWidth),
-            labelWidth = labelWidth,
-            spaceWidth = spaceWidth,
-            actualValueWidths = actualWidths
-        )
     }
 }
 
@@ -124,18 +127,18 @@ internal fun statsBlocks(snapshot: StatsSnapshot, isRecording: Boolean): List<St
             StatRowModel(
                 "SS",
                 if (snapshot.shutterSpeed > 0) "1/${snapshot.shutterSpeed.roundToInt()}s" else "N/A",
-                listOf("N/A", "1/99999s")
+                shutterCeilingValues
             ),
-            StatRowModel("ISO", "${snapshot.iso}", listOf("N/A", "99999")),
+            StatRowModel("ISO", "${snapshot.iso}", isoCeilingValues),
             StatRowModel(
                 "FPS",
                 if (isRecording) "${snapshot.effectiveFps}" else "N/A",
-                listOf("N/A", "999")
+                fpsCeilingValues
             ),
             StatRowModel(
                 "DROP",
                 if (isRecording && snapshot.canMeasureDroppedFrames) "${snapshot.droppedFrames}" else "N/A",
-                listOf("N/A", "999999")
+                dropCeilingValues
             )
         )
     ),
@@ -150,7 +153,7 @@ internal fun statsBlocks(snapshot: StatsSnapshot, isRecording: Boolean): List<St
             StatRowModel(
                 "TIME",
                 snapshot.storageRemainingTime,
-                listOf("N/A", "0 Min", "999 Min", "1.00 Hr", "9999 Hr")
+                timeCeilingValues
             ),
             StatRowModel(
                 "BIT",
@@ -174,24 +177,34 @@ internal fun statsBlocks(snapshot: StatsSnapshot, isRecording: Boolean): List<St
             StatRowModel(
                 "STATE",
                 snapshot.thermalStatus.toStatsLabel(),
-                listOf("N/A", "SHUTDOWN"),
+                thermalCeilingValues,
                 getThermalColorByStatus(snapshot.thermalStatus)
             ),
             StatRowModel(
                 "IN 60s",
                 snapshot.thermalForecast.toDisplayText(),
-                listOf("0.00", "SHUTDOWN"),
+                forecastCeilingValues,
                 getThermalForecastColor(snapshot.thermalForecast)
             ),
             StatRowModel(
                 "NET",
                 "%.1f W".format(snapshot.netPowerWatts),
-                listOf("0.0 W", "-99.9 W")
+                powerCeilingValues
             )
         )
     )
 )
 
+private val shutterCeilingValues = listOf("N/A", "1/99999s")
+private val isoCeilingValues = listOf("N/A", "99999")
+private val fpsCeilingValues = listOf("N/A", "999")
+private val dropCeilingValues = listOf("N/A", "999999")
+private val timeCeilingValues = listOf("N/A", "0 Min", "999 Min", "1.00 Hr", "9999 Hr")
+private val thermalCeilingValues = listOf("N/A", "SHUTDOWN")
+private val forecastCeilingValues = listOf("0.00", "SHUTDOWN")
+private val powerCeilingValues = listOf("0.0 W", "-99.9 W")
+
+// Phone storage, including external drives, stays below petabyte scale.
 private val dataSizeCeilingValues = listOf(
     "N/A",
     "0.00 MB",
@@ -199,15 +212,14 @@ private val dataSizeCeilingValues = listOf(
     "1.00 GB",
     "999 GB",
     "1.00 TB",
-    "999 TB"
+    "99.9 TB"
 )
 
+// Video bitrate is limited to Bitrate.MAX_MBPS (999), so Mbps never needs promotion.
 private val bitrateCeilingValues = listOf(
     "N/A",
     "0.00 Mbps",
-    "999 Mbps",
-    "1.00 Gbps",
-    "999 Gbps"
+    "999 Mbps"
 )
 
 private fun ThermalStatus.toStatsLabel(): String =

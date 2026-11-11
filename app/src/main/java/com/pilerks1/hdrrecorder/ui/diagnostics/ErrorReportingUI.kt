@@ -26,24 +26,26 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.pilerks1.hdrrecorder.R
 import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
-import com.pilerks1.hdrrecorder.data.diagnostics.IssueRecord
 import com.pilerks1.hdrrecorder.data.diagnostics.IssueSeverity
-import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 import java.text.DateFormat
 import java.util.Date
 
 /** The only owner of error dialogs and warning/info Toasts across all app screens. */
 @Composable
-fun ErrorReportingHost(reporter: ErrorReporter) {
+fun ErrorReportingHost(reporter: ErrorReporter, showHistory: Boolean, onShowHistoryChange: (Boolean) -> Unit) {
     MaterialTheme(colorScheme = darkColorScheme(background = Color.Black, primary = Color.White,
         onBackground = Color.White, onSurface = Color.White, onSurfaceVariant = Color.White)) {
-        ErrorReportingContent(reporter)
+        ErrorReportingContent(reporter, showHistory, onShowHistoryChange)
     }
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun ErrorReportingContent(reporter: ErrorReporter) {
+private fun ErrorReportingContent(
+    reporter: ErrorReporter,
+    showHistory: Boolean,
+    onShowHistoryChange: (Boolean) -> Unit
+) {
     val state by reporter.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -62,15 +64,15 @@ private fun ErrorReportingContent(reporter: ErrorReporter) {
         }
     }
 
-    if (state.showHistory) {
-        BackHandler { reporter.showHistory(false) }
+    if (showHistory) {
+        BackHandler { onShowHistoryChange(false) }
         Surface(Modifier.fillMaxSize(), color = Color.Black, contentColor = Color.White) {
             Scaffold(
                 topBar = {
                     TopAppBar(
                         title = { Text(stringResource(R.string.diagnostics_title)) },
                         navigationIcon = {
-                            IconButton(onClick = { reporter.showHistory(false) }) {
+                            IconButton(onClick = { onShowHistoryChange(false) }) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.diagnostics_back))
                             }
                         },
@@ -105,7 +107,7 @@ private fun ErrorReportingContent(reporter: ErrorReporter) {
     }
 
     val selected = state.history.firstOrNull { it.id == selectedId }
-    val pending = if (state.showHistory || selected != null) null else state.pending
+    val pending = if (showHistory || selected != null) null else state.pending
         .mapNotNull { id -> state.history.firstOrNull { it.id == id } }
         .firstOrNull { it.code.severity == IssueSeverity.ERROR }
     val issue = selected ?: pending
@@ -124,26 +126,21 @@ private fun ErrorReportingContent(reporter: ErrorReporter) {
                     reporter.settingsSummary(issue)?.let { Text(it, Modifier.padding(top = 8.dp)) }
                     TextButton(onClick = { expanded = !expanded }) { Text(stringResource(R.string.diagnostics_details)) }
                     if (expanded) SelectionContainer { Text(reporter.export(issue), style = MaterialTheme.typography.bodySmall) }
-                    if (!state.showHistory) TextButton(onClick = { dismiss(); reporter.showHistory(true) }) {
+                    if (!showHistory) TextButton(onClick = { dismiss(); onShowHistoryChange(true) }) {
                         Text(stringResource(R.string.diagnostics_title))
                     }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { copyDiagnostics(reporter, issue, context) }) {
+                TextButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                        ClipData.newPlainText(resources.getString(R.string.diagnostics_title), reporter.export(issue))
+                    )
+                }) {
                     Text(stringResource(R.string.diagnostics_copy))
                 }
             },
             confirmButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.diagnostics_dismiss)) } }
         )
-    }
-}
-
-private fun copyDiagnostics(reporter: ErrorReporter, issue: IssueRecord, context: android.content.Context) {
-    try {
-        val clipboard = context.getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.diagnostics_title), reporter.export(issue)))
-    } catch (error: Exception) {
-        reporter.report(IssueCode.COPY_FAILED, "copyDiagnostics", error)
     }
 }

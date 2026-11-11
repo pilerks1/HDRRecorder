@@ -51,6 +51,37 @@ fun SettingsHeader(onClose: () -> Unit) {
     Spacer(modifier = Modifier.height(16.dp))
 }
 
+/** Primary-colored title shown above each settings section. */
+@Composable
+fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(bottom = 8.dp)
+    )
+}
+
+@Composable
+fun settingsSwitchColors(): SwitchColors = SwitchDefaults.colors(
+    checkedThumbColor = MaterialTheme.colorScheme.primary,
+    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+    uncheckedThumbColor = Color.LightGray,
+    uncheckedTrackColor = Color.DarkGray,
+    uncheckedBorderColor = Color.LightGray
+)
+
+@Composable
+fun settingsTextFieldColors(unfocusedBorderColor: Color = Color.DarkGray): TextFieldColors =
+    OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = unfocusedBorderColor,
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White,
+        cursorColor = MaterialTheme.colorScheme.primary
+    )
+
 @Composable
 fun SectionDivider() {
     HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
@@ -153,13 +184,7 @@ fun HdrSettingsSwitchRow(
             checked = checked,
             enabled = enabled,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                uncheckedThumbColor = Color.LightGray,
-                uncheckedTrackColor = Color.DarkGray,
-                uncheckedBorderColor = Color.LightGray
-            )
+            colors = settingsSwitchColors()
         )
     }
 }

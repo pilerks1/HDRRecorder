@@ -13,7 +13,6 @@ class ManualControlStateUpdaterTest {
         shutterNanos = 10_000_000L
     )
     private val fullManualCaps = CameraCapabilities(
-        supportsManualSensor = true,
         supportsFullManualExposure = true,
         hasManualIsoControl = true,
         hasManualShutterControl = true
