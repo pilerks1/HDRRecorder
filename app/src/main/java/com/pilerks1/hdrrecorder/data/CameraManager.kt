@@ -14,6 +14,9 @@ import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager
 import com.pilerks1.hdrrecorder.data.camera.camerax.CameraXRequestBackend
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostObservation
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostRuntimeState
 import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
 import com.pilerks1.hdrrecorder.data.camera.core.CameraFrameMetadata
 import com.pilerks1.hdrrecorder.data.camera.core.CameraZoomState
@@ -106,8 +109,8 @@ class CameraManager(
     private var preview: Preview? = null
     var videoCapture: VideoCapture<Recorder>? = null
         private set
-    private val _isLowLightBoostActive = MutableStateFlow(false)
-    val isLowLightBoostActive = _isLowLightBoostActive.asStateFlow()
+    private val _lowLightBoostState = MutableStateFlow(LowLightBoostObservation())
+    val lowLightBoostState = _lowLightBoostState.asStateFlow()
 
     private var pendingBind: BindRequest? = null
     private var isWaitingForProvider = false
@@ -209,7 +212,6 @@ class CameraManager(
             return
         }
         invalidateAttachment()
-        clearLowLightBoostObserver()
         val cameraGeneration = telemetryCoordinator.beginCameraGeneration()
         activeCameraGeneration = cameraGeneration
 
@@ -241,14 +243,14 @@ class CameraManager(
             preview = newPreview
             videoCapture = newVideoCapture
             observeCameraErrors(boundCamera.cameraInfo)
-            observeLowLightBoostState(boundCamera.cameraInfo)
+            observeLowLightBoostState(boundCamera.cameraInfo, cameraGeneration)
 
             // Extract characteristics and pass back to ViewModel
             val cameraId = boundCamera.cameraInfo.cameraId
             val metadata = CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow()
             val caps = CameraCapabilitiesManager.extractCapabilities(
                 metadata,
-                boundCamera.cameraInfo.isLowLightBoostSupported,
+                LowLightBoostPolicy.isSupported(boundCamera.cameraInfo.isLowLightBoostSupported),
                 extendManualRanges = config.isExtendManualRangesEnabled
             ).copy(
                 camera2Modes = CameraCapabilitiesManager.extractCamera2Modes(metadata)
@@ -361,6 +363,7 @@ class CameraManager(
     }
 
     private fun invalidateAttachment() {
+        clearLowLightBoostObserver()
         cameraStateObservation?.remove()
         cameraStateObservation = null
         zoomRevision++
@@ -397,23 +400,27 @@ class CameraManager(
         preview = null
         videoCapture = null
         invalidateAttachment()
-        clearLowLightBoostObserver()
         // Teardown above may still deliver capture callbacks to this executor.
         cameraExecutor.shutdown()
     }
 
-    /** Called only after [clearLowLightBoostObserver], which every bind performs first. */
-    private fun observeLowLightBoostState(cameraInfo: CameraInfo) {
-        if (!cameraInfo.isLowLightBoostSupported) return
+    private fun observeLowLightBoostState(cameraInfo: CameraInfo, generation: Long) {
+        if (!LowLightBoostPolicy.isSupported(cameraInfo.isLowLightBoostSupported)) return
         lowLightBoostObservation = Observation(cameraInfo.lowLightBoostState) { state ->
-            _isLowLightBoostActive.value = state == LowLightBoostState.ACTIVE
+            if (activeCameraGeneration == generation) {
+                _lowLightBoostState.value = LowLightBoostObservation(generation, when (state) {
+                    LowLightBoostState.ACTIVE -> LowLightBoostRuntimeState.ACTIVE
+                    LowLightBoostState.INACTIVE -> LowLightBoostRuntimeState.INACTIVE
+                    else -> LowLightBoostRuntimeState.OFF
+                })
+            }
         }
     }
 
     private fun clearLowLightBoostObserver() {
         lowLightBoostObservation?.remove()
         lowLightBoostObservation = null
-        _isLowLightBoostActive.value = false
+        _lowLightBoostState.value = LowLightBoostObservation()
     }
 
     private data class BindRequest(

@@ -365,15 +365,17 @@ object CameraLayoutCalculator {
 
     private fun lowLightBoostIndicator(
         preview: LayoutRect,
+        axis: AxisSpec,
         density: Float
     ): LayoutRect {
         val size = LOW_LIGHT_BOOST_INDICATOR_DP * density
         val inset = LOW_LIGHT_BOOST_INDICATOR_INSET_DP * density
+        val left = if (axis.usesVerticalTrack) preview.right - inset - size else preview.left + inset
         return LayoutRect(
-            left = preview.left + inset,
-            top = preview.top + inset,
-            right = preview.left + inset + size,
-            bottom = preview.top + inset + size
+            left = left,
+            top = preview.bottom - inset - size,
+            right = left + size,
+            bottom = preview.bottom - inset
         )
     }
 
@@ -419,7 +421,7 @@ object CameraLayoutCalculator {
         expandedPanel = geometry.expandedPanel,
         primaryActions = primaryActions(preview, geometry.expandedPanel, axis, density),
         manualReset = manualReset(preview, geometry.expandedPanel, axis, density),
-        lowLightBoostIndicator = lowLightBoostIndicator(preview, density),
+        lowLightBoostIndicator = lowLightBoostIndicator(preview, axis, density),
         actionRail = geometry.actionRail
     )
 

@@ -1,6 +1,8 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
+import android.util.Range
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
 import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 
@@ -19,6 +21,8 @@ object ManualControlStateUpdater {
         oldState: ManualControlsState,
         caps: CameraCapabilities?,
         exposureDefaults: ExposureDefaults,
+        selectedFps: Int,
+        previewFpsRange: Range<Int>?,
         updater: (ManualControlsState) -> ManualControlsState
     ): Pair<ManualControlsState, Boolean> {
         var newState = updater(oldState)
@@ -27,7 +31,6 @@ object ManualControlStateUpdater {
             newState = clearUnsupportedControls(newState, caps)
             newState = resolvePostRawExposureOwnership(oldState, newState, caps)
             newState = resolveHybridOnlyConflict(oldState, newState, caps)
-            newState = resolveLowLightBoostConflict(oldState, newState)
 
             // A full-manual device may pair ISO and shutter when the selected individual
             // control has no Hybrid AE priority mode.
@@ -38,15 +41,22 @@ object ManualControlStateUpdater {
         }
 
         val triggersRebind = newState.isManualFps != oldState.isManualFps
-        return Pair(clearInactiveValues(newState), triggersRebind)
+        return Pair(LowLightBoostPolicy.normalize(
+            clearInactiveValues(newState), caps?.supportsLowLightBoost == true, selectedFps, previewFpsRange
+        ), triggersRebind)
     }
 
     /**
      * Normalizes a complete state (such as a loaded preset) against capabilities, without a
      * previous state to diff against. Low-light boost is dropped when manual exposure or an
-     * effective frame rate above [LOW_LIGHT_BOOST_MAX_FPS] makes it unavailable.
+     * effective frame rate above [LowLightBoostPolicy.MAX_FPS] makes it unavailable.
      */
-    fun normalize(state: ManualControlsState, caps: CameraCapabilities, selectedFps: Int): ManualControlsState {
+    fun normalize(
+        state: ManualControlsState,
+        caps: CameraCapabilities,
+        selectedFps: Int,
+        previewFpsRange: Range<Int>? = null
+    ): ManualControlsState {
         var normalized = clearUnsupportedControls(state, caps)
         if (!caps.supportsFullManualExposure && normalized.isManualIso && normalized.isManualSs) {
             normalized = normalized.withAutoExposure()
@@ -61,10 +71,7 @@ object ManualControlStateUpdater {
         normalized = clearInactiveValues(
             completeRequiredValues(normalized, caps, ExposureDefaults(null, null, postRawSensitivityBoost = 100))
         )
-        val effectiveFps = if (normalized.isManualFps) normalized.fpsRange?.upper ?: selectedFps else selectedFps
-        return if (normalized.isLowLightBoostEnabled &&
-            (effectiveFps > LOW_LIGHT_BOOST_MAX_FPS || normalized.isManualIso || normalized.isManualSs)
-        ) normalized.copy(isLowLightBoostEnabled = false) else normalized
+        return LowLightBoostPolicy.normalize(normalized, caps.supportsLowLightBoost, selectedFps, previewFpsRange)
     }
 
     /** Fills values required by full manual exposure and by manual white balance. */
@@ -112,31 +119,10 @@ object ManualControlStateUpdater {
         isManualSs = state.isManualSs && caps.hasManualShutterControl,
         isManualEv = state.isManualEv && caps.hasExposureCompensationControl,
         evValueIndex = if (caps.hasExposureCompensationControl) state.evValueIndex else 0,
-        isLowLightBoostEnabled = state.isLowLightBoostEnabled && caps.supportsLowLightBoost,
         isManualFocus = state.isManualFocus && caps.hasManualFocusControl,
         isManualWb = state.isManualWb && caps.supportsCCT,
         isManualFps = state.isManualFps && caps.fpsRanges.isNotEmpty()
     )
-
-    private fun resolveLowLightBoostConflict(
-        oldState: ManualControlsState,
-        newState: ManualControlsState
-    ): ManualControlsState {
-        if (!oldState.isLowLightBoostEnabled || !newState.isLowLightBoostEnabled) return newState
-
-        val enabledManualExposure =
-            (!oldState.isManualIso && newState.isManualIso) ||
-                (!oldState.isManualSs && newState.isManualSs) ||
-                (!oldState.isManualPostRawSensitivity &&
-                    newState.isManualPostRawSensitivity)
-        val selectedHighFrameRate = newState.isManualFps &&
-            (newState.fpsRange?.upper ?: 0) > LOW_LIGHT_BOOST_MAX_FPS
-        return if (enabledManualExposure || selectedHighFrameRate) {
-            newState.copy(isLowLightBoostEnabled = false)
-        } else {
-            newState
-        }
-    }
 
     private fun resolveHybridOnlyConflict(
         oldState: ManualControlsState,
@@ -243,6 +229,4 @@ object ManualControlStateUpdater {
         val turnedOffShutter = oldState.isManualSs && !newState.isManualSs
         return (turnedOffIso || turnedOffShutter) && ExposureMode.resolve(newState, caps) == ExposureMode.FULL_MANUAL
     }
-
-    private const val LOW_LIGHT_BOOST_MAX_FPS = 30
 }

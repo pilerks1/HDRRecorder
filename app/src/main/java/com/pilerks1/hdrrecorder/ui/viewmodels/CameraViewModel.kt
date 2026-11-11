@@ -3,7 +3,6 @@ package com.pilerks1.hdrrecorder.ui.viewmodels
 import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
 import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 
-import android.util.Range
 import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -23,9 +22,9 @@ import com.pilerks1.hdrrecorder.data.RecordingConfiguration
 import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
 import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
-import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
 import com.pilerks1.hdrrecorder.data.camera.DesiredCameraState
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
 import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
 import com.pilerks1.hdrrecorder.data.camera.CameraRuntime
@@ -41,8 +40,6 @@ import com.pilerks1.hdrrecorder.ui.CameraUiEvent
 import com.pilerks1.hdrrecorder.ui.CameraUiState
 import com.pilerks1.hdrrecorder.ui.ManualControlsState
 import com.pilerks1.hdrrecorder.ui.resetManualSlidersToAuto
-import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeBound
-import com.pilerks1.hdrrecorder.ui.manualcontrols.FpsRangeMath
 import com.pilerks1.hdrrecorder.ui.manualcontrols.availableControlPanels
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -52,7 +49,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * Managers are constructor-injected (via CameraViewModelFactory in MainActivity) so the
@@ -78,7 +74,6 @@ internal class CameraViewModel(
     private var lastDisplayRotation = 0
     private var cameraRebindJob: Job? = null
     private var recordingStartJob: Job? = null
-    private var lowLightBoostApplyJob: Job? = null
     private var exposureTransitionJob: Job? = null
     private var exposureTransitionGeneration = 0L
 
@@ -110,6 +105,11 @@ internal class CameraViewModel(
         // The recording-state collector also delivers the initial stats state.
         collectRecordingState()
         collectLowLightBoostState()
+        viewModelScope.launch {
+            controlCoordinator.lowLightBoostRequest.collect { request ->
+                _uiState.update { it.copy(lowLightBoostRequest = request) }
+            }
+        }
 
         collectZoomState()
         viewModelScope.launch {
@@ -134,9 +134,11 @@ internal class CameraViewModel(
      */
     private fun updateSettings(requiresHardRebind: Boolean = false, update: (CameraUiState) -> CameraUiState) {
         if (isRecordingBusy()) return
-        _uiState.update(update)
+        val wasBoostSelected = _uiState.value.manualControlsState.isLowLightBoostEnabled
+        _uiState.update { update(it).normalizeLowLightBoost() }
         if (!cameraRuntime.usesCameraHardware) return
 
+        if (wasBoostSelected && !_uiState.value.manualControlsState.isLowLightBoostEnabled) applyInterop()
         when {
             requiresHardRebind -> requestRebind()
             // Defer changes while in settings UI
@@ -222,23 +224,8 @@ internal class CameraViewModel(
             is CameraUiEvent.TogglePause -> togglePause()
 
             // Draft settings modifications (saved only by Add/Save)
-            is CameraUiEvent.CycleFps -> {
-                var disabledLowLightBoost = false
-                updateSettings(requiresHardRebind = true) { state ->
-                    val newFps = when (state.selectedFps) { 24 -> 30; 30 -> 60; else -> 24 }
-                    disabledLowLightBoost =
-                        state.manualControlsState.isLowLightBoostEnabled &&
-                            newFps > LOW_LIGHT_BOOST_MAX_FPS
-                    state.copy(
-                        selectedFps = newFps,
-                        manualControlsState = if (disabledLowLightBoost) {
-                            state.manualControlsState.copy(isLowLightBoostEnabled = false)
-                        } else {
-                            state.manualControlsState
-                        }
-                    )
-                }
-                if (disabledLowLightBoost) applyLowLightBoostPreference()
+            is CameraUiEvent.CycleFps -> updateSettings(requiresHardRebind = true) { state ->
+                state.copy(selectedFps = when (state.selectedFps) { 24 -> 30; 30 -> 60; else -> 24 })
             }
             is CameraUiEvent.CycleResolution -> {
                 updateSettings(requiresHardRebind = true) { state ->
@@ -469,6 +456,7 @@ internal class CameraViewModel(
         }
         exposureTransitionJob?.cancel()
         exposureTransitionGeneration++
+        controlCoordinator.invalidateLowLightBoostRequest()
         _uiState.update { it.withPreset(preset).copy(storageUri = destination, isExposureTransitioning = false) }
         preferencesManager.storageUri = destination
         statsManager.updateStorageUri(destination)
@@ -483,7 +471,7 @@ internal class CameraViewModel(
     private fun normalizeManualControls() {
         val caps = _uiState.value.cameraCapabilities ?: return
         _uiState.update {
-            it.copy(manualControlsState = ManualControlStateUpdater.normalize(it.manualControlsState, caps, it.selectedFps))
+            it.copy(manualControlsState = ManualControlStateUpdater.normalize(it.manualControlsState, caps, it.selectedFps, it.previewSettings.frameRate))
         }
     }
 
@@ -559,26 +547,14 @@ internal class CameraViewModel(
             shutterNanos = telemetry.shutterNanos,
             postRawSensitivityBoost = telemetry.postRawSensitivityBoost ?: 100
         )
-        val (calculatedState, triggersRebind) = ManualControlStateUpdater.calculateNextState(
+        val (newState, triggersRebind) = ManualControlStateUpdater.calculateNextState(
             oldControls,
             caps,
             exposureDefaults,
+            currentUi.selectedFps,
+            currentUi.previewSettings.frameRate,
             updater
         )
-        val newState = if (
-            oldControls.isLowLightBoostEnabled &&
-            calculatedState.isLowLightBoostEnabled &&
-            oldControls.isManualFps &&
-            !calculatedState.isManualFps &&
-            currentUi.selectedFps > LOW_LIGHT_BOOST_MAX_FPS
-        ) {
-            calculatedState.copy(isLowLightBoostEnabled = false)
-        } else {
-            calculatedState
-        }
-        val lowLightBoostChanged =
-            oldControls.isLowLightBoostEnabled != newState.isLowLightBoostEnabled
-
         if (!cameraRuntime.usesCameraHardware) {
             _uiState.update { it.copy(manualControlsState = newState) }
             return
@@ -592,8 +568,7 @@ internal class CameraViewModel(
                 oldControls = oldControls,
                 targetControls = newState,
                 defaults = exposureDefaults,
-                triggersRebind = triggersRebind,
-                lowLightBoostChanged = lowLightBoostChanged
+                triggersRebind = triggersRebind
             )
             return
         }
@@ -602,19 +577,22 @@ internal class CameraViewModel(
 
         if (triggersRebind) requestRebind()
         applyInterop(coalesce = true)
-        if (lowLightBoostChanged) applyLowLightBoostPreference()
     }
 
     private fun beginExposureTransition(
         oldControls: ManualControlsState,
         targetControls: ManualControlsState,
         defaults: ManualControlStateUpdater.ExposureDefaults,
-        triggersRebind: Boolean,
-        lowLightBoostChanged: Boolean
+        triggersRebind: Boolean
     ) {
         exposureTransitionJob?.cancel()
         val generation = ++exposureTransitionGeneration
-        _uiState.update { it.copy(isExposureTransitioning = true) }
+        _uiState.update {
+            it.copy(
+                manualControlsState = it.manualControlsState.copy(isLowLightBoostEnabled = targetControls.isLowLightBoostEnabled),
+                isExposureTransitioning = true
+            )
+        }
 
         exposureTransitionJob = viewModelScope.launch {
             var resolved: ManualControlsState? = null
@@ -645,7 +623,6 @@ internal class CameraViewModel(
             }
             if (resolved == null || generation != exposureTransitionGeneration) return@launch
             if (triggersRebind) requestRebind()
-            if (lowLightBoostChanged) applyLowLightBoostPreference()
         }
     }
 
@@ -687,7 +664,6 @@ internal class CameraViewModel(
                 pendingHardRebind = true
                 return
             }
-            lowLightBoostApplyJob?.cancel()
             _uiState.update { it.copy(isCameraReady = false) }
             cameraManager.requestBindWhenReady(
                 lifecycleOwner = lifecycleOwner,
@@ -720,17 +696,20 @@ internal class CameraViewModel(
                         camera2Settings = it.camera2Settings.reconcile(caps.camera2Modes),
                         activePanel = it.activePanel?.takeIf { panel -> panel in availableControlPanels(caps) },
                         manualControlsState = ManualControlStateUpdater.normalize(
-                            it.manualControlsState, caps, it.selectedFps
+                            it.manualControlsState, caps, it.selectedFps, outcome.previewSettings.frameRate
                         ),
                         isCameraReady = true
                     )
                 }
                 applyInterop()
-                applyLowLightBoostPreference()
             }
             // The rejected settings never reached the camera; show what is actually bound.
-            is BindOutcome.Retained -> _uiState.update {
-                it.withCaptureConfiguration(outcome.configuration).copy(isCameraReady = it.zoomState.isReady)
+            is BindOutcome.Retained -> {
+                _uiState.update {
+                    it.withCaptureConfiguration(outcome.configuration).normalizeLowLightBoost()
+                        .copy(isCameraReady = it.zoomState.isReady)
+                }
+                applyInterop()
             }
             BindOutcome.Failed -> Unit // Nothing is bound, so the camera remains unready.
         }
@@ -739,112 +718,19 @@ internal class CameraViewModel(
     private fun requestedFpsForStats(): Int? = _uiState.value.selectedFps
         .takeUnless { _uiState.value.manualControlsState.isManualFps }
 
+    private fun CameraUiState.normalizeLowLightBoost(): CameraUiState {
+        val caps = cameraCapabilities ?: return this
+        return copy(manualControlsState = LowLightBoostPolicy.normalize(
+            manualControlsState, caps.supportsLowLightBoost, selectedFps, previewSettings.frameRate
+        ))
+    }
+
     private fun setLowLightBoostRequested(enabled: Boolean) {
         val current = _uiState.value
-        if (enabled && current.cameraCapabilities?.supportsLowLightBoost != true) return
-
-        val controls = current.manualControlsState
-        val caps = current.cameraCapabilities
-        if (
-            enabled &&
-            caps != null &&
-            ExposureMode.resolve(controls, caps) != ExposureMode.AUTO
-        ) {
-            updateManualControls { it.withAutoExposure() }
-            viewModelScope.launch {
-                exposureTransitionJob?.join()
-                if (
-                    !_uiState.value.isExposureTransitioning &&
-                    _uiState.value.manualControlsState.isLowLightBoostEnabled.not()
-                ) {
-                    setLowLightBoostRequested(true)
-                }
-            }
-            return
-        }
-
-        val effectiveUpperFps = if (controls.isManualFps) {
-            controls.fpsRange?.upper ?: current.selectedFps
-        } else {
-            current.selectedFps
-        }
-        if (
-            enabled &&
-            current.isRecording &&
-            effectiveUpperFps > LOW_LIGHT_BOOST_MAX_FPS
-        ) return
-
-        val currentRange = controls.fpsRange
-        val adjustedRange = if (
-            enabled && caps != null && controls.isManualFps &&
-            currentRange != null && currentRange.upper > LOW_LIGHT_BOOST_MAX_FPS
-        ) {
-            // Without a supported range at or below the boost limit, boost cannot be enabled.
-            clampManualFpsForLowLightBoost(currentRange, caps) ?: return
-        } else {
-            currentRange
-        }
-        val needsHardRebind = enabled &&
-            !controls.isManualFps &&
-            current.selectedFps > LOW_LIGHT_BOOST_MAX_FPS
-
-        _uiState.update { state ->
-            val base = if (enabled) state.manualControlsState.withAutoExposure() else state.manualControlsState
-            state.copy(
-                selectedFps = if (needsHardRebind) LOW_LIGHT_BOOST_MAX_FPS else state.selectedFps,
-                manualControlsState = base.copy(isLowLightBoostEnabled = enabled, fpsRange = adjustedRange)
-            )
-        }
-
+        if (enabled && (!current.isLowLightBoostEligible || !current.isCameraReady || current.isExposureTransitioning)) return
+        if (current.manualControlsState.isLowLightBoostEnabled == enabled) return
+        _uiState.update { it.copy(manualControlsState = it.manualControlsState.copy(isLowLightBoostEnabled = enabled)) }
         applyInterop()
-        if (needsHardRebind) {
-            requestRebind()
-        } else {
-            applyLowLightBoostPreference()
-        }
-    }
-
-    /** Returns null when the camera reports no FPS range compatible with low-light boost. */
-    private fun clampManualFpsForLowLightBoost(
-        currentRange: Range<Int>,
-        capabilities: CameraCapabilities
-    ): Range<Int>? {
-        val compatibleRanges = capabilities.fpsRanges.filter { it.upper <= LOW_LIGHT_BOOST_MAX_FPS }
-        if (compatibleRanges.isEmpty()) return null
-
-        val snapped = FpsRangeMath.clampToSupportedRange(
-            newRange = currentRange.lower.toFloat()..LOW_LIGHT_BOOST_MAX_FPS.toFloat(),
-            oldRange = currentRange.lower.toFloat()..currentRange.upper.toFloat(),
-            draggedBound = FpsRangeBound.UPPER,
-            dragDirection = -1f,
-            validRanges = compatibleRanges
-        )
-        return Range(snapped.start.roundToInt(), snapped.endInclusive.roundToInt())
-    }
-
-    private fun applyLowLightBoostPreference() {
-        if (!cameraRuntime.usesCameraHardware) return
-        if (_uiState.value.cameraCapabilities?.supportsLowLightBoost != true) return
-        val desired = _uiState.value.manualControlsState.isLowLightBoostEnabled
-        lowLightBoostApplyJob?.cancel()
-        lowLightBoostApplyJob = viewModelScope.launch {
-            try {
-                controlCoordinator.setLowLightBoost(desired)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                if (_uiState.value.manualControlsState.isLowLightBoostEnabled == desired) {
-                    _uiState.update {
-                        it.copy(
-                            manualControlsState = it.manualControlsState.copy(
-                                isLowLightBoostEnabled = false
-                            )
-                        )
-                    }
-                }
-                reporter.report(IssueCode.CAMERA_CONTROL, "lowLightBoost", error)
-            }
-        }
     }
 
     private fun desiredState(controls: ManualControlsState = _uiState.value.manualControlsState): DesiredCameraState {
@@ -856,7 +742,8 @@ internal class CameraViewModel(
                 camera2 = state.camera2Settings
             ),
             capabilities = state.cameraCapabilities,
-            selectedFps = state.selectedFps
+            selectedFps = state.selectedFps,
+            previewFpsRange = state.previewSettings.frameRate
         )
     }
 
@@ -921,8 +808,8 @@ internal class CameraViewModel(
 
     private fun collectLowLightBoostState() {
         viewModelScope.launch {
-            cameraManager.isLowLightBoostActive.collect { active ->
-                _uiState.update { it.copy(isLowLightBoostActive = active) }
+            cameraManager.lowLightBoostState.collect { state ->
+                _uiState.update { it.copy(lowLightBoostState = state) }
             }
         }
     }
@@ -946,6 +833,5 @@ internal class CameraViewModel(
 
     private companion object {
         const val CAMERA_REBIND_DEBOUNCE_MS = 300L
-        const val LOW_LIGHT_BOOST_MAX_FPS = 30
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.sp
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
 import com.pilerks1.hdrrecorder.data.camera.CameraCapabilities
 import com.pilerks1.hdrrecorder.model.CameraTelemetry
 import com.pilerks1.hdrrecorder.model.RecordingAspectRatio
@@ -48,7 +49,7 @@ fun availableControlPanels(
     hasShutter = caps?.hasManualShutterControl == true,
     hasIso = caps?.hasManualIsoControl == true,
     hasExposureCompensation = caps?.let {
-        it.hasExposureCompensationControl || it.supportsLowLightBoost
+        it.hasExposureCompensationControl || LowLightBoostPolicy.isSupported(it.supportsLowLightBoost)
     } == true,
     hasFocus = caps?.hasManualFocusControl == true,
     hasWhiteBalance = caps?.supportsCCT == true
@@ -190,6 +191,7 @@ fun ActiveControlPanel(
     onSetSs: (Boolean, Long?) -> Unit,
     onSetEv: (Boolean, Int?) -> Unit,
     onSetLowLightBoost: (Boolean) -> Unit,
+    isLowLightBoostEligible: Boolean,
     onSetFocus: (Boolean, Float?) -> Unit,
     onSetWb: (Boolean, Int?, Int?) -> Unit,
     onSetFps: (Boolean, Range<Int>?) -> Unit,
@@ -297,14 +299,11 @@ fun ActiveControlPanel(
                             onSetEv(false, 0)
                             onManualControlInteractionFinished()
                         },
-                        secondaryButtonText = if (caps?.supportsLowLightBoost == true) "NHT" else null,
-                        secondaryButtonEnabled = !isRecording || maxOf(
-                            if (state.isManualFps) state.fpsRange?.upper ?: autoFps else autoFps,
-                            0
-                        ) <= 30,
+                        secondaryButtonText = if (LowLightBoostPolicy.isSupported(caps?.supportsLowLightBoost == true)) "NHT" else null,
+                        secondaryButtonEnabled = controlsEnabled && isLowLightBoostEligible,
                         secondaryButtonColor = if (state.isLowLightBoostEnabled) Color.Yellow else Color.DarkGray,
                         secondaryButtonTextColor = if (state.isLowLightBoostEnabled) Color.Black else Color.LightGray,
-                        onSecondaryButtonClick = if (caps?.supportsLowLightBoost == true) {
+                        onSecondaryButtonClick = if (LowLightBoostPolicy.isSupported(caps?.supportsLowLightBoost == true)) {
                             {
                                 onSetLowLightBoost(!state.isLowLightBoostEnabled)
                                 onManualControlInteractionFinished()

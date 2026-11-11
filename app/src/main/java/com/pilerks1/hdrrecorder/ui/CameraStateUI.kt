@@ -1,5 +1,9 @@
 package com.pilerks1.hdrrecorder.ui
 
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostObservation
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostRuntimeState
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostRequestState
 import androidx.camera.core.MeteringPoint
 import com.pilerks1.hdrrecorder.data.camera.core.MeteringAnchor
 import com.pilerks1.hdrrecorder.data.camera.core.MeteringMode
@@ -62,7 +66,8 @@ data class CameraUiState(
     val isCameraReady: Boolean = false,
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
-    val isLowLightBoostActive: Boolean = false,
+    val lowLightBoostState: LowLightBoostObservation = LowLightBoostObservation(),
+    val lowLightBoostRequest: LowLightBoostRequestState = LowLightBoostRequestState(),
     val previewPlaceholderLabel: String? = null,
 
     // Settings / Configuration
@@ -107,7 +112,17 @@ data class CameraUiState(
     // UI Visibility
     val isSettingsSheetVisible: Boolean = false,
     val isExposureTransitioning: Boolean = false
-)
+) {
+    val isLowLightBoostEligible: Boolean
+        get() = LowLightBoostPolicy.isSupported(cameraCapabilities?.supportsLowLightBoost == true) &&
+            LowLightBoostPolicy.isEligible(manualControlsState, selectedFps, previewSettings.frameRate)
+
+    val isLowLightBoostActive: Boolean
+        get() = isCameraReady && !isExposureTransitioning && manualControlsState.isLowLightBoostEnabled &&
+            isLowLightBoostEligible &&
+            lowLightBoostState.generation != null && lowLightBoostState.generation == lowLightBoostRequest.generation &&
+            lowLightBoostState.state == LowLightBoostRuntimeState.ACTIVE
+}
 
 /**
  * Represents all possible user actions or events that can occur in the Camera UI.

@@ -113,6 +113,17 @@ private fun CameraXReport(report: CompatibilityReport) {
             Choice("Video codec", codec, listOf(null to "Auto") + report.videoCodecs.map { it to it }) { codec = it }
             Choice("Stabilization", stabilization, listOf(false to "Off", true to "On")) { stabilization = it }
             Choice("AE boost", boost, listOf(false to "Off", true to "On")) { boost = it }
+            if (boost) {
+                Text(
+                    "AE boost is conditional on the camera accepting the session and low scene lighting. " +
+                        "It requires automatic exposure and a target FPS range at or below 30. " +
+                        "The platform documents up to two outputs: preview (SurfaceView/TextureView) and video (MediaCodec/MediaRecorder). " +
+                        "Actual FPS may fall to 10; noise and processing may change. " +
+                        "A conditional result does not confirm active brightening.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.LightGray
+                )
+            }
             Text("Preview FPS · Auto", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
             Text("Preview dynamic range · Auto", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
         }

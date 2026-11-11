@@ -17,7 +17,14 @@ import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestOverrides
 import com.pilerks1.hdrrecorder.data.camera.core.CameraRequestSupersededException
 import com.pilerks1.hdrrecorder.data.camera.core.CameraResultReader
 import com.pilerks1.hdrrecorder.data.camera.core.InteropSettings
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostRequestState
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostRequestStatus
 import com.pilerks1.hdrrecorder.data.camera.core.ExposureMode
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -46,7 +53,8 @@ data class DesiredCameraState(
     val controls: CameraControlValues,
     val settings: InteropSettings,
     val capabilities: CameraCapabilities?,
-    val selectedFps: Int
+    val selectedFps: Int,
+    val previewFpsRange: Range<Int>? = null
 )
 
 /** Serializes submissions, native CameraX controls and result-driven exposure handoffs. */
@@ -61,6 +69,16 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
     private var lastSubmissionMs = 0L
     private var transitionVersion = 0L
     private var transitioning = false
+    private var boostRequested = false
+    private val boostChanges = MutableStateFlow(0L)
+    private var boostRevision = 0L
+        set(value) {
+            field = value
+            boostChanges.value = value
+        }
+    private var attemptedBoostRevision: Long? = null
+    private val _lowLightBoostRequest = MutableStateFlow(LowLightBoostRequestState())
+    val lowLightBoostRequest = _lowLightBoostRequest.asStateFlow()
     private val _meteringState = MutableStateFlow(RegionalMeteringState())
     val meteringState = _meteringState.asStateFlow()
     private var meteringPoint: MeteringPoint? = null
@@ -110,6 +128,7 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
     fun attach(attachment: CameraXRequestBackend) {
         detach()
         backend = attachment
+        _lowLightBoostRequest.value = LowLightBoostRequestState(generation = attachment.generation)
         _meteringState.value = RegionalMeteringState(generation = attachment.generation)
         // The owner supplies a capability-adapted desired state after binding.
     }
@@ -124,6 +143,10 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         transitioning = false
         backend?.detach()
         backend = null
+        desired = null
+        boostRevision++
+        attemptedBoostRevision = null
+        _lowLightBoostRequest.value = LowLightBoostRequestState()
     }
 
     fun update(state: DesiredCameraState, coalesce: Boolean = false) {
@@ -131,6 +154,7 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         if (previous != null && (manualModes(previous.controls) != manualModes(state.controls) ||
             focusMode(previous) != focusMode(state))
         ) restartMetering()
+        updateBoostIntent(state)
         desired = state
         revision++
         immediate = immediate || !coalesce
@@ -150,12 +174,78 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         meteringRevision++
     }
 
-    suspend fun setLowLightBoost(enabled: Boolean) = mutex.withLock {
-        try {
-            backend?.setLowLightBoost(enabled)
-        } catch (_: CameraRequestSupersededException) {
-            // Rebinding reapplies the current preference.
+    private fun updateBoostIntent(state: DesiredCameraState) {
+        val requested = state.boostEnabled()
+        if (requested != boostRequested) {
+            boostRequested = requested
+            boostRevision++
+            _lowLightBoostRequest.value = LowLightBoostRequestState(
+                generation = backend?.generation, revision = boostRevision, enabled = requested
+            )
         }
+    }
+
+    private fun DesiredCameraState.boostEnabled(): Boolean =
+        controls.isLowLightBoostEnabled && LowLightBoostPolicy.isSupported(capabilities?.supportsLowLightBoost == true) &&
+            LowLightBoostPolicy.isEligible(controls, selectedFps, previewFpsRange)
+
+    /** A loaded preset supersedes pending completions; its new bind owns the next attempt. */
+    fun invalidateLowLightBoostRequest() {
+        desired = null
+        boostRevision++
+        attemptedBoostRevision = boostRevision
+        _lowLightBoostRequest.value = LowLightBoostRequestState(generation = backend?.generation)
+    }
+
+    private suspend fun reconcileLowLightBoost(attachment: CameraXRequestBackend, enabled: Boolean) {
+        ensureCurrent(attachment)
+        if (enabled != boostRequested) throw CameraRequestSupersededException()
+        if (attemptedBoostRevision == boostRevision) return
+        val version = boostRevision
+        attemptedBoostRevision = version
+        val pending = LowLightBoostRequestState(
+            attachment.generation, version, enabled, LowLightBoostRequestStatus.PENDING
+        )
+        _lowLightBoostRequest.value = pending
+        try {
+            coroutineScope {
+                val request = async(start = CoroutineStart.UNDISPATCHED) { attachment.setLowLightBoost(enabled) }
+                val superseded = async { boostChanges.first { it != version } }
+                try {
+                    select {
+                        request.onAwait { }
+                        superseded.onAwait { throw CameraRequestSupersededException() }
+                    }
+                } finally {
+                    request.cancel()
+                    superseded.cancel()
+                }
+            }
+            ensureCurrent(attachment)
+            if (version == boostRevision) {
+                _lowLightBoostRequest.value = pending.copy(status = LowLightBoostRequestStatus.SUCCEEDED)
+            }
+        } catch (superseded: CameraRequestSupersededException) {
+            if (backend === attachment && version == boostRevision) {
+                _lowLightBoostRequest.value = pending.copy(status = LowLightBoostRequestStatus.IDLE)
+            }
+            throw superseded
+        } catch (cancelled: CancellationException) {
+            // Cancelling the await does not undo a CameraX request. Reconcile the latest intent.
+            if (backend === attachment && version == boostRevision) {
+                attemptedBoostRevision = null
+                _lowLightBoostRequest.value = pending.copy(status = LowLightBoostRequestStatus.IDLE)
+            }
+            signal.trySend(Unit)
+            throw cancelled
+        } catch (failure: Exception) {
+            if (backend === attachment && version == boostRevision) {
+                _lowLightBoostRequest.value = pending.copy(status = LowLightBoostRequestStatus.FAILED)
+                reporter.report(IssueCode.CAMERA_CONTROL, "lowLightBoost", failure)
+            }
+        }
+        ensureCurrent(attachment)
+        if (version != boostRevision) throw CameraRequestSupersededException()
     }
 
     // Native zoom supersedes earlier zoom requests without waiting for exposure submissions.
@@ -258,8 +348,12 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
 
     private suspend fun submit(attachment: CameraXRequestBackend, state: DesiredCameraState, lock: Boolean? = null) {
         ensureCurrent(attachment)
+        val supportsBoost = LowLightBoostPolicy.isSupported(state.capabilities?.supportsLowLightBoost == true)
+        val enableBoost = state.boostEnabled()
+        if (supportsBoost && !enableBoost) reconcileLowLightBoost(attachment, false)
         attachment.apply(snapshot(state, lock))
         ensureCurrent(attachment)
+        if (supportsBoost && enableBoost) reconcileLowLightBoost(attachment, true)
         lastSubmissionMs = SystemClock.elapsedRealtime()
     }
 
@@ -271,6 +365,11 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
         restartMetering()
         val version = ++transitionVersion
         transitioning = true
+        // Withdraw boost immediately, but commit exposure targets only after the handoff succeeds.
+        desired = desired?.let { state ->
+            state.copy(controls = state.controls.copy(isLowLightBoostEnabled = target.controls.isLowLightBoostEnabled))
+        }
+        updateBoostIntent(target)
         return try {
             mutex.withLock {
                 val attachment = backend ?: throw CameraRequestSupersededException()
@@ -290,8 +389,12 @@ class CameraControlCoordinator(private val results: CameraResultReader, private 
                             target.controls.copy(isManualEv = false, evValueIndex = 0)
                         } else target.controls
                         if (newMode != ExposureMode.AUTO) {
+                            if (LowLightBoostPolicy.isSupported(caps.supportsLowLightBoost)) {
+                                reconcileLowLightBoost(attachment, false)
+                                checkCurrent()
+                            }
                             val held = if (waitToLockAe && oldMode != ExposureMode.FULL_MANUAL && caps.supportsAeLock) {
-                                val source = target.copy(controls = previous)
+                                val source = target.copy(controls = previous.copy(isLowLightBoostEnabled = false))
                                 val lockedOverrides = snapshot(source, lock = true)
                                 val before = results.latest.value?.frameNumber ?: -1L
                                 submit(attachment, source, lock = true)

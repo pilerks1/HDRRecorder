@@ -18,7 +18,6 @@ class CameraXRequestBackend(
     private val active = AtomicBoolean(true)
     private var successful: CameraRequestOverrides? = null
     private val ownedKeys = mutableSetOf<CaptureRequest.Key<*>>()
-    private var lowLightBoost: Boolean? = null
 
     suspend fun apply(overrides: CameraRequestOverrides) {
         ensureActive()
@@ -45,13 +44,10 @@ class CameraXRequestBackend(
 
     suspend fun setLowLightBoost(enabled: Boolean) {
         ensureActive()
-        if (lowLightBoost == enabled) return
         try {
             control.enableLowLightBoostAsync(enabled).await()
             ensureActive()
-            lowLightBoost = enabled
         } catch (error: Exception) {
-            lowLightBoost = null
             if (error is CameraControl.OperationCanceledException) throw CameraRequestSupersededException(error)
             throw error
         }

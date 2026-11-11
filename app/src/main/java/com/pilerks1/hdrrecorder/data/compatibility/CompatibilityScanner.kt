@@ -18,6 +18,7 @@ import com.pilerks1.hdrrecorder.data.PreviewConfiguration
 import com.pilerks1.hdrrecorder.data.RecordingConfiguration
 import com.pilerks1.hdrrecorder.data.RecordingSessionConfiguration
 import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
+import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
 import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
 import com.pilerks1.hdrrecorder.data.storage.PrivateDocumentStore
 import com.pilerks1.hdrrecorder.data.storage.StorageManager.Companion.COMPATIBILITY_REPORT_ID
@@ -85,7 +86,7 @@ class CompatibilityScanner(
             val previewStabilization = query("PreviewCapabilities.isStabilizationSupported") {
                 Preview.getPreviewCapabilities(info).isStabilizationSupported
             }
-            val boost = query("CameraInfo.isLowLightBoostSupported") { info.isLowLightBoostSupported }
+            val boost = query("CameraInfo.isLowLightBoostSupported") { LowLightBoostPolicy.isSupported(info.isLowLightBoostSupported) }
             val preview = query("PreviewConfiguration.queryOptions") { PreviewConfiguration.queryOptions(info) }
             val collector = Camera2ReportCollector(CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow(), reporter)
             val camera2 = collector.collect(cameraId) + CompatibilityTable("Preview · CameraX", listOf("Field", "Value"), listOf(
@@ -183,7 +184,7 @@ class CompatibilityScanner(
                     }
                 }
                 val boostStatus = when {
-                    status == S.UNSUPPORTED || boost == false || config.fps > 30 -> S.UNSUPPORTED
+                    status == S.UNSUPPORTED || boost == false || !LowLightBoostPolicy.isFpsCompatible(config.fps) -> S.UNSUPPORTED
                     status == S.UNKNOWN || boost == null -> S.UNKNOWN
                     else -> S.CONDITIONAL
                 }
