@@ -1,8 +1,11 @@
 package com.pilerks1.hdrrecorder.data
 
+import android.util.Range
 import androidx.annotation.OptIn
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.DynamicRange
+import androidx.camera.core.Preview
+import androidx.camera.core.SessionConfig
 import androidx.camera.video.ExperimentalMimeTypeApi
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapabilities
@@ -10,6 +13,13 @@ import com.pilerks1.hdrrecorder.model.RecordingOptions
 import com.pilerks1.hdrrecorder.model.VideoColorOption
 import com.pilerks1.hdrrecorder.model.VideoEncoding
 import com.pilerks1.hdrrecorder.ui.CameraUiState
+import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+import com.pilerks1.hdrrecorder.model.Resolution
+
+/** A known configuration rejection, independent of platform exception wording. */
+class CameraConfigurationException(val issue: IssueCode, cause: Throwable? = null) :
+    IllegalArgumentException(issue.name, cause)
 
 /** CameraX capability discovery and recording configuration share the same encoding mapping. */
 object RecordingConfiguration {
@@ -44,17 +54,59 @@ object RecordingConfiguration {
     }
 
     fun validate(state: CameraUiState, options: RecordingOptions) {
-        require(state.videoCodec == null || state.videoCodec in options.videoCodecs) {
-            "Video codec ${state.videoCodec} is not supported by this device"
+        requireSupported(state.videoCodec == null || state.videoCodec in options.videoCodecs, IssueCode.CONFIG_VIDEO_CODEC)
+        requireSupported(state.audioCodec == null || state.audioCodec in options.audioCodecs, IssueCode.CONFIG_AUDIO_CODEC)
+        requireSupported(state.videoBitDepth == 8 || state.videoBitDepth == 10, IssueCode.CONFIG_BIT_DEPTH)
+        requireSupported(VideoColorOption(state.videoBitDepth, state.encoding) in options.colors(state.videoCodec),
+            IssueCode.CONFIG_COLOR)
+        requireSupported(state.bitrate.isEmpty() || Bitrate.parse(state.bitrate) != null, IssueCode.CONFIG_VIDEO_BITRATE)
+        requireSupported(state.audioBitrate.isEmpty() || Bitrate.parseAudio(state.audioBitrate) != null, IssueCode.CONFIG_AUDIO_BITRATE)
+    }
+
+    /** Check only the requested configuration, before replacing a working camera session. */
+    @OptIn(ExperimentalMimeTypeApi::class)
+    fun validateSession(info: CameraInfo, state: CameraUiState, session: SessionConfig) {
+        val caps = if (state.videoCodec == null) Recorder.getVideoCapabilities(info)
+            else Recorder.getVideoCapabilities(info, state.videoCodec)
+        requireSupported(caps != null, IssueCode.CONFIG_VIDEO_CODEC)
+        requireSupported(isResolutionSupported(caps!!, state), IssueCode.CONFIG_RESOLUTION)
+        if (state.isStabilizationEnabled) {
+            requireSupported(caps.isStabilizationSupported && Preview.getPreviewCapabilities(info).isStabilizationSupported,
+                IssueCode.CONFIG_STABILIZATION)
         }
-        require(state.audioCodec == null || state.audioCodec in options.audioCodecs) {
-            "Audio codec ${state.audioCodec} is not supported by this device"
+        val supported = try {
+            info.isSessionConfigSupported(session)
+        } catch (error: IllegalArgumentException) {
+            // CameraX documents conflicting session options as IllegalArgumentException.
+            throw CameraConfigurationException(IssueCode.CONFIG_COMBINATION, error)
         }
-        require(VideoColorOption(state.videoBitDepth, state.encoding) in options.colors(state.videoCodec)) {
-            "The selected video codec does not support ${state.videoBitDepth} bit ${state.encoding.displayName}"
+        requireSupported(supported, IssueCode.CONFIG_COMBINATION)
+        if (!state.manualControlsState.isManualFps) {
+            requireSupported(Range(state.selectedFps, state.selectedFps) in info.getSupportedFrameRateRanges(session),
+                IssueCode.CONFIG_FRAME_RATE)
         }
-        require(state.bitrate.isEmpty() || Bitrate.parse(state.bitrate) != null) { "Invalid video bitrate" }
-        require(state.audioBitrate.isEmpty() || Bitrate.parseAudio(state.audioBitrate) != null) { "Invalid audio bitrate" }
+    }
+
+    fun isResolutionSupported(caps: VideoCapabilities, state: CameraUiState): Boolean {
+        val range = dynamicRange(state)
+        val quality = state.selectedResolution.toCameraXQuality()
+        return if (state.selectedResolution == Resolution.HIGHEST || state.encoding == VideoEncoding.UNSPECIFIED)
+            caps.isQualitySupported(quality, range) else quality in caps.getSupportedQualities(range)
+    }
+
+    fun diagnosticContext(state: CameraUiState): Map<String, String> = mapOf(
+        "resolution" to state.selectedResolution.name,
+        "fps" to if (state.manualControlsState.isManualFps) {
+            state.manualControlsState.fpsRange?.let { if (it.lower == it.upper) "${it.upper}" else "${it.lower}–${it.upper}" } ?: "Auto"
+        } else state.selectedFps.toString(),
+        "encoding" to state.encoding.displayName,
+        "bitDepth" to state.videoBitDepth.toString(),
+        "videoCodec" to (state.videoCodec ?: "Auto"),
+        "stabilization" to state.isStabilizationEnabled.toString()
+    )
+
+    private fun requireSupported(supported: Boolean, issue: IssueCode) {
+        if (!supported) throw CameraConfigurationException(issue)
     }
 
     fun configure(builder: Recorder.Builder, state: CameraUiState): Recorder.Builder = builder.apply {

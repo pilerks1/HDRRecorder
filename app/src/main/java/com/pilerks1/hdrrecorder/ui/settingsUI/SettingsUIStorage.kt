@@ -79,7 +79,7 @@ private fun getReadablePath(uriString: String?): String {
         val path = uri.path ?: uri.toString()
         // Strips out the initial provider jargon so it just shows the folder structure
         URLDecoder.decode(path, "UTF-8").substringAfter("tree/")
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
         "Custom Directory"
     }
 }

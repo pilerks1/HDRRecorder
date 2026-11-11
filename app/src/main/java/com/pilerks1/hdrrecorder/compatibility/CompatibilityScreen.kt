@@ -1,5 +1,9 @@
 package com.pilerks1.hdrrecorder.compatibility
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.pilerks1.hdrrecorder.errorReporter
+import com.pilerks1.hdrrecorder.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +43,7 @@ fun CompatibilityScreen(
     hardwareEnabled: Boolean = true,
     mandatory: Boolean = false
 ) {
+    val reporter = LocalContext.current.errorReporter
     SystemUiManagement()
     val blocked = hardwareEnabled && (mandatory || state.loading || state.scanning)
     BackHandler(enabled = blocked) { }
@@ -58,9 +63,9 @@ fun CompatibilityScreen(
         Column(Modifier.padding(padding).fillMaxSize()) {
             when {
                 !hardwareEnabled -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Not reported") }
-                state.error != null -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+                state.failed -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center) {
-                    Text(state.error)
+                    TextButton(onClick = { reporter.showHistory(true) }) { Text(stringResource(R.string.diagnostics_open)) }
                     Button(onClick = onRetry) { Text("Retry") }
                 }
                 state.loading || state.scanning -> Column(Modifier.fillMaxSize().padding(24.dp),

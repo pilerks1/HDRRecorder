@@ -1,9 +1,10 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import android.app.Application
-import android.util.Log
 import android.util.Range
-import android.widget.Toast
 import androidx.camera.core.SurfaceRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
@@ -16,6 +17,7 @@ import com.pilerks1.hdrrecorder.model.CameraPreset
 import com.pilerks1.hdrrecorder.model.PresetSettings
 import com.pilerks1.hdrrecorder.data.PreferencesManager
 import com.pilerks1.hdrrecorder.data.RecordingManager
+import com.pilerks1.hdrrecorder.data.RecordingConfiguration
 import com.pilerks1.hdrrecorder.data.StatsManager
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
 import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
@@ -62,7 +64,8 @@ internal class CameraViewModel(
     private val recordingManager: RecordingManager,
     private val recordingStorage: RecordingStorageManager,
     private val controlCoordinator: CameraControlCoordinator,
-    private val cameraRuntime: CameraRuntime
+    private val cameraRuntime: CameraRuntime,
+    private val reporter: ErrorReporter
 ) : AndroidViewModel(application) {
 
     // --- Deferred settings and camera binding state ---
@@ -91,6 +94,13 @@ internal class CameraViewModel(
         _uiState.value = (cameraRuntime.initialUiState() ?: CameraUiState()).copy(
             storageUri = preferencesManager.storageUri
         )
+        reporter.contextProvider = {
+            val state = _uiState.value
+            RecordingConfiguration.diagnosticContext(state) +
+                mapOf("cameraId" to (state.zoomState.inventory?.defaultCameraId ?: "unavailable"),
+                "recording" to state.isRecording.toString(),
+                "destination" to if (state.storageUri == null) "default" else "custom")
+        }
         initializePresets()
 
         collectRecordingState()
@@ -300,7 +310,7 @@ internal class CameraViewModel(
             is CameraUiEvent.SetPreviewFrameRate -> {
                 if (event.range == null || event.range in _uiState.value.previewOptions.frameRates) {
                     updateSettings(requiresHardRebind = true) {
-                        it.copy(previewSettings = it.previewSettings.copy(frameRate = event.range), previewSettingsError = null)
+                        it.copy(previewSettings = it.previewSettings.copy(frameRate = event.range))
                     }
                 }
             }
@@ -310,10 +320,8 @@ internal class CameraViewModel(
                 if (event.dynamicRange != null && event.dynamicRange !in state.previewOptions.dynamicRanges) return
                 val requested = state.copy(previewSettings = state.previewSettings.copy(dynamicRange = event.dynamicRange))
                 val error = if (cameraRuntime.usesCameraHardware) cameraManager.previewDynamicRangeError(requested) else null
-                if (error != null) {
-                    _uiState.update { it.copy(previewSettingsError = error) }
-                } else {
-                    updateSettings(requiresHardRebind = true) { requested.copy(previewSettingsError = null) }
+                if (error == null) {
+                    updateSettings(requiresHardRebind = true) { requested }
                 }
             }
 
@@ -334,7 +342,7 @@ internal class CameraViewModel(
                     val uri = event.uri.toUri()
                     recordingStorage.takePersistablePermission(uri)
                 } catch (e: Exception) {
-                    showPresetError("Could not access the selected recording folder")
+                    reporter.report(IssueCode.STORAGE_ACCESS, "selectRecordingFolder", e)
                     return
                 }
 
@@ -366,21 +374,16 @@ internal class CameraViewModel(
         }
     }
 
-    private fun showPresetError(message: String) {
-        _uiState.update { it.copy(presetError = message) }
-        Toast.makeText(getApplication(), message, Toast.LENGTH_LONG).show()
-    }
-
     private fun runPresetOperation(operation: suspend () -> Unit) {
         if (_uiState.value.isPresetBusy || recordingManager.isRecording.value) return
-        _uiState.update { it.copy(isPresetBusy = true, presetError = null) }
+        _uiState.update { it.copy(isPresetBusy = true) }
         viewModelScope.launch {
             try {
                 operation()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.e("CameraViewModel", "Preset operation failed", error)
+                // Refresh after partial operations; retain secondary failures on the original report.
                 // A bulk deletion may have removed some files before failing.
                 try {
                     refreshPresets()
@@ -388,9 +391,9 @@ internal class CameraViewModel(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (refreshError: Exception) {
-                    Log.e("CameraViewModel", "Could not refresh presets", refreshError)
+                    error.addSuppressed(refreshError)
                 }
-                showPresetError(error.message ?: "Preset operation failed")
+                reporter.report(IssueCode.PRESET_OPERATION, "presetOperation", error)
             } finally {
                 _uiState.update { it.copy(isPresetBusy = false) }
             }
@@ -415,7 +418,6 @@ internal class CameraViewModel(
         val listing = presetManager.list()
         presetDocuments = listing.presets
         _uiState.update { it.copy(presetsList = listing.presets.map { preset -> preset.name }) }
-        if (listing.errors.isNotEmpty()) showPresetError(listing.errors.joinToString("\n"))
     }
 
     private fun selectSavedPreset(preset: CameraPreset) {
@@ -452,8 +454,10 @@ internal class CameraViewModel(
         var destination = _uiState.value.storageUri
         if (preset.saveStorageLocation) {
             val saved = preset.storageUri
-            if (saved == null || recordingStorage.isUsablePresetDestination(saved)) destination = saved
-            else showPresetError("Preset recording folder is unavailable. Kept the current recording folder.")
+            val usable = saved?.let { recordingStorage.checkPresetDestination(it) } ?: Result.success(true)
+            if (usable.getOrDefault(false)) destination = saved
+            else reporter.report(IssueCode.PRESET_FOLDER, "applyPreset", usable.exceptionOrNull(),
+                mapOf("recovery" to "current folder kept"))
         }
         exposureTransitionJob?.cancel()
         exposureTransitionGeneration++
@@ -535,12 +539,12 @@ internal class CameraViewModel(
 
     private fun togglePause() {
         if (!cameraRuntime.usesCameraHardware) return
-        if (_uiState.value.isPaused) {
+        val changed = if (_uiState.value.isPaused) {
             recordingManager.resumeRecording()
         } else {
             recordingManager.pauseRecording()
         }
-        _uiState.update { it.copy(isPaused = !it.isPaused) }
+        if (changed) _uiState.update { it.copy(isPaused = !it.isPaused) }
     }
 
     private fun selectZoomLens(cameraId: String) {
@@ -641,7 +645,6 @@ internal class CameraViewModel(
                         isExposureTransitioning = false
                     )
                 }
-                if (result.usedUnlockedHandoff) Log.d("CameraViewModel", "Exposure handoff used an unlocked camera result")
                 if (triggersRebind && _uiState.value.isSettingsSheetVisible) pendingHardRebind = true
                 else if (triggersRebind) scheduleCameraRebind(debounce = true)
                 if (lowLightBoostChanged) applyLowLightBoostPreference()
@@ -653,7 +656,7 @@ internal class CameraViewModel(
                 if (generation == exposureTransitionGeneration) _uiState.update { it.copy(isExposureTransitioning = false) }
                 throw cancelled
             } catch (error: Exception) {
-                Log.w("CameraViewModel", "Exposure transition failed", error)
+                reporter.report(IssueCode.CAMERA_CONTROL, "exposureTransition", error)
                 if (generation == exposureTransitionGeneration) {
                     _uiState.update { it.copy(isExposureTransitioning = false) }
                 }
@@ -695,13 +698,12 @@ internal class CameraViewModel(
                 onSurfaceRequest = { request -> _surfaceRequest.value = request },
                 uiState = _uiState.value,
                 displayRotation = lastDisplayRotation,
-                onCameraBound = { caps, previewOptions, previewSettings, previewError ->
+                onCameraBound = { caps, previewOptions, previewSettings ->
                     _uiState.update {
                         it.copy(
                             cameraCapabilities = caps,
                             previewOptions = previewOptions,
                             previewSettings = previewSettings,
-                            previewSettingsError = previewError,
                             camera2Settings = it.camera2Settings.reconcile(caps.camera2Modes),
                             manualControlsState = ManualControlStateUpdater.adaptToCapabilities(
                                 it.manualControlsState,
@@ -710,7 +712,6 @@ internal class CameraViewModel(
                             isCameraReady = true
                         )
                     }
-                    if (previewError != null) Toast.makeText(getApplication(), previewError, Toast.LENGTH_LONG).show()
                     reconcilePresetControls()
                     applyInterop()
                     applyLowLightBoostPreference()
@@ -865,7 +866,7 @@ internal class CameraViewModel(
                         )
                     }
                 }
-                Log.w("CameraViewModel", "Unable to set low-light boost to $desired", error)
+                reporter.report(IssueCode.CAMERA_CONTROL, "lowLightBoost", error)
             }
         }
     }
@@ -957,6 +958,7 @@ internal class CameraViewModel(
     }
 
     override fun onCleared() {
+        reporter.contextProvider = null
         cameraRebindJob?.cancel()
         lowLightBoostApplyJob?.cancel()
         exposureTransitionJob?.cancel()

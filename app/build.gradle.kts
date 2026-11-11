@@ -18,6 +18,18 @@ configure<com.android.build.api.dsl.ApplicationExtension> {
 
     }
 
+    // Keep symbols outside build/ so clean does not remove diagnostics for shipped versions.
+    val releaseMappingArchive = tasks.register<Copy>("archiveReleaseMapping") {
+        dependsOn("minifyReleaseWithR8")
+        from(layout.buildDirectory.file("outputs/mapping/release/mapping.txt"))
+        into(rootProject.layout.projectDirectory.dir(
+            "release-diagnostics/${defaultConfig.versionCode}-${defaultConfig.versionName}"
+        ))
+    }
+    tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+        dependsOn(releaseMappingArchive)
+    }
+
     buildTypes {
         release {
             // This is for your final app uploaded to the Play Store

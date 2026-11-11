@@ -1,5 +1,9 @@
 package com.pilerks1.hdrrecorder.compatibility
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
+import com.pilerks1.hdrrecorder.errorReporter
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,14 +22,15 @@ data class CompatibilityUiState(
     val loading: Boolean = true,
     val scanning: Boolean = false,
     val report: CompatibilityReport? = null,
-    val error: String? = null,
+    val failed: Boolean = false,
     val stale: Boolean = false
 ) {
-    val ready: Boolean get() = !loading && !scanning && error == null && report?.completedAt != null
+    val ready: Boolean get() = !loading && !scanning && !failed && report?.completedAt != null
 }
 
 class CcViewModel(application: Application) : AndroidViewModel(application) {
-    private val scanner = CompatibilityScanner(application, StorageManager(application).compatibilityReports)
+    private val reporter = application.errorReporter
+    private val scanner = CompatibilityScanner(application, StorageManager(application, reporter).compatibilityReports, reporter)
     private val _state = MutableStateFlow(CompatibilityUiState())
     val state = _state.asStateFlow()
     private var initialized = false
@@ -43,7 +48,7 @@ class CcViewModel(application: Application) : AndroidViewModel(application) {
     private fun start(refresh: Boolean) {
         if (job?.isActive == true) return
         job = viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true, error = null)
+            _state.value = _state.value.copy(loading = true, failed = false)
             try {
                 val saved = withContext(Dispatchers.Default) { scanner.read() }
                 if (!refresh && saved?.completedAt != null) {
@@ -59,8 +64,8 @@ class CcViewModel(application: Application) : AndroidViewModel(application) {
                 _state.value = CompatibilityUiState(loading = false, report = report)
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                android.util.Log.e("Compatibility", "Compatibility report failed", error)
-                _state.value = _state.value.copy(loading = false, scanning = false, error = "Scan failed")
+                reporter.report(IssueCode.COMPATIBILITY_SCAN, "compatibilityScan", error)
+                _state.value = _state.value.copy(loading = false, scanning = false, failed = true)
             }
         }
     }

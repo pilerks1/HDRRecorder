@@ -1,5 +1,8 @@
 package com.pilerks1.hdrrecorder.data
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import com.pilerks1.hdrrecorder.data.storage.PresetRepository
 import com.pilerks1.hdrrecorder.model.CameraPreset
 import kotlinx.coroutines.CancellationException
@@ -10,24 +13,23 @@ import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 /** Owns preset documents. The ViewModel serializes complete user operations. */
-class PresetManager(private val repository: PresetRepository) {
+class PresetManager(private val repository: PresetRepository, private val reporter: ErrorReporter) {
     private val mutex = Mutex()
 
-    data class Listing(val presets: List<CameraPreset>, val errors: List<String>)
+    data class Listing(val presets: List<CameraPreset>)
 
     suspend fun list(): Listing = mutex.withLock {
-        val errors = mutableListOf<String>()
         val presets = repository.listIds().mapNotNull { id ->
             try {
                 readDocument(id)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                errors.add("Could not read preset $id: "+(error.message ?: "invalid document"))
+                reporter.report(IssueCode.PRESET_UNREADABLE, "readPresetDocument", error)
                 null
             }
         }.sortedWith(compareBy<CameraPreset, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id })
-        Listing(presets, errors)
+        Listing(presets)
     }
 
     suspend fun read(id: String): CameraPreset = mutex.withLock { readDocument(id) }

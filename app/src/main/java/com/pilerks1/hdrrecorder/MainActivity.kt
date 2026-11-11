@@ -1,5 +1,6 @@
 package com.pilerks1.hdrrecorder
 
+import com.pilerks1.hdrrecorder.ui.diagnostics.ErrorReportingHost
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -10,9 +11,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,38 +79,46 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (hasPermissions) {
-                    if (cameraRuntime.usesCameraHardware && !compatibilityState.ready) {
-                        CompatibilityScreen(
-                            state = compatibilityState,
-                            onNavigateBack = {},
-                            onRetry = compatibilityViewModel::retry,
-                            onRefresh = compatibilityViewModel::refresh,
-                            mandatory = true
-                        )
-                    } else when (currentScreen) {
-                        is Screen.Camera -> CameraUI(
-                            cameraRuntime = cameraRuntime,
-                            onNavigateToCompatibility = { currentScreen = Screen.Compatibility }
-                        )
-                        is Screen.Compatibility -> CompatibilityScreen(
-                            state = compatibilityState,
-                            onNavigateBack = { currentScreen = Screen.Camera },
-                            onRetry = compatibilityViewModel::retry,
-                            onRefresh = compatibilityViewModel::refresh,
-                            hardwareEnabled = cameraRuntime.usesCameraHardware
-                        )
+                Box(Modifier.fillMaxSize()) {
+                    if (hasPermissions) {
+                        if (cameraRuntime.usesCameraHardware && !compatibilityState.ready) {
+                            CompatibilityScreen(
+                                state = compatibilityState,
+                                onNavigateBack = {},
+                                onRetry = compatibilityViewModel::retry,
+                                onRefresh = compatibilityViewModel::refresh,
+                                mandatory = true
+                            )
+                        } else when (currentScreen) {
+                            is Screen.Camera -> CameraUI(
+                                cameraRuntime = cameraRuntime,
+                                onNavigateToCompatibility = { currentScreen = Screen.Compatibility }
+                            )
+                            is Screen.Compatibility -> CompatibilityScreen(
+                                state = compatibilityState,
+                                onNavigateBack = { currentScreen = Screen.Camera },
+                                onRetry = compatibilityViewModel::retry,
+                                onRefresh = compatibilityViewModel::refresh,
+                                hardwareEnabled = cameraRuntime.usesCameraHardware
+                            )
+                        }
+                    } else {
+                        // Show a message until permissions are granted
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Please grant camera and audio permissions to use the app.", color = Color.White)
+                                TextButton(onClick = { errorReporter.showHistory(true) }) {
+                                    Text(stringResource(R.string.diagnostics_title))
+                                }
+                            }
+                        }
                     }
-                } else {
-                    // Show a message until permissions are granted
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Please grant camera and audio permissions to use the app.", color = Color.White)
-                    }
+                    ErrorReportingHost(errorReporter)
                 }
             }
         }

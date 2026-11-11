@@ -1,11 +1,13 @@
 package com.pilerks1.hdrrecorder.data.camera
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
 import android.util.Range
 import com.pilerks1.hdrrecorder.data.camera.camerax.CameraXRequestBackend
 import com.pilerks1.hdrrecorder.data.camera.core.CameraControlValues
@@ -54,7 +56,7 @@ data class ExposureTransitionResult(
 )
 
 /** Serializes submissions, native CameraX controls and result-driven exposure handoffs. */
-class CameraControlCoordinator(private val results: CameraResultReader) {
+class CameraControlCoordinator(private val results: CameraResultReader, private val reporter: ErrorReporter) {
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private val mutex = Mutex()
     private val signal = Channel<Unit>(Channel.CONFLATED)
@@ -99,7 +101,7 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
-                    Log.w("CameraControlCoordinator", "Unable to apply camera settings", failure)
+                    reporter.report(IssueCode.CAMERA_CONTROL, "applyCameraSettings", failure)
                 }
             }
         }
@@ -262,10 +264,11 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                 native.cancelMetering()
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (cleanupError: Exception) {
+                failure.addSuppressed(cleanupError)
                 // Preserve the original application error.
             }
-            Log.w("CameraControlCoordinator", "Unable to apply metering region", failure)
+            reporter.report(IssueCode.CAMERA_CONTROL, "applyMetering", failure)
         }
     }
 
@@ -421,13 +424,15 @@ class CameraControlCoordinator(private val results: CameraResultReader) {
                     } catch (cancelled: CancellationException) {
                         if (cancelled !is kotlinx.coroutines.TimeoutCancellationException) throw cancelled
                         false
-                    } catch (_: Exception) { false }
+                    } catch (recoveryError: Exception) {
+                        failure.addSuppressed(recoveryError)
+                        false
+                    }
                     desired = (desired ?: recovery).let { latest ->
                         latest.copy(controls = latest.controls.withExposure(auto))
                     }
-                    val message = if (recovered) "Exposure transition failed; Auto restored"
-                        else "Exposure transition failed; unable to confirm Auto"
-                    Log.w("CameraControlCoordinator", message, failure)
+                    reporter.report(IssueCode.CAMERA_CONTROL, "exposureHandoff", failure,
+                        mapOf("recovery" to if (recovered) "Auto restored" else "Auto recovery unconfirmed"))
                     ExposureTransitionResult(auto)
                 }
             }

@@ -1,5 +1,8 @@
 package com.pilerks1.hdrrecorder.data.compatibility
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import android.content.Context
 import android.os.Build
 import android.util.Range
@@ -15,7 +18,6 @@ import com.pilerks1.hdrrecorder.data.RecordingSessionConfiguration
 import com.pilerks1.hdrrecorder.data.camera.CameraProviderRepository
 import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
 import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
-import com.pilerks1.hdrrecorder.data.camera.toCameraXQuality
 import com.pilerks1.hdrrecorder.data.storage.CompatibilityReportRepository
 import com.pilerks1.hdrrecorder.model.*
 import com.pilerks1.hdrrecorder.model.CompatibilityStatus as S
@@ -29,7 +31,8 @@ import kotlinx.coroutines.withContext
 /** Capability queries only. Constructing a use case never attaches it to a camera. */
 class CompatibilityScanner(
     private val context: Context,
-    private val repository: CompatibilityReportRepository
+    private val repository: CompatibilityReportRepository,
+    private val reporter: ErrorReporter
 ) {
     val environment: String = listOf(Build.MANUFACTURER, Build.MODEL, Build.FINGERPRINT,
         Build.VERSION.SDK_INT, BuildConfig.VERSION_CODE, BuildConfig.CAMERAX_VERSION).joinToString("|")
@@ -37,7 +40,7 @@ class CompatibilityScanner(
     suspend fun read(): CompatibilityReport? {
         val json = repository.read() ?: return null
         return try { CompatibilityReportJson.decode(json) } catch (error: Exception) {
-            android.util.Log.w("Compatibility", "Invalid saved report", error)
+            reporter.report(IssueCode.COMPATIBILITY_CACHE, "readCompatibilityReport", error, notify = false)
             null
         }
     }
@@ -46,12 +49,14 @@ class CompatibilityScanner(
     suspend fun scan(previous: CompatibilityReport?, onProgress: (CompatibilityReport) -> Unit): CompatibilityReport =
         withContext(Dispatchers.Default) {
             val provider = CameraProviderRepository.awaitProvider(context)
-            val info = DefaultBackCameraRepository(context).cameraInfo(provider)
+            val info = DefaultBackCameraRepository(context, reporter).cameraInfo(provider)
             val cameraId = info.cameraId
             val diagnostics = mutableListOf<String>()
             fun <T> query(source: String, block: () -> T): T? = try { block() } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                diagnostics += "$source: $error"
+                diagnostics += "$source: ${error.javaClass.simpleName}"
+                reporter.report(IssueCode.CAPABILITY_QUERY, "compatibilityQuery", error,
+                    mapOf("query" to source), notify = false)
                 null
             }
             val videoCodecs = Recorder.getSupportedVideoMimeTypes().distinct()
@@ -84,7 +89,7 @@ class CompatibilityScanner(
             }
             val boost = query("CameraInfo.isLowLightBoostSupported") { info.isLowLightBoostSupported }
             val preview = query("PreviewConfiguration.queryOptions") { PreviewConfiguration.queryOptions(info) }
-            val collector = Camera2ReportCollector(CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow())
+            val collector = Camera2ReportCollector(CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow(), reporter)
             val camera2 = collector.collect(cameraId) + CompatibilityTable("Preview · CameraX", listOf("Field", "Value"), listOf(
                 listOf("Dynamic ranges", preview?.dynamicRanges?.joinToString { it.displayName } ?: S.UNKNOWN.label),
                 listOf("General FPS", preview?.frameRates?.joinToString { "[${it.lower}, ${it.upper}]" } ?: S.UNKNOWN.label),
@@ -160,11 +165,7 @@ class CompatibilityScanner(
                     evidence += qualityApi
                     if (!qualitySupport.containsKey(qualityKey)) {
                         qualitySupport[qualityKey] = query("$qualityApi($qualityKey)") {
-                            val dynamicRange = RecordingConfiguration.dynamicRange(state)
-                            val quality = state.selectedResolution.toCameraXQuality()
-                            if (state.selectedResolution == Resolution.HIGHEST || state.encoding == VideoEncoding.UNSPECIFIED)
-                                caps!!.isQualitySupported(quality, dynamicRange)
-                            else quality in caps!!.getSupportedQualities(dynamicRange)
+                            RecordingConfiguration.isResolutionSupported(caps!!, state)
                         }
                     }
                     status = when (qualitySupport[qualityKey]) { true -> S.SUPPORTED; false -> S.UNSUPPORTED; null -> S.UNKNOWN }
@@ -194,7 +195,8 @@ class CompatibilityScanner(
                     } catch (error: Exception) {
                         if (error is CancellationException) throw error
                         status = S.UNKNOWN
-                        errors += error.toString()
+                        errors += error.javaClass.simpleName
+                        reporter.report(IssueCode.CAPABILITY_QUERY, "compatibilitySession", error, notify = false)
                     }
                 }
                 val boostStatus = when {

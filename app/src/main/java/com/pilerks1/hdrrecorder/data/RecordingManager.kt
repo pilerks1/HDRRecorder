@@ -1,9 +1,11 @@
 package com.pilerks1.hdrrecorder.data
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
-import android.widget.Toast
 import androidx.camera.video.*
 import androidx.core.content.ContextCompat
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
@@ -22,7 +24,8 @@ import java.util.*
 class RecordingManager(
     private val context: Context,
     private val statsManager: StatsManager,
-    private val storage: RecordingStorageManager
+    private val storage: RecordingStorageManager,
+    private val reporter: ErrorReporter
 ) {
     sealed interface StartResult {
         data class Started(val destination: RecordingDestination) : StartResult
@@ -47,7 +50,7 @@ class RecordingManager(
     @SuppressLint("MissingPermission")
     fun startRecording(videoCapture: VideoCapture<Recorder>, destination: RecordingDestination): StartResult {
         if (activeRecording != null) {
-            Log.w("RecordingManager", "Ignoring start request while another recording is finalizing")
+            reporter.report(IssueCode.RECORDING_BUSY, "startRecording")
             return StartResult.Failed
         }
 
@@ -59,7 +62,7 @@ class RecordingManager(
         var output = try {
             storage.createOutput(destination, name)
         } catch (e: Exception) {
-            Log.e("RecordingManager", "Failed to prepare recording output", e)
+            reporter.report(IssueCode.RECORDING_START, "createRecordingOutput", e)
             return StartResult.Failed
         }
         val pendingRecording = try {
@@ -68,13 +71,13 @@ class RecordingManager(
             } catch (error: Exception) {
                 if (output.destination !is RecordingDestination.DocumentTree) throw error
                 output.abort()
-                Log.e("RecordingManager", "Failed to prepare SAF recording; using MediaStore", error)
+                reporter.report(IssueCode.STORAGE_FALLBACK, "prepareRecording", error, mapOf("recovery" to "MediaStore"))
                 output = storage.createOutput(RecordingDestination.Default, name)
                 prepareRecording(videoCapture, output)
             }
         } catch (error: Exception) {
             output.abort()
-            Log.e("RecordingManager", "Failed to prepare recording", error)
+            reporter.report(IssueCode.RECORDING_START, "prepareRecording", error)
             return StartResult.Failed
         }
         val session = ActiveRecording(id = nextRecordingId++, output = output)
@@ -91,7 +94,7 @@ class RecordingManager(
         } catch (e: Exception) {
             activeRecording = null
             output.abort()
-            Log.e("RecordingManager", "Failed to start recording", e)
+            reporter.report(IssueCode.RECORDING_START, "startRecording", e)
             StartResult.Failed
         }
     }
@@ -110,18 +113,28 @@ class RecordingManager(
         val session = activeRecording ?: return
         if (!session.stopRequested) {
             session.stopRequested = true
-            session.recording?.stop()
+            try {
+                session.recording?.stop()
+            } catch (error: Exception) {
+                session.stopRequested = false
+                reporter.report(IssueCode.RECORDING_CONTROL, "stopRecording", error)
+            }
         }
     }
 
-    fun pauseRecording() {
-        Log.d("RecordingManager", "pauseRecording called")
-        activeRecording?.recording?.pause()
-    }
+    fun pauseRecording(): Boolean = changeRecordingState("pauseRecording") { it.pause() }
 
-    fun resumeRecording() {
-        Log.d("RecordingManager", "resumeRecording called")
-        activeRecording?.recording?.resume()
+    fun resumeRecording(): Boolean = changeRecordingState("resumeRecording") { it.resume() }
+
+    private fun changeRecordingState(operation: String, change: (Recording) -> Unit): Boolean {
+        val recording = activeRecording?.recording ?: return false
+        return try {
+            change(recording)
+            true
+        } catch (error: Exception) {
+            reporter.report(IssueCode.RECORDING_CONTROL, operation, error)
+            false
+        }
     }
 
     private fun handleRecordingEvent(recordingId: Long, event: VideoRecordEvent) {
@@ -154,23 +167,23 @@ class RecordingManager(
                 Log.d("RecordingManager", "Recording started")
             }
             is VideoRecordEvent.Finalize -> {
-                if (!event.hasError()) {
-                    val msg = try {
-                        session.output.complete(event.outputResults.outputUri, successful = true)
-                        "Video saved successfully"
-                    } catch (error: Exception) {
-                        Log.w("RecordingManager", "Video saved but output metadata could not be updated", error)
-                        "Video saved, but its filename or MIME type could not be updated"
-                    }
-                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                    Log.d("RecordingManager", "Video saved to: ${event.outputResults.outputUri}")
-                } else {
-                    session.output.complete(event.outputResults.outputUri, successful = false)
-                    Log.e("RecordingManager", "Video capture error: ${event.error}")
-                    Toast.makeText(context, "Video recording failed (error ${event.error})", Toast.LENGTH_LONG).show()
+                // Finalize is asynchronous: startup catches cannot handle failures here.
+                var completionError: Exception? = null
+                try {
+                    session.output.complete(event.outputResults.outputUri, successful = !event.hasError())
+                } catch (error: Exception) {
+                    completionError = error
+                } finally {
+                    activeRecording = null
+                    _isRecording.value = false
                 }
-                activeRecording = null
-                _isRecording.value = false
+                if (event.hasError()) {
+                    completionError?.let { cleanup -> event.cause?.let { cleanup.addSuppressed(it) } }
+                    reporter.report(IssueCode.RECORDING_FAILED, "finalizeRecording", completionError ?: event.cause,
+                        mapOf("platformCode" to event.error.toString(), "recording" to "false"))
+                } else if (completionError != null) {
+                    reporter.report(IssueCode.RECORDING_METADATA, "finalizeMetadata", completionError)
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.pilerks1.hdrrecorder.ui.viewmodels
 
+import com.pilerks1.hdrrecorder.errorReporter
 import android.app.Application
 import com.pilerks1.hdrrecorder.data.camera.CameraControlCoordinator
 import com.pilerks1.hdrrecorder.data.camera.core.CameraResultReader
@@ -31,14 +32,15 @@ internal class CameraViewModelFactory(
             "Unknown ViewModel class: ${modelClass.name}"
         }
         val telemetryStore = TelemetryStore()
-        val storageManager = StorageManager(application)
-        val statsManager = StatsManager(application, telemetryStore, storageManager.recordings)
+        val reporter = application.errorReporter
+        val storageManager = StorageManager(application, reporter)
+        val statsManager = StatsManager(application, telemetryStore, storageManager.recordings, reporter)
         val resultReader = CameraResultReader()
         val telemetryCoordinator = TelemetryCoordinator(telemetryStore, statsManager, resultReader)
-        val controlCoordinator = CameraControlCoordinator(resultReader)
+        val controlCoordinator = CameraControlCoordinator(resultReader, reporter)
         val preferencesManager = PreferencesManager(application)
-        val cameraManager = CameraManager(application, telemetryCoordinator, controlCoordinator)
-        val recordingManager = RecordingManager(application, statsManager, storageManager.recordings)
+        val cameraManager = CameraManager(application, telemetryCoordinator, controlCoordinator, reporter)
+        val recordingManager = RecordingManager(application, statsManager, storageManager.recordings, reporter)
 
         @Suppress("UNCHECKED_CAST")
         return CameraViewModel(
@@ -46,12 +48,13 @@ internal class CameraViewModelFactory(
             statsManager = statsManager,
             telemetryCoordinator = telemetryCoordinator,
             preferencesManager = preferencesManager,
-            presetManager = PresetManager(storageManager.presets),
+            presetManager = PresetManager(storageManager.presets, reporter),
             cameraManager = cameraManager,
             recordingManager = recordingManager,
             recordingStorage = storageManager.recordings,
             controlCoordinator = controlCoordinator,
-            cameraRuntime = cameraRuntime
+            cameraRuntime = cameraRuntime,
+            reporter = reporter
         ) as T
     }
 }

@@ -24,7 +24,6 @@ fun PresetSection(
     onSaveStorageLocationChange: (Boolean) -> Unit,
     presetsEnabled: Boolean,
     presetBusy: Boolean,
-    presetError: String?,
     onRetryPresets: () -> Unit,
     onLoadPreset: (String) -> Unit,
     onDeletePreset: (String) -> Unit,
@@ -48,7 +47,6 @@ fun PresetSection(
 
     val enabled = presetsEnabled && !presetBusy
     if (presetBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-    presetError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
     if (!presetsEnabled && !presetBusy) {
         TextButton(onClick = onRetryPresets) { Text("Retry loading presets") }
     }

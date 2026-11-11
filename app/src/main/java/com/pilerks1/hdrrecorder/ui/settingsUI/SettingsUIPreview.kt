@@ -18,7 +18,6 @@ import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
 fun PreviewSection(
     settings: PreviewSettings,
     options: PreviewOptions,
-    error: String?,
     enabled: Boolean,
     onFrameRateChange: (Range<Int>?) -> Unit,
     onDynamicRangeChange: (PreviewDynamicRange?) -> Unit,
@@ -53,10 +52,6 @@ fun PreviewSection(
         onSelect = onDynamicRangeChange,
         enabled = enabled
     )
-    error?.let {
-        Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
-            modifier = Modifier.padding(top = 8.dp))
-    }
 
     Spacer(Modifier.height(16.dp))
     HdrSettingsSwitchRow(

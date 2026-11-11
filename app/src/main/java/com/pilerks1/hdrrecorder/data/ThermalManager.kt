@@ -7,6 +7,8 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 import com.pilerks1.hdrrecorder.model.ThermalForecast
 import com.pilerks1.hdrrecorder.model.ThermalStatus
 
@@ -37,7 +39,7 @@ internal fun batteryCurrentToAmps(rawCurrent: Long): Double? {
  * Refactored to be passive: it no longer has its own timer.
  * Its state is queried by the unified timer in StatsManager.
  */
-class ThermalManager(private val context: Context) {
+class ThermalManager(private val context: Context, private val reporter: ErrorReporter) {
 
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
@@ -74,6 +76,7 @@ class ThermalManager(private val context: Context) {
         lastForecast = try {
             powerManager.getThermalHeadroom(60)
         } catch (e: Exception) {
+            reporter.report(IssueCode.TELEMETRY, "thermalHeadroom", e, notify = false)
             0.0f
         }
     }
@@ -127,11 +130,14 @@ class ThermalManager(private val context: Context) {
     }
 
     fun cleanup() {
-        powerManager.removeThermalStatusListener(thermalStatusListener)
         try {
-            context.unregisterReceiver(batteryReceiver)
-        } catch (e: Exception) {
-            // Ignore if already unregistered or fails
+            powerManager.removeThermalStatusListener(thermalStatusListener)
+        } finally {
+            try {
+                context.unregisterReceiver(batteryReceiver)
+            } catch (_: IllegalArgumentException) {
+                // Already unregistered: cleanup is idempotent.
+            }
         }
     }
 }

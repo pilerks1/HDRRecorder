@@ -90,7 +90,6 @@ data class CameraUiState(
     val currentPresetId: String? = null,
     val isPresetBusy: Boolean = true,
     val arePresetsInitialized: Boolean = false,
-    val presetError: String? = null,
     val saveRecordingOptions: Boolean = false,
     val saveStorageLocation: Boolean = false,
     val currentPresetName: String = "Default",
@@ -131,7 +130,6 @@ data class CameraUiState(
     // Preview
     val previewSettings: PreviewSettings = PreviewSettings(),
     val previewOptions: PreviewOptions = PreviewOptions(),
-    val previewSettingsError: String? = null,
     val isRespectDisplayCutoutsEnabled: Boolean = false,
     val isForceDisplaySdrEnabled: Boolean = false,
 

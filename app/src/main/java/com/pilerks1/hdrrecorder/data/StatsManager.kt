@@ -2,6 +2,9 @@ package com.pilerks1.hdrrecorder.data
 
 import android.content.Context
 import android.os.SystemClock
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+import kotlinx.coroutines.CancellationException
 import com.pilerks1.hdrrecorder.data.storage.RecordingDestination
 import com.pilerks1.hdrrecorder.data.storage.RecordingStorageManager
 import com.pilerks1.hdrrecorder.model.StatsSnapshot
@@ -30,9 +33,10 @@ import kotlinx.coroutines.launch
 class StatsManager(
     private val context: Context,
     private val telemetryStore: TelemetryStore,
-    private val recordingStorage: RecordingStorageManager
+    private val recordingStorage: RecordingStorageManager,
+    private val reporter: ErrorReporter
 ) {
-    private val thermalManager = ThermalManager(context)
+    private val thermalManager = ThermalManager(context, reporter)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val storageGeneration = AtomicLong(0L)
     private val telemetryActive = AtomicBoolean(false)
@@ -163,15 +167,22 @@ class StatsManager(
         powerPollingJob = scope.launch {
             while (isActive) {
                 if (telemetryActive.get()) {
-                    val state = thermalManager.getInstantThermalState()
-                    telemetryStore.updateThermalPower(
-                        ThermalPowerSample(
-                            capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
-                            thermalStatus = state.thermalStatus,
-                            thermalForecast = state.thermalForecast,
-                            netPowerWatts = state.netPowerWatts
+                    try {
+                        val state = thermalManager.getInstantThermalState()
+                        telemetryStore.updateThermalPower(
+                            ThermalPowerSample(
+                                capturedAtElapsedNanos = SystemClock.elapsedRealtimeNanos(),
+                                thermalStatus = state.thermalStatus,
+                                thermalForecast = state.thermalForecast,
+                                netPowerWatts = state.netPowerWatts
+                            )
                         )
-                    )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        // Keep the last measured sample; a transient read must not kill polling.
+                        reporter.report(IssueCode.TELEMETRY, "powerSample", error, notify = false)
+                    }
                 }
                 delay(POWER_INTERVAL_MS)
             }
@@ -256,8 +267,13 @@ class StatsManager(
         headroomPollingJob?.cancel()
         idleStoragePollingJob?.cancel()
         storageRefreshJob?.cancel()
-        thermalManager.cleanup()
-        scope.cancel()
+        try {
+            thermalManager.cleanup()
+        } catch (error: Exception) {
+            reporter.report(IssueCode.TELEMETRY, "thermalCleanup", error, notify = false)
+        } finally {
+            scope.cancel()
+        }
     }
 
     private fun normalizePower(value: Double): Double = round(value * 100.0) / 100.0

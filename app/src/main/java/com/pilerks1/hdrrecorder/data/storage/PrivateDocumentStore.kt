@@ -27,7 +27,7 @@ internal class PrivateDocumentStore(private val directory: File) {
                 }
                 // Unlike AtomicFile.finishWrite, move failures are surfaced to the caller.
                 Files.move(temporary.toPath(), file.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
-            } catch (error: Throwable) {
+            } catch (error: Exception) {
                 try {
                     Files.deleteIfExists(temporary.toPath())
                 } catch (cleanupError: Exception) {

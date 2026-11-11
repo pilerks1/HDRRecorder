@@ -1,5 +1,8 @@
 package com.pilerks1.hdrrecorder.data.compatibility
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import android.hardware.camera2.CameraCharacteristics as C
 import android.hardware.camera2.CameraMetadata as M
 import android.hardware.camera2.CaptureRequest
@@ -12,10 +15,11 @@ import com.pilerks1.hdrrecorder.model.CompatibilityStatus as S
 import com.pilerks1.hdrrecorder.model.CompatibilityTable
 import java.util.Locale
 
-internal class Camera2ReportCollector(private val metadata: CameraMetadata) {
+internal class Camera2ReportCollector(private val metadata: CameraMetadata, private val reporter: ErrorReporter) {
     val diagnostics = mutableListOf<String>()
     private fun <T> read(key: C.Key<T>): T? = try { metadata[key] } catch (error: Exception) {
-        diagnostics += "${key.name}: $error"
+        diagnostics += "${key.name}: ${error.javaClass.simpleName}"
+        reporter.report(IssueCode.CAPABILITY_QUERY, "camera2Metadata", error, mapOf("query" to key.name), notify = false)
         null
     }
 

@@ -11,6 +11,10 @@ import android.util.Range
 import com.pilerks1.hdrrecorder.model.PreviewSettings
 import com.pilerks1.hdrrecorder.model.PreviewOptions
 import com.pilerks1.hdrrecorder.model.PreviewDynamicRange
+import com.pilerks1.hdrrecorder.errorReporter
+import com.pilerks1.hdrrecorder.R
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,7 +43,6 @@ fun SettingsUI(
     onSaveStorageLocationChange: (Boolean) -> Unit,
     presetsEnabled: Boolean,
     presetBusy: Boolean,
-    presetError: String?,
     onRetryPresets: () -> Unit,
     onLoadPreset: (String) -> Unit,
     onDeletePreset: (String) -> Unit,
@@ -70,7 +73,6 @@ fun SettingsUI(
     // Preview
     previewSettings: PreviewSettings,
     previewOptions: PreviewOptions,
-    previewSettingsError: String?,
     isRecording: Boolean,
     onPreviewFrameRateChange: (Range<Int>?) -> Unit,
     onPreviewDynamicRangeChange: (PreviewDynamicRange?) -> Unit,
@@ -106,6 +108,7 @@ fun SettingsUI(
             .verticalScroll(rememberScrollState())
     ) {
         SettingsHeader(onClose = onClose)
+        val reporter = LocalContext.current.errorReporter
 
         PresetSection(
             currentPreset = currentPreset,
@@ -118,7 +121,6 @@ fun SettingsUI(
             onSaveStorageLocationChange = onSaveStorageLocationChange,
             presetsEnabled = presetsEnabled,
             presetBusy = presetBusy,
-            presetError = presetError,
             onRetryPresets = onRetryPresets,
             onLoadPreset = onLoadPreset,
             onDeletePreset = onDeletePreset,
@@ -171,7 +173,6 @@ fun SettingsUI(
         PreviewSection(
             settings = previewSettings,
             options = previewOptions,
-            error = previewSettingsError,
             enabled = !isRecording,
             onFrameRateChange = onPreviewFrameRateChange,
             onDynamicRangeChange = onPreviewDynamicRangeChange,
@@ -210,6 +211,13 @@ fun SettingsUI(
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
         ) {
             Text("Check Device Compatibility")
+        }
+        OutlinedButton(
+            onClick = { onClose(); reporter.showHistory(true) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+        ) {
+            Text(stringResource(R.string.diagnostics_title))
         }
     }
 }

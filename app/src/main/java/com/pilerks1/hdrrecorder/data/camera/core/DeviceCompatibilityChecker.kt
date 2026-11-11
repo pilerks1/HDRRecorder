@@ -20,7 +20,7 @@ object DeviceCompatibilityChecker {
             val temperatureRange = getCctTemperatureRange(camera2Info)
             modes?.contains(AndroidCameraMetadata.COLOR_CORRECTION_MODE_CCT) == true &&
                 temperatureRange != null
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
             false
         }
     }
@@ -29,7 +29,7 @@ object DeviceCompatibilityChecker {
     fun getCctTemperatureRange(camera2Info: CameraMetadata) =
         try {
             camera2Info.get(CameraCharacteristics.COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE)
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
             null
         }
 
@@ -39,7 +39,7 @@ object DeviceCompatibilityChecker {
         return try {
             val modes = camera2Info.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES)
             modes?.contains(AndroidCameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY) == true
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
             false
         }
     }
@@ -50,7 +50,7 @@ object DeviceCompatibilityChecker {
         return try {
             val modes = camera2Info.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES)
             modes?.contains(AndroidCameraMetadata.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY) == true
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
             false
         }
     }

@@ -71,7 +71,6 @@ internal fun CameraUiState.withPreset(preset: CameraPreset): CameraUiState {
         isWaitToLockAeEnabled = settings.isWaitToLockAeEnabled,
         gammaSettings = settings.gammaSettings,
         previewSettings = settings.previewSettings,
-        previewSettingsError = null,
         camera2Settings = settings.camera2Settings.reconcile(cameraCapabilities?.camera2Modes),
         zoomState = zoomState.copy(ratio = recording?.zoomRatio ?: zoomState.ratio),
         selectedFps = recording?.selectedFps ?: selectedFps,

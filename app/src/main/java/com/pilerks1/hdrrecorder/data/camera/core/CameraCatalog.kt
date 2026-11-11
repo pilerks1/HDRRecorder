@@ -79,7 +79,12 @@ class CameraCatalog private constructor(private val application: Application) {
             cached[id]?.let { return it }
             revision
         }
-        val descriptor = CameraDescriptor(id, runCatching { CameraMetadata(manager.getCameraCharacteristics(id)) })
+        val metadata = try {
+            Result.success(CameraMetadata(manager.getCameraCharacteristics(id)))
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+        val descriptor = CameraDescriptor(id, metadata)
         return synchronized(cacheLock) {
             if (revision == queryRevision) cached.getOrPut(id) { descriptor } else descriptor
         }

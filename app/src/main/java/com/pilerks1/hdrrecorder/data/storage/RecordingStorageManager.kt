@@ -1,5 +1,8 @@
 package com.pilerks1.hdrrecorder.data.storage
 
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -11,14 +14,13 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.system.Os
 import android.system.OsConstants
-import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.camera.video.FileDescriptorOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.OutputOptions
 import android.os.storage.StorageManager as AndroidStorageManager
 
-class RecordingStorageManager(private val context: Context) {
+class RecordingStorageManager(private val context: Context, private val reporter: ErrorReporter) {
     private val resolver = context.contentResolver
 
     fun takePersistablePermission(uri: Uri) {
@@ -29,21 +31,24 @@ class RecordingStorageManager(private val context: Context) {
     }
 
     /** A saved destination must still have a writable directory and persisted grant. */
-    suspend fun isUsablePresetDestination(value: String): Boolean =
+    suspend fun checkPresetDestination(value: String): Result<Boolean> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val uri = Uri.parse(value)
                 if (!DocumentsContract.isTreeUri(uri) || resolver.persistedUriPermissions.none {
                         it.uri == uri && it.isReadPermission && it.isWritePermission
-                    }) return@withContext false
+                    }) return@withContext Result.success(false)
                 val document = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
-                resolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_MIME_TYPE,
+                val usable = resolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_MIME_TYPE,
                     DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { cursor ->
                     cursor.moveToFirst() && cursor.getString(0) == DocumentsContract.Document.MIME_TYPE_DIR &&
                         cursor.getInt(1) and DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE != 0
                 } ?: false
-            } catch (_: Exception) {
-                false
+                Result.success(usable)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
             }
         }
 
@@ -67,7 +72,7 @@ class RecordingStorageManager(private val context: Context) {
             } catch (error: Exception) {
                 closeDescriptor(descriptor)
                 deleteDocument(document)
-                Log.e(TAG, "Failed to set up SAF custom storage; using MediaStore", error)
+                reporter.report(IssueCode.STORAGE_FALLBACK, "createOutput", error, mapOf("recovery" to "MediaStore", "destination" to "default"))
             }
         }
 
@@ -95,7 +100,7 @@ class RecordingStorageManager(private val context: Context) {
             is RecordingDestination.DocumentTree -> documentTreeAvailableBytes(destination.uri)
         }
     } catch (error: Exception) {
-        Log.d(TAG, "Available space could not be queried", error)
+        reporter.report(IssueCode.TELEMETRY, "availableBytes", error, notify = false)
         null
     }
 
@@ -169,7 +174,7 @@ class RecordingStorageManager(private val context: Context) {
         try {
             descriptor?.close()
         } catch (error: Exception) {
-            Log.w(TAG, "Failed to close recording descriptor", error)
+            reporter.report(IssueCode.STORAGE_CLEANUP, "closeDescriptor", error, notify = false)
         }
     }
 
@@ -178,11 +183,8 @@ class RecordingStorageManager(private val context: Context) {
         try {
             check(DocumentsContract.deleteDocument(resolver, uri)) { "Provider refused document deletion" }
         } catch (error: Exception) {
-            Log.w(TAG, "Failed to remove unused recording document", error)
+            reporter.report(IssueCode.STORAGE_CLEANUP, "deleteUnusedDocument", error, notify = false)
         }
     }
 
-    private companion object {
-        const val TAG = "RecordingStorageManager"
-    }
 }
