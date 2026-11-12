@@ -87,6 +87,4 @@ dependencies {
     implementation(libs.androidx.camera.compose)
     implementation(libs.kotlinx.coroutines.guava)
 
-    // Testing
-    testImplementation(libs.junit)
 }

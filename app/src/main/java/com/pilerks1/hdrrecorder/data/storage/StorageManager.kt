@@ -1,8 +1,7 @@
 package com.pilerks1.hdrrecorder.data.storage
 
-import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
-
 import android.content.Context
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
 import java.io.File
 
 /** Storage entry point. Feature managers retain ownership of document contents. */

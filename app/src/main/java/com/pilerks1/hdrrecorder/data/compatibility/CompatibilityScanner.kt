@@ -1,8 +1,5 @@
 package com.pilerks1.hdrrecorder.data.compatibility
 
-import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
-import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
-
 import android.content.Context
 import android.os.Build
 import android.util.Range
@@ -13,21 +10,26 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.ExperimentalMimeTypeApi
 import androidx.camera.video.Recorder
 import com.pilerks1.hdrrecorder.BuildConfig
-import com.pilerks1.hdrrecorder.data.CaptureConfiguration
-import com.pilerks1.hdrrecorder.data.PreviewConfiguration
-import com.pilerks1.hdrrecorder.data.RecordingConfiguration
-import com.pilerks1.hdrrecorder.data.RecordingSessionConfiguration
-import com.pilerks1.hdrrecorder.data.camera.DefaultBackCameraRepository
-import com.pilerks1.hdrrecorder.data.camera.core.LowLightBoostPolicy
-import com.pilerks1.hdrrecorder.data.camera.core.CameraCatalog
+import com.pilerks1.hdrrecorder.camera.camera2.CameraCatalog
+import com.pilerks1.hdrrecorder.camera.camerax.CameraXPreviewConfiguration
+import com.pilerks1.hdrrecorder.camera.camerax.CameraXRecordingConfiguration
+import com.pilerks1.hdrrecorder.camera.camerax.CameraXSessionFactory
+import com.pilerks1.hdrrecorder.camera.camerax.DefaultBackCameraRepository
+import com.pilerks1.hdrrecorder.camera.model.CaptureConfiguration
+import com.pilerks1.hdrrecorder.camera.model.LowLightBoostPolicy
+import com.pilerks1.hdrrecorder.camera.model.RecordingAspectRatio
+import com.pilerks1.hdrrecorder.camera.model.Resolution
+import com.pilerks1.hdrrecorder.camera.model.VideoEncoding
+import com.pilerks1.hdrrecorder.data.compatibility.CompatibilityStatus as S
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
 import com.pilerks1.hdrrecorder.data.storage.PrivateDocumentStore
 import com.pilerks1.hdrrecorder.data.storage.StorageManager.Companion.COMPATIBILITY_REPORT_ID
-import com.pilerks1.hdrrecorder.model.*
-import com.pilerks1.hdrrecorder.model.CompatibilityStatus as S
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 
@@ -66,12 +68,12 @@ class CompatibilityScanner(
             val unsupportedCodecs = mutableSetOf<String?>()
             val capabilities = codecs.associateWith { codec ->
                 query("Recorder.getVideoCapabilities(${codec ?: "Auto"})") {
-                    RecordingConfiguration.videoCapabilities(info, codec).also { if (it == null) unsupportedCodecs += codec }
+                    CameraXRecordingConfiguration.videoCapabilities(info, codec).also { if (it == null) unsupportedCodecs += codec }
                 }
             }
             val colorsByCodec = codecs.associateWith { codec ->
                 capabilities[codec]?.let { caps -> query("VideoCapabilities.getSupportedDynamicRanges($codec)") {
-                    RecordingConfiguration.colors(caps).map { color ->
+                    CameraXRecordingConfiguration.colors(caps).map { color ->
                         CompatibilityColor(color.encoding.storageId, color.bitDepth,
                             "${color.encoding.displayName} ${color.bitDepth}-bit")
                     }
@@ -87,7 +89,7 @@ class CompatibilityScanner(
                 Preview.getPreviewCapabilities(info).isStabilizationSupported
             }
             val boost = query("CameraInfo.isLowLightBoostSupported") { LowLightBoostPolicy.isSupported(info.isLowLightBoostSupported) }
-            val preview = query("PreviewConfiguration.queryOptions") { PreviewConfiguration.queryOptions(info) }
+            val preview = query("CameraXPreviewConfiguration.queryOptions") { CameraXPreviewConfiguration.queryOptions(info) }
             val collector = Camera2ReportCollector(CameraCatalog.get(context).camera(cameraId).metadata.getOrThrow(), reporter)
             val camera2 = collector.collect(cameraId) + CompatibilityTable("Preview · CameraX", listOf("Field", "Value"), listOf(
                 listOf("Dynamic ranges", preview?.dynamicRanges?.joinToString { it.displayName } ?: S.UNKNOWN.label),
@@ -158,7 +160,7 @@ class CompatibilityScanner(
                     val qualityKey = "${config.codec}|${config.resolution}|${config.encoding}|${config.depth}"
                     if (!qualitySupport.containsKey(qualityKey)) {
                         qualitySupport[qualityKey] = query("VideoCapabilities quality($qualityKey)") {
-                            RecordingConfiguration.isResolutionSupported(caps, capture)
+                            CameraXRecordingConfiguration.isResolutionSupported(caps, capture)
                         }
                     }
                     status = when (qualitySupport[qualityKey]) { true -> S.SUPPORTED; false -> S.UNSUPPORTED; null -> S.UNKNOWN }
@@ -171,8 +173,8 @@ class CompatibilityScanner(
                     try {
                         // Feature groups cannot coexist with the explicit production use-case options.
                         val session = SessionConfig.Builder(listOf(
-                            RecordingSessionConfiguration.preview(capture, 0),
-                            RecordingSessionConfiguration.video(capture, 0)
+                            CameraXSessionFactory.preview(capture, 0),
+                            CameraXSessionFactory.video(capture, 0)
                         )).build()
                         if (!info.isSessionConfigSupported(session) ||
                             Range(config.fps, config.fps) !in info.getSupportedFrameRateRanges(session)

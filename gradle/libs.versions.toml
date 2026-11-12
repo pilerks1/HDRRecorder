@@ -8,7 +8,6 @@ lifecycleViewmodelCompose = "2.11.0"
 activityCompose = "1.13.0"
 composeBom = "2026.09.00"
 cameraX = "1.7.0-rc01"
-junit = "4.13.2"
 
 
 [libraries]
@@ -35,8 +34,6 @@ androidx-camera-video = { group = "androidx.camera", name = "camera-video", vers
 androidx-camera-compose = { group = "androidx.camera", name = "camera-compose", version.ref = "cameraX" }
 kotlinx-coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "kotlinx"}
 
-# Testing
-junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }

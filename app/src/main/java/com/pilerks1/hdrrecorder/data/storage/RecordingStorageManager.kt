@@ -1,8 +1,5 @@
 package com.pilerks1.hdrrecorder.data.storage
 
-import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
-import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
-
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -10,13 +7,35 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
+import android.os.storage.StorageManager as AndroidStorageManager
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.camera.video.FileDescriptorOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.OutputOptions
-import android.os.storage.StorageManager as AndroidStorageManager
+import androidx.core.net.toUri
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
+
+sealed interface RecordingDestination {
+    data object Default : RecordingDestination
+    data class DocumentTree(val uri: Uri) : RecordingDestination
+
+    fun toStorageUri(): String? = when (this) {
+        Default -> null
+        is DocumentTree -> uri.toString()
+    }
+
+    companion object {
+        fun fromStorageUri(uri: String?): RecordingDestination =
+            if (uri == null) Default else DocumentTree(uri.toUri())
+    }
+}
 
 class RecordingStorageManager(private val context: Context, private val reporter: ErrorReporter) {
     private val resolver = context.contentResolver
@@ -116,7 +135,7 @@ class RecordingStorageManager(private val context: Context, private val reporter
         return volume?.directory?.let { StatFs(it.absolutePath).availableBytes }
     }
 
-    /** Retained by RecordingManager until CameraX finalizes; all cleanup is idempotent. */
+    /** Retained by CameraXRecordingManager until CameraX finalizes; all cleanup is idempotent. */
     inner class RecordingOutput internal constructor(
         val options: OutputOptions,
         val destination: RecordingDestination,

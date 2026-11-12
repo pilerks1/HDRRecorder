@@ -1,6 +1,8 @@
 package com.pilerks1.hdrrecorder.data.compatibility
 
-import com.pilerks1.hdrrecorder.model.*
+import com.pilerks1.hdrrecorder.camera.model.RecordingAspectRatio
+import com.pilerks1.hdrrecorder.camera.model.Resolution
+import com.pilerks1.hdrrecorder.camera.model.VideoEncoding
 import org.json.JSONArray
 import org.json.JSONObject
 

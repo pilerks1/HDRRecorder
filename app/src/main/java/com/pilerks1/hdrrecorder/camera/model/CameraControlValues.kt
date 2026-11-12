@@ -1,0 +1,62 @@
+package com.pilerks1.hdrrecorder.camera.model
+
+import android.util.Range
+
+/** The single manual-control model shared by UI state, presets, and request compilation. */
+data class CameraControlValues(
+
+    // ISO
+    val isManualIso: Boolean = false,
+    val isoValue: Int? = null,
+    val isManualPostRawSensitivity: Boolean = false,
+    val postRawSensitivityBoost: Int? = null,
+
+    // Shutter Speed (SS)
+    val isManualSs: Boolean = false,
+    val ssValueNanos: Long? = null,
+
+    // Exposure Value (EV)
+    val isManualEv: Boolean = false,
+    val evValueIndex: Int = 0,
+    val isLowLightBoostEnabled: Boolean = false,
+
+    // Focus
+    val isManualFocus: Boolean = false,
+    val focusDistanceDiopters: Float? = null,
+
+    // White Balance
+    val isManualWb: Boolean = false,
+    val wbTemp: Int? = null,
+    val wbTint: Int? = null,
+
+    // FPS
+    val isManualFps: Boolean = false,
+    val fpsRange: Range<Int>? = null
+) {
+    /** Returns ISO, post-RAW boost, and shutter to automatic exposure. */
+    fun withAutoExposure(): CameraControlValues = copy(
+        isManualIso = false,
+        isoValue = null,
+        isManualPostRawSensitivity = false,
+        postRawSensitivityBoost = null,
+        isManualSs = false,
+        ssValueNanos = null
+    )
+}
+
+/** Unsupported individual priority modes require paired manual controls. */
+enum class ExposureMode {
+    AUTO, SHUTTER_PRIORITY, SENSITIVITY_PRIORITY, FULL_MANUAL;
+
+    companion object {
+        fun resolve(controls: CameraControlValues, caps: CameraCapabilities?): ExposureMode = when {
+            caps == null || (!controls.isManualIso && !controls.isManualSs) -> AUTO
+            controls.isManualIso && controls.isManualSs ->
+                if (caps.supportsFullManualExposure) FULL_MANUAL else AUTO
+            controls.isManualIso && caps.supportsIsoPriorityAe -> SENSITIVITY_PRIORITY
+            controls.isManualSs && caps.supportsShutterPriorityAe -> SHUTTER_PRIORITY
+            caps.supportsFullManualExposure -> FULL_MANUAL
+            else -> AUTO
+        }
+    }
+}

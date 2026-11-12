@@ -1,20 +1,20 @@
 package com.pilerks1.hdrrecorder.data.compatibility
 
-import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
-import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
-
 import android.hardware.camera2.CameraCharacteristics as C
 import android.hardware.camera2.CameraMetadata as M
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.util.Range
-import com.pilerks1.hdrrecorder.data.camera.CameraCapabilitiesManager
-import com.pilerks1.hdrrecorder.data.camera.core.Camera2Control
-import com.pilerks1.hdrrecorder.data.camera.core.CameraMetadata
-import com.pilerks1.hdrrecorder.model.CompatibilityStatus as S
-import com.pilerks1.hdrrecorder.model.CompatibilityTable
-import com.pilerks1.hdrrecorder.model.formatShutterNanos
-import com.pilerks1.hdrrecorder.model.trimmedDecimal
+import androidx.compose.foundation.layout.width
+import com.pilerks1.hdrrecorder.camera.camera2.Camera2Control
+import com.pilerks1.hdrrecorder.camera.camera2.CameraCapabilitiesReader
+import com.pilerks1.hdrrecorder.camera.camera2.CameraMetadata
+import com.pilerks1.hdrrecorder.data.compatibility.CompatibilityStatus as S
+import com.pilerks1.hdrrecorder.data.diagnostics.ErrorReporter
+import com.pilerks1.hdrrecorder.data.diagnostics.IssueCode
+import com.pilerks1.hdrrecorder.formatShutterNanos
+import com.pilerks1.hdrrecorder.trimmedDecimal
+import java.util.Locale
 
 internal class Camera2ReportCollector(private val metadata: CameraMetadata, private val reporter: ErrorReporter) {
     private fun <T> read(key: C.Key<T>): T? = try { metadata[key] } catch (error: Exception) {
@@ -24,7 +24,7 @@ internal class Camera2ReportCollector(private val metadata: CameraMetadata, priv
 
     fun collect(cameraId: String): List<CompatibilityTable> {
         val requestKeys = metadata.requestKeys
-        val caps = CameraCapabilitiesManager.extractCapabilities(metadata, false)
+        val caps = CameraCapabilitiesReader.extractCapabilities(metadata, false)
         val hardware = listOf(
             listOf("Hardware level", read(C.INFO_SUPPORTED_HARDWARE_LEVEL)?.let(::hardwareLevel) ?: S.NOT_REPORTED.label),
             listOf("Camera ID", cameraId),

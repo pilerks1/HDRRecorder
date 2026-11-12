@@ -65,3 +65,7 @@ Multiple lense support
 Continuous zoom
 
 Complete settings presets and compatibility screen
+
+# Development
+
+See [source organization and UI testbed](docs/architecture.md) for the package map, naming rules, and debug testbed launch command. Build/lint and manual-validation guidance is in [AGENTS.md](AGENTS.md). Camera pipeline ownership is described in [camera architecture](docs/camera-architecture.md).
